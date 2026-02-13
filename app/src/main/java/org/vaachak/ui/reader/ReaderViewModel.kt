@@ -1,25 +1,3 @@
-/*
- *  Copyright (c) 2026 Piyush Daiya
- *  *
- *  * Permission is hereby granted, free of charge, to any person obtaining a copy
- *  * of this software and associated documentation files (the "Software"), to deal
- *  * in the Software without restriction, including without limitation the rights
- *  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  * copies of the Software, and to permit persons to whom the Software is
- *  * furnished to do so, subject to the following conditions:
- *  *
- *  * The above copyright notice and this permission notice shall be included in all
- *  * copies or substantial portions of the Software.
- *  *
- *  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  * SOFTWARE.
- */
-
 package org.vaachak.ui.reader
 
 import android.graphics.Color
@@ -186,7 +164,7 @@ class ReaderViewModel @Inject constructor(
                 val bLoc = Locator.fromJSON(JSONObject(entity.locatorJson))
                 // Match Resource (href) AND Progression (within 1% tolerance)
                 bLoc?.href == locator.href &&
-                        abs((bLoc?.locations?.totalProgression ?: 0.0) - (locator.locations.totalProgression ?: 0.0)) < 0.01
+                        abs((bLoc.locations.totalProgression ?: 0.0) - (locator.locations.totalProgression ?: 0.0)) < 0.01
             } catch (e: Exception) { false }
         }
     }.stateIn(viewModelScope, SharingStarted.Lazily, false)
@@ -232,7 +210,9 @@ class ReaderViewModel @Inject constructor(
         }
 
         _currentBookId.value = uri.toString()
+
         viewModelScope.launch {
+            syncRepository.sync()
             bookDao.updateLastRead(uri.toString(), System.currentTimeMillis())
             val book = bookDao.getBookByUri(uri.toString())
             val targetJson = pendingJumpLocator ?: book?.lastLocationJson
@@ -259,13 +239,13 @@ class ReaderViewModel @Inject constructor(
 
         viewModelScope.launch {
             if (isBookmarked) {
-                // Remove (Find closest match)
+
                 val bookmarks = savedBookmarks.value
                 val toDelete = bookmarks.find { entity ->
                     try {
                         val bLoc = Locator.fromJSON(JSONObject(entity.locatorJson))
                         bLoc?.href == locator.href &&
-                                abs((bLoc?.locations?.totalProgression ?: 0.0) - (locator.locations.totalProgression ?: 0.0)) < 0.01
+                                abs((bLoc.locations.totalProgression ?: 0.0) - (locator.locations.totalProgression ?: 0.0)) < 0.01
                     } catch (e: Exception) { false }
                 }
                 if (toDelete != null) {
@@ -439,7 +419,7 @@ class ReaderViewModel @Inject constructor(
         _currentLocator.value = l
         val prog = l.locations.totalProgression ?: 0.0
         val pos = l.locations.position ?: 0
-        Log.e("updateProgress:"," progress is $prog")
+
         // UI Logic
         var pct = round(prog * 100).toInt()
         if (prog > 0.99) pct = 100
@@ -449,8 +429,18 @@ class ReaderViewModel @Inject constructor(
         val json = l.toJSON().toString()
 
         viewModelScope.launch {
-            // Update local DB instantly
-            bookDao.updateBookProgress(uri, prog, json, System.currentTimeMillis())
+            // 1. Fetch current book state from DB
+            val currentBook = bookDao.getBookByUri(uri)
+            val now = System.currentTimeMillis()
+
+            // 2. The Guard: Only update if the DB is empty
+            // OR if our current timestamp is newer than the existing lastRead.
+            // This prevents an "initialization 0%" from overwriting a "cloud 45%".
+            if (currentBook == null || now > currentBook.lastRead) {
+                bookDao.updateBookProgress(uri, prog, json, now)
+            } else {
+                Log.d("SyncDebug", "Ignored progress update to avoid overwriting newer cloud data.")
+            }
         }
     }
 
@@ -527,7 +517,7 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             val isEmbedded = settingsRepo.getUseEmbeddedDictionary().first()
             _isDictionaryLookup.value = true
-            var definition: String? = null
+            var definition: String?
             if (isEmbedded) {
                 _isBottomSheetVisible.value = true
                 _aiResponse.value = "Searching device dictionaries..."
@@ -568,7 +558,7 @@ class ReaderViewModel @Inject constructor(
      * Called when the user leaves the reader or pauses the app.
      * @param locationJson The full JSON representation of the Readium Locator.
      */
-    fun onReaderPause(bookId: Long, locationJson: String) {
+    fun onReaderPause(locationJson: String) {
         val uri = _currentBookId.value ?: return
 
         // If both sources are empty, this is a redundant call; skip it quietly.
@@ -579,7 +569,7 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             val prog = try {
                 if (locationJson.isNotBlank()) {
-                    val jsonObj = org.json.JSONObject(locationJson)
+                    val jsonObj = JSONObject(locationJson)
                     // Readium's totalProgression is what we need
                     jsonObj.optJSONObject("locations")?.optDouble("totalProgression") ?: 0.0
                 } else {

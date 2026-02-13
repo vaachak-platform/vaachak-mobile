@@ -9,7 +9,7 @@
             android:allowBackup="true"
             android:icon="@mipmap/ic_vaachak"
             android:roundIcon="@mipmap/ic_vaachak_round"
-            android:label="@string/app_name"
+            android:label="Vaachak Reader"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar">
 
         <activity

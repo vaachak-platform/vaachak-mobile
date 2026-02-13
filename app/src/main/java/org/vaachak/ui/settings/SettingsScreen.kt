@@ -9,10 +9,7 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -21,6 +18,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -32,15 +31,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import org.vaachak.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
-
+import androidx.compose.ui.text.input.KeyboardType
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -48,42 +45,46 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     // --- VIEWMODEL STATE ---
-    // AI / Intelligence
     val vmGeminiKey by viewModel.geminiKey.collectAsState()
-    val vmCfUrl by viewModel.cfUrl.collectAsState()     // AI URL
-    val vmCfToken by viewModel.cfToken.collectAsState() // AI Token
+    val vmCfUrl by viewModel.cfUrl.collectAsState()
+    val vmCfToken by viewModel.cfToken.collectAsState()
     val vmIsAutoSave by viewModel.isAutoSaveRecapsEnabled.collectAsState()
 
-    // Sync
-    val vmSyncCloudUrl by viewModel.syncCloudUrl.collectAsState() // NEW: Sync URL
+    // Sync States
+    val vmSyncCloudUrl by viewModel.syncCloudUrl.collectAsState()
     val vmUseLocalServer by viewModel.useLocalServer.collectAsState()
     val vmLocalServerUrl by viewModel.localServerUrl.collectAsState()
     val deviceId by viewModel.deviceId.collectAsState()
+    val syncUsername by viewModel.syncUsername.collectAsState()
+    val syncPassword by viewModel.syncPassword.collectAsState()
+    val deviceName by viewModel.deviceName.collectAsState()
 
-    // General
+    // General States
     val currentTheme by viewModel.themeMode.collectAsState()
-    val isEinkEnabled by viewModel.isEinkEnabled.collectAsState()
     val contrast by viewModel.einkContrast.collectAsState()
     val useEmbeddedDictionary by viewModel.useEmbeddedDictionary.collectAsState()
     val dictionaryFolder by viewModel.dictionaryFolder.collectAsState()
     val isOfflineMode by viewModel.isOfflineModeEnabled.collectAsState()
 
-    // --- LOCAL FORM STATE (For editing) ---
+    // --- LOCAL FORM STATE ---
     var inputGemini by remember(vmGeminiKey) { mutableStateOf(vmGeminiKey) }
     var inputCfUrl by remember(vmCfUrl) { mutableStateOf(vmCfUrl) }
     var inputCfToken by remember(vmCfToken) { mutableStateOf(vmCfToken) }
 
-    // Sync Inputs
     var inputSyncCloudUrl by remember(vmSyncCloudUrl) { mutableStateOf(vmSyncCloudUrl) }
     var inputLocalUrl by remember(vmLocalServerUrl) { mutableStateOf(vmLocalServerUrl) }
     var inputUseLocal by remember(vmUseLocalServer) { mutableStateOf(vmUseLocalServer) }
 
-    // UI State
-    var showResetDialog by remember { mutableStateOf(false) }
+    // Sync Profile Local State
+    var tempUser by remember(syncUsername) { mutableStateOf(syncUsername) }
+    var tempPass by remember(syncPassword) { mutableStateOf(syncPassword) }
+    var tempName by remember(deviceName) { mutableStateOf(deviceName) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val keyboardController = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
+    var showResetDialog by remember { mutableStateOf(false) }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -97,9 +98,8 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold)) },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                title = { Text("Settings", fontWeight = FontWeight.SemiBold) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
@@ -113,7 +113,6 @@ fun SettingsScreen(
                 .imePadding(),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-
             // 1. HEADER & SAVE ACTION
             Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -125,35 +124,27 @@ fun SettingsScreen(
                         keyboardController?.hide()
                         scope.launch {
                             try {
-                                // Save Intelligence Settings
                                 viewModel.updateGemini(inputGemini)
                                 viewModel.updateCfUrl(inputCfUrl)
                                 viewModel.updateCfToken(inputCfToken)
-
-                                // Save Sync Settings
-                                viewModel.saveSyncSettings(
-                                    syncCloud = inputSyncCloudUrl,
-                                    localUrl = inputLocalUrl,
-                                    useLocal = inputUseLocal
-                                )
-
-                                snackbarHostState.showSnackbar("✅ Settings saved successfully")
+                                viewModel.saveSyncSettings(inputSyncCloudUrl, inputLocalUrl, inputUseLocal)
+                                viewModel.saveSyncProfile(tempUser, tempPass, tempName)
+                                snackbarHostState.showSnackbar("✅ All settings saved")
                             } catch (e: Exception) {
                                 snackbarHostState.showSnackbar("❌ Error: ${e.localizedMessage}")
                             }
                         }
                     },
-                    shape = RoundedCornerShape(8.dp),
-                    colors = if (isEinkEnabled) ButtonDefaults.filledTonalButtonColors(containerColor = Color.Black, contentColor = Color.White) else ButtonDefaults.filledTonalButtonColors()
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Icon(Icons.Default.Save, contentDescription = "Save Settings", modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Save, null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Save")
+                    Text("Save All")
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // 2. CONNECTIVITY (Offline Mode)
+            // 2. CONNECTIVITY
             SettingsSection(title = "Connectivity", icon = Icons.Default.WifiOff) {
                 SettingsToggleRow(
                     label = "Offline Mode",
@@ -178,157 +169,176 @@ fun SettingsScreen(
                     }
                 }
                 if (currentTheme == ThemeMode.E_INK) {
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Settings, null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("E-ink Sharpness", style = MaterialTheme.typography.labelMedium)
-                    }
                     var sliderPosition by remember(contrast) { mutableFloatStateOf(contrast) }
+                    Text("E-ink Sharpness", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 16.dp))
                     Slider(
                         value = sliderPosition,
                         onValueChange = { sliderPosition = it; viewModel.updateContrast(it) },
                         steps = 3,
-                        modifier = Modifier.padding(horizontal = 8.dp),
                         colors = SliderDefaults.colors(thumbColor = Color.Black, activeTrackColor = Color.Black)
                     )
                 }
             }
 
-            // 4. SYNC & BACKUP (NEW SECTION)
+            // 4. SYNC & BACKUP
             SettingsSection(title = "Sync & Backup", icon = Icons.Default.Sync) {
-                // Device ID Display
-                OutlinedTextField(
-                    value = deviceId,
-                    onValueChange = {},
-                    label = { Text("Device ID") },
-                    readOnly = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Color.Gray, unfocusedBorderColor = Color.Gray),
-                    trailingIcon = { Icon(Icons.Default.Smartphone, null, tint = Color.Gray) }
-                )
-                Spacer(modifier = Modifier.height(16.dp))
+                // Device ID Display (Read-Only)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
+                    Icon(Icons.Default.Smartphone, null, modifier = Modifier.size(18.dp), tint = Color.Gray)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Device ID: ", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text(deviceId, style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                }
 
-                // Toggle: Local vs Cloud
                 SettingsToggleRow(
                     label = "Use Local Server",
-                    description = if (inputUseLocal) "Syncing via Home WiFi (Local)" else "Syncing via Cloud (Internet)",
+                    description = if (inputUseLocal) "Syncing via Home WiFi" else "Syncing via Cloud",
                     checked = inputUseLocal,
                     onCheckedChange = { inputUseLocal = it }
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Inputs based on Toggle
-                AnimatedVisibility(visible = inputUseLocal, enter = expandVertically(), exit = shrinkVertically()) {
-                    SettingsTextField(
-                        value = inputLocalUrl,
-                        onValueChange = { inputLocalUrl = it },
-                        label = "Local Server URL",
-                        icon = Icons.Default.Computer,
-                        placeholder = "http://192.168.1.X:8081",
-                        isUrl = true
-                    )
+                AnimatedVisibility(visible = inputUseLocal) {
+                    SettingsTextField(value = inputLocalUrl, onValueChange = { inputLocalUrl = it }, label = "Local Server URL", icon = Icons.Default.Computer, isUrl = true)
+                }
+                AnimatedVisibility(visible = !inputUseLocal) {
+                    SettingsTextField(value = inputSyncCloudUrl, onValueChange = { inputSyncCloudUrl = it }, label = "Sync Server URL", icon = Icons.Default.CloudSync, isUrl = true)
                 }
 
-                AnimatedVisibility(visible = !inputUseLocal, enter = expandVertically(), exit = shrinkVertically()) {
-                    SettingsTextField(
-                        value = inputSyncCloudUrl,
-                        onValueChange = { inputSyncCloudUrl = it },
-                        label = "Sync Server URL",
-                        icon = Icons.Default.CloudSync,
-                        placeholder = "https://vaachak-sync.workers.dev",
-                        isUrl = true
-                    )
+                // --- URL CONFIG BUTTONS ---
+                Spacer(modifier = Modifier.height(12.dp))
+                val isUrlEmpty = if (inputUseLocal) inputLocalUrl.isBlank() else inputSyncCloudUrl.isBlank()
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                viewModel.saveSyncSettings(inputSyncCloudUrl, inputLocalUrl, inputUseLocal)
+                                snackbarHostState.showSnackbar("✅ Server URL updated")
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(if (isUrlEmpty) "Add Url" else "Update Url")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            android.util.Log.d("SyncDebug", "UI: Test Button Tapped")
+                            val currentUrl = if (inputUseLocal) inputLocalUrl else inputSyncCloudUrl
+                            if (currentUrl.isBlank()) {
+                                scope.launch { snackbarHostState.showSnackbar("❌ Enter a URL first") }
+                            } else {
+                                viewModel.testConnection(currentUrl) { message ->
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar(message)
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(0.6f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Default.Link, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Test")
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+                // --- USER PROFILE SUB-SECTION ---
+                Text("User Profile", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                SettingsTextField(value = tempUser, onValueChange = { tempUser = it }, label = "Username", icon = Icons.Default.Person)
+                Spacer(modifier = Modifier.height(8.dp))
+                SettingsTextField(value = tempPass, onValueChange = { tempPass = it }, label = "Password", icon = Icons.Default.Lock, isSensitive = true)
+                Spacer(modifier = Modifier.height(8.dp))
+                SettingsTextField(value = tempName, onValueChange = { tempName = it }, label = "Device Friendly Name", icon = Icons.Default.Badge)
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // --- AUTH ACTIONS (Login & Register) ---
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // LOGIN BUTTON (For existing users)
+                    Button(
+                        onClick = {
+                            viewModel.loginUser(tempUser, tempPass) { msg ->
+                                scope.launch {
+                                    if (msg.contains("✅")) viewModel.saveSyncProfile(tempUser, tempPass, tempName)
+                                    snackbarHostState.showSnackbar(msg)
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Login, null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Login")
+                    }
+
+                    // REGISTER BUTTON (For new users)
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.registerUser(tempUser, tempPass) { msg ->
+                                scope.launch {
+                                    if (msg.contains("✅")) viewModel.saveSyncProfile(tempUser, tempPass, tempName)
+                                    snackbarHostState.showSnackbar(msg)
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Register")
+                    }
                 }
             }
 
             // 5. READING
-            SettingsSection(title = "Reading", icon = Icons.Default.Info) {
+            SettingsSection(title = "Reading", icon = Icons.AutoMirrored.Filled.MenuBook) {
                 SettingsToggleRow(
                     label = "Use External Dictionary",
-                    description = "Use external StarDict files instead of embedded dictionary",
+                    description = "StarDict support",
                     checked = useEmbeddedDictionary,
                     onCheckedChange = { viewModel.toggleEmbeddedDictionary(it) }
                 )
                 if (useEmbeddedDictionary) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedButton(onClick = { launcher.launch(null) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
-                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedButton(onClick = { launcher.launch(null) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                         Text(if (dictionaryFolder.isEmpty()) "Select Dictionary Folder" else "Change Folder")
                     }
-                    if (dictionaryFolder.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.3f), RoundedCornerShape(4.dp)).padding(8.dp)) {
-                            Text("📂 Selected Location:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                            Text(dictionaryFolder, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
-                    }
                 }
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
                 if (!isOfflineMode) {
-                    SettingsToggleRow(
-                        label = "Auto-Save Recaps",
-                        description = "Save AI summaries to highlights",
-                        checked = vmIsAutoSave,
-                        onCheckedChange = { viewModel.toggleAutoSaveRecaps(it) }
-                    )
-                } else {
-                    Text("Auto-Save Recaps disabled in Offline Mode", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    SettingsToggleRow(label = "Auto-Save Recaps", description = "AI summaries to highlights", checked = vmIsAutoSave, onCheckedChange = { viewModel.toggleAutoSaveRecaps(it) })
                 }
             }
 
-            // 6. INTELLIGENCE (Restored for AI Features)
-            AnimatedVisibility(visible = !isOfflineMode, enter = expandVertically(), exit = shrinkVertically()) {
+            // 6. INTELLIGENCE
+            AnimatedVisibility(visible = !isOfflineMode) {
                 SettingsSection(title = "Intelligence", icon = Icons.Default.Psychology) {
-                    SettingsTextField(
-                        value = inputGemini,
-                        onValueChange = { inputGemini = it },
-                        label = "Gemini API Key",
-                        icon = Icons.Default.Lock,
-                        isSensitive = true
-                    )
+                    SettingsTextField(value = inputGemini, onValueChange = { inputGemini = it }, label = "Gemini API Key", icon = Icons.Default.Key, isSensitive = true)
                     Spacer(modifier = Modifier.height(12.dp))
-
-                    Text("Image Generation (Nano Banana)", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    SettingsTextField(
-                        value = inputCfUrl,
-                        onValueChange = { inputCfUrl = it },
-                        label = "Cloudflare AI URL",
-                        icon = Icons.Default.Cloud,
-                        placeholder = "https://ai-worker.workers.dev",
-                        isUrl = true
-                    )
+                    SettingsTextField(value = inputCfUrl, onValueChange = { inputCfUrl = it }, label = "Cloudflare AI URL", icon = Icons.Default.Cloud, isUrl = true)
                     Spacer(modifier = Modifier.height(12.dp))
-                    SettingsTextField(
-                        value = inputCfToken,
-                        onValueChange = { inputCfToken = it },
-                        label = "Auth Token",
-                        icon = Icons.Default.Key,
-                        isSensitive = true
-                    )
-                }
-            }
-            if (isOfflineMode) {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.3f)), modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.WifiOff, null, tint = Color.Gray)
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Text("AI features are currently hidden.", color = Color.Gray)
-                    }
+                    SettingsTextField(value = inputCfToken, onValueChange = { inputCfToken = it }, label = "Auth Token", icon = Icons.Default.Security, isSensitive = true)
                 }
             }
 
             // 7. DANGER ZONE
-            SettingsSection(title = "Danger Zone", icon = Icons.Default.Warning, borderColor = MaterialTheme.colorScheme.error.copy(alpha = 0.5f), titleColor = MaterialTheme.colorScheme.error) {
-                OutlinedButton(onClick = { showResetDialog = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error), border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f))) {
-                    Text("Reset All Settings")
-                }
+            SettingsSection(title = "Danger Zone", icon = Icons.Default.Warning, titleColor = MaterialTheme.colorScheme.error) {
+                OutlinedButton(
+                    onClick = { showResetDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                ) { Text("Reset All Settings") }
             }
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -337,13 +347,15 @@ fun SettingsScreen(
             AlertDialog(
                 onDismissRequest = { showResetDialog = false },
                 title = { Text("Factory Reset?") },
-                text = { Text("This will erase all API keys, Sync settings, and preferences.") },
-                confirmButton = { TextButton(onClick = { viewModel.resetSettings(); showResetDialog = false; scope.launch { snackbarHostState.showSnackbar("Settings reset") } }) { Text("Reset", color = Color.Red) } },
+                text = { Text("Erase all local credentials and keys?") },
+                confirmButton = { TextButton(onClick = { viewModel.resetSettings(); showResetDialog = false }) { Text("Reset", color = Color.Red) } },
                 dismissButton = { TextButton(onClick = { showResetDialog = false }) { Text("Cancel") } }
             )
         }
     }
 }
+
+// (Helper composables SettingsSection, SettingsToggleRow, SettingsTextField remain same as provided previously)
 
 // --- HELPER COMPOSABLES ---
 

@@ -82,5 +82,23 @@ interface BookDao {
 
     @Query("SELECT * FROM books WHERE id = :bookId LIMIT 1")
     suspend fun getBookById(bookId: Long): BookEntity?
+
+    @Query("SELECT bookHash FROM books")
+    suspend fun getAllBookHashes(): List<String>
+
+    @Query("""
+    UPDATE books 
+    SET lastCfiLocation = :cfi, 
+        lastLocationJson = :cfi, 
+        lastRead= :timestamp,
+        progress = :progress
+    WHERE bookHash = :bookHash AND lastRead < :timestamp
+""")
+    suspend fun updateBookMetadataFromSync(
+        bookHash: String,
+        cfi: String,
+        progress: Double,
+        timestamp: Long
+    )
 }
 

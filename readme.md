@@ -61,6 +61,21 @@ Vaachak fills this gap: a tool built by a reader, for readers.
 * **LLM Partner:** Google Gemini (used for pair programming, boilerplate generation, and API orchestration).
 * **Target Hardware:** E-ink devices, Android Phones.
 
+
+### "Cloud-First" Synchronization Strategy
+Vaachak now uses a "Last Write Wins" strategy with a **Cloud-First** priority during initialization to prevent data loss.
+
+1.  **Opening a Book:**
+  - The app triggers an immediate `sync()` call *before* the Reader engine loads.
+  - If the Cloud has a newer `updated_at` timestamp, the app pulls that position immediately.
+  - **Priority Order:** `Pending Jump > Cloud CFI > Local JSON`.
+
+2.  **Conflict Resolution (The "Anti-Overwrite" Guard):**
+  - When the Reader opens, it often reports "0% progress" during initialization.
+  - The `ReaderViewModel` now checks the database timestamp before saving.
+  - **Logic:** `if (now > currentBook.lastRead) { save() }`
+  - This ensures that a stale local "0%" event never overwrites a recent sync from another device.
+
 ## 🏗️ Architecture
 
 Vaachak is built using **Modern Android Development (MAD)** standards and **Clean Architecture** principles, ensuring scalability and testability.

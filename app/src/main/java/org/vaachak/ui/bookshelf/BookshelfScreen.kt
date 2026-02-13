@@ -59,7 +59,7 @@ fun BookshelfScreen(
     // Sync States
     val isRefreshing by viewModel.isRefreshing.collectAsState()
     val lastSyncTime by viewModel.lastSyncTime.collectAsState(initial = 0L)
-    val syncError by viewModel.snackbarMessage.collectAsState() // Using snackbar message as proxy for error state
+    val syncUsername by viewModel.syncUserName.collectAsState()
 
     // Ticker to refresh "Relative Time" every minute
     var tick by remember { mutableIntStateOf(0) }
@@ -140,7 +140,11 @@ fun BookshelfScreen(
                     val statusText = when {
                         isRefreshing -> "Syncing..."
                         isError -> "Sync error"
-                        else -> "Last synced: ${formatRelativeTime(lastSyncTime)}"
+                        else -> if (lastSyncTime > 0) {
+                            "Last synced for $syncUsername: ${formatRelativeTime(lastSyncTime)}"
+                        } else {
+                            "Not synced yet"
+                        }
                     }
 
                     val statusColor = when {

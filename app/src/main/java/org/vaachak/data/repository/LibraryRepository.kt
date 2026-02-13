@@ -116,7 +116,7 @@ class LibraryRepository @Inject constructor(
 
                 coverPath = savedCoverPath,
                 addedDate = System.currentTimeMillis(),
-                lastRead = System.currentTimeMillis(),
+                lastRead = 0L,
                 progress = 0.0
             )
             bookDao.insertBook(newBook)

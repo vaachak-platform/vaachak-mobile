@@ -29,8 +29,17 @@ import kotlinx.serialization.Serializable
 data class SyncRequest(
     @SerialName("last_sync_timestamp") val lastSyncTimestamp: Long,
     @SerialName("device_id") val deviceId: String,
+    @SerialName("device_name") val deviceName: String,
     @SerialName("states") val states: List<ReadingStateDto>,
-    @SerialName("annotations") val annotations: List<AnnotationDto>
+    @SerialName("annotations") val annotations: List<AnnotationDto>,
+    @SerialName("auth") val auth: SyncAuthDto,
+    @SerialName("local_hashes") val localHashes: List<String>? = null
+)
+
+@Serializable
+data class SyncAuthDto(
+    @SerialName("username") val username: String,
+    @SerialName("password") val password: String
 )
 
 @Serializable
@@ -42,11 +51,13 @@ data class SyncResponse(
 
 @Serializable
 data class ReadingStateDto(
-    @SerialName("user_id") val userId: String,
+    @SerialName("user_id") val userId: String, // Removed default to ensure we always map the real username
     @SerialName("book_hash") val bookHash: String,
     @SerialName("progress_cfi") val progressCfi: String,
+    @SerialName("progress_percent") val progressPercent: Double = 0.0,
     @SerialName("updated_at") val updatedAt: Long,
-    @SerialName("device_id") val deviceId: String? = null
+    @SerialName("device_id") val deviceId: String? = null,
+    @SerialName("device_name") val deviceName: String? = null
 )
 
 @Serializable
@@ -60,7 +71,11 @@ data class AnnotationDto(
     @SerialName("deleted") val deleted: Boolean,
     @SerialName("updated_at") val updatedAt: Long
 )
-
+@Serializable
+data class RegisterRequest(
+    @SerialName("username") val username: String,
+    @SerialName("password") val password: String
+)
 @Serializable
 data class InboxItemDto(
     val id: String,

@@ -32,6 +32,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import org.vaachak.data.local.BookDao
 import org.vaachak.data.local.BookEntity
@@ -72,6 +73,9 @@ class BookshelfViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = 0L
         )
+    val syncUserName: StateFlow<String> = settingsRepo.syncUsername
+        .stateIn(
+            scope = viewModelScope, SharingStarted.WhileSubscribed(5000),"")
     // --- STATE: THEME ---
     val isEinkEnabled: StateFlow<Boolean> = settingsRepo.isEinkEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -102,8 +106,13 @@ class BookshelfViewModel @Inject constructor(
     val filteredLibraryBooks: StateFlow<List<BookEntity>> =
         combine(allBooks, searchQuery, _sortOrder) { books, query, order ->
             val filtered = books.filter { book ->
-                (book.progress <= 0.0 || book.progress >= 0.99) &&
-                        book.title.contains(query, ignoreCase = true)
+                // A book stays in Library ONLY if:
+                // 1. Progress is exactly 0
+                // 2. AND there is no saved CFI location (meaning it's never been opened or synced)
+                val hasNotBeenOpened = book.progress <= 0.0 && book.lastCfiLocation.isNullOrBlank()
+                val isFinished = book.progress >= 0.99
+
+                (hasNotBeenOpened || isFinished) && book.title.contains(query, ignoreCase = true)
             }
             when (order) {
                 SortOrder.TITLE -> filtered.sortedBy { it.title }
@@ -113,7 +122,13 @@ class BookshelfViewModel @Inject constructor(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentBooks: StateFlow<List<BookEntity>> = allBooks.map { books ->
-        books.filter { it.progress > 0.0 && it.progress < 0.99 }
+        books.filter { // A book moves to "Continue Reading" ONLY if:
+            // It has a CFI location (from opening locally OR from a sync)
+            // AND it's not finished yet.
+            val hasStarted = !it.lastCfiLocation.isNullOrBlank() || it.progress > 0.0
+            val isNotFinished = it.progress < 0.99
+
+            hasStarted && isNotFinished }
             .sortedByDescending { it.lastRead }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

@@ -127,7 +127,7 @@ fun ReaderScreen(
             if (event == Lifecycle.Event.ON_PAUSE) {
                 // Triggered on Home button / App switch
                 val json = currentLocator?.toJSON()?.toString() ?: ""
-                viewModel.onReaderPause(bookId, json)
+                viewModel.onReaderPause( json)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -135,7 +135,7 @@ fun ReaderScreen(
             lifecycleOwner.lifecycle.removeObserver(observer)
             // Triggered on Back button (returning to Bookshelf)
             val json = currentLocator?.toJSON()?.toString() ?: ""
-            viewModel.onReaderPause(bookId, json)
+            viewModel.onReaderPause( json)
         }
     }
     // ------------------------------------

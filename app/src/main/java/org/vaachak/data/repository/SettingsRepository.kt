@@ -14,10 +14,6 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Repository for managing application settings and user preferences.
- * Uses DataStore to persist settings such as API keys, theme, reader preferences, and sync configs.
- */
 @Singleton
 class SettingsRepository @Inject constructor(
     private val dataStore: DataStore<Preferences>,
@@ -27,8 +23,8 @@ class SettingsRepository @Inject constructor(
     companion object {
         // --- APP GLOBAL SETTINGS ---
         val GEMINI_KEY = stringPreferencesKey("gemini_api_key")
-        val CF_URL = stringPreferencesKey("cloudflare_url") // AI / Image Gen URL
-        val CF_TOKEN = stringPreferencesKey("cloudflare_token") // AI Token
+        val CF_URL = stringPreferencesKey("cloudflare_url")
+        val CF_TOKEN = stringPreferencesKey("cloudflare_token")
         val IS_EINK_ENABLED = booleanPreferencesKey("is_eink_enabled")
         val AUTO_SAVE_RECAPS_KEY = booleanPreferencesKey("auto_save_recaps")
         val THEME_KEY = stringPreferencesKey("theme_mode")
@@ -44,14 +40,17 @@ class SettingsRepository @Inject constructor(
         val SYNC_DEVICE_ID = stringPreferencesKey("sync_device_id")
         val LAST_SYNC_TIMESTAMP = longPreferencesKey("last_sync_timestamp")
 
+        // Auth & Personalization
+        val SYNC_USERNAME = stringPreferencesKey("sync_username")
+        val SYNC_PASSWORD = stringPreferencesKey("sync_password")
+        val DEVICE_NAME = stringPreferencesKey("device_name")
+
         // --- READER PREFERENCES ---
         val READER_FONT_FAMILY = stringPreferencesKey("reader_font_family")
         val READER_FONT_SIZE = doublePreferencesKey("reader_font_size")
         val READER_TEXT_ALIGN = stringPreferencesKey("reader_text_align")
         val READER_THEME = stringPreferencesKey("reader_theme")
         val READER_PUBLISHER_STYLES = booleanPreferencesKey("reader_publisher_styles")
-
-        // Layout Sliders
         val READER_LETTER_SPACING = doublePreferencesKey("reader_letter_spacing")
         val READER_LINE_HEIGHT = doublePreferencesKey("reader_line_height")
         val READER_PARAGRAPH_SPACING = doublePreferencesKey("reader_para_spacing")
@@ -80,10 +79,11 @@ class SettingsRepository @Inject constructor(
     val localServerUrl: Flow<String> = dataStore.data.map { it[LOCAL_SERVER_URL] ?: "" }
     val deviceId: Flow<String> = dataStore.data.map { it[SYNC_DEVICE_ID] ?: "" }
     val lastSyncTimestamp: Flow<Long> = dataStore.data.map { it[LAST_SYNC_TIMESTAMP] ?: 0L }
-
-    // Dictionary Flows
-    fun getUseEmbeddedDictionary(): Flow<Boolean> = dataStore.data.map { it[USE_EMBEDDED_DICT] ?: false }
-    fun getDictionaryFolder(): Flow<String> = dataStore.data.map { it[DICTIONARY_FOLDER_KEY] ?: "" }
+    val syncUsername: Flow<String> = dataStore.data.map { it[SYNC_USERNAME] ?: "" }
+    val syncPassword: Flow<String> = dataStore.data.map { it[SYNC_PASSWORD] ?: "" }
+    val deviceName: Flow<String> = dataStore.data.map {
+        it[DEVICE_NAME] ?: "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+    }
 
     // --- READER PREF FLOWS ---
     val readerFontFamily: Flow<String?> = dataStore.data.map { it[READER_FONT_FAMILY] }
@@ -91,41 +91,54 @@ class SettingsRepository @Inject constructor(
     val readerTextAlign: Flow<String> = dataStore.data.map { it[READER_TEXT_ALIGN] ?: "justify" }
     val readerTheme: Flow<String> = dataStore.data.map { it[READER_THEME] ?: "light" }
     val readerPublisherStyles: Flow<Boolean> = dataStore.data.map { it[READER_PUBLISHER_STYLES] ?: true }
-
-    val readerLetterSpacing: Flow<Double?> = dataStore.data.map { it[READER_LETTER_SPACING] }
-    val readerLineHeight: Flow<Double?> = dataStore.data.map { it[READER_LINE_HEIGHT] }
-    val readerParaSpacing: Flow<Double?> = dataStore.data.map { it[READER_PARAGRAPH_SPACING] }
+    val readerLetterSpacing: Flow<Double> = dataStore.data.map { it[READER_LETTER_SPACING] ?: 1.0 }
+    val readerLineHeight: Flow<Double> = dataStore.data.map { it[READER_LINE_HEIGHT] ?: 1.0}
+    val readerParaSpacing: Flow<Double> = dataStore.data.map { it[READER_PARAGRAPH_SPACING]  ?: 1.0 }
     val readerMarginSide: Flow<Double> = dataStore.data.map { it[READER_MARGIN_SIDE] ?: 1.0 }
-    val readerMarginTop: Flow<Double> = dataStore.data.map { it[READER_MARGIN_TOP] ?: 1.0 }
-    val readerMarginBottom: Flow<Double> = dataStore.data.map { it[READER_MARGIN_BOTTOM] ?: 1.0 }
 
-    // --- SYNC HELPERS ---
+    // Dictionary Flows
+    fun getUseEmbeddedDictionary(): Flow<Boolean> = dataStore.data.map { it[USE_EMBEDDED_DICT] ?: false }
+    fun getDictionaryFolder(): Flow<String> = dataStore.data.map { it[DICTIONARY_FOLDER_KEY] ?: "" }
 
-    suspend fun getLastSyncTimestamp(): Long {
-        return dataStore.data.first()[LAST_SYNC_TIMESTAMP] ?: 0L
+    // --- SYNC ACTIONS ---
+
+    suspend fun updateSyncProfile(user: String, pass: String, name: String) {
+        dataStore.edit { prefs ->
+            prefs[SYNC_USERNAME] = user.trim()
+            prefs[SYNC_PASSWORD] = pass
+            prefs[DEVICE_NAME] = name.trim()
+        }
     }
+
+    suspend fun saveSyncSettings(syncCloudUrl: String, localUrl: String, useLocal: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[SYNC_CLOUD_URL] = syncCloudUrl.trim().removeSuffix("/")
+            prefs[LOCAL_SERVER_URL] = localUrl.trim().removeSuffix("/")
+            prefs[USE_LOCAL_SERVER] = useLocal
+        }
+    }
+
+    suspend fun getLastSyncTimestamp(): Long = dataStore.data.first()[LAST_SYNC_TIMESTAMP] ?: 0L
 
     suspend fun setLastSyncTimestamp(ts: Long) {
         dataStore.edit { it[LAST_SYNC_TIMESTAMP] = ts }
     }
 
-    suspend fun isSyncConfigured(): Boolean {
-        val prefs = dataStore.data.first()
-        val useLocal = prefs[USE_LOCAL_SERVER] ?: false
-        val local = prefs[LOCAL_SERVER_URL]
-        val cloud = prefs[SYNC_CLOUD_URL]
+    suspend fun ensureDeviceId(): String {
+        val existing = dataStore.data.first()[SYNC_DEVICE_ID]
+        if (!existing.isNullOrBlank()) return existing
 
-        return if (useLocal) !local.isNullOrBlank() else !cloud.isNullOrBlank()
+        val newId = "android-${UUID.randomUUID().toString().take(8)}"
+        dataStore.edit { it[SYNC_DEVICE_ID] = newId }
+        return newId
     }
 
-    // --- WRITE ACTIONS ---
+    // --- APP SETTINGS ACTIONS ---
 
     suspend fun saveSettings(gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean) {
         dataStore.edit { prefs ->
             prefs[GEMINI_KEY] = gemini.trim()
-            var cleanUrl = cfUrl.trim()
-            if (cleanUrl.endsWith("/")) cleanUrl = cleanUrl.removeSuffix("/")
-            prefs[CF_URL] = cleanUrl
+            prefs[CF_URL] = cfUrl.trim().removeSuffix("/")
             prefs[CF_TOKEN] = cfToken.trim()
             prefs[IS_EINK_ENABLED] = isEnk
         }
@@ -138,33 +151,6 @@ class SettingsRepository @Inject constructor(
     suspend fun setDictionaryFolder(uri: String) { dataStore.edit { it[DICTIONARY_FOLDER_KEY] = uri } }
     suspend fun setOfflineMode(enabled: Boolean) { dataStore.edit { it[OFFLINE_MODE_KEY] = enabled } }
     suspend fun clearSettings() { dataStore.edit { it.clear() } }
-
-    suspend fun saveSyncSettings(syncCloudUrl: String, localUrl: String, useLocal: Boolean) {
-        dataStore.edit { prefs ->
-            var cleanCloud = syncCloudUrl.trim()
-            if (cleanCloud.endsWith("/")) cleanCloud = cleanCloud.removeSuffix("/")
-            prefs[SYNC_CLOUD_URL] = cleanCloud
-
-            var cleanLocal = localUrl.trim()
-            if (cleanLocal.endsWith("/")) cleanLocal = cleanLocal.removeSuffix("/")
-            prefs[LOCAL_SERVER_URL] = cleanLocal
-
-            prefs[USE_LOCAL_SERVER] = useLocal
-        }
-    }
-
-    suspend fun ensureDeviceId(): String {
-        val prefs = dataStore.data.first()
-        val existing = prefs[SYNC_DEVICE_ID]
-        if (!existing.isNullOrBlank()) return existing
-
-        val newId = "android-${UUID.randomUUID().toString().take(8)}"
-        // Wait for the edit to complete
-        dataStore.edit { it[SYNC_DEVICE_ID] = newId }
-
-        // Return the newId directly to ensure the caller has it immediately
-        return newId
-    }
 
     suspend fun updateReaderPreferences(
         fontFamily: String? = null,
@@ -194,25 +180,11 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    suspend fun resetReaderLayout() {
-        dataStore.edit { prefs ->
-            prefs.remove(READER_TEXT_ALIGN)
-            prefs.remove(READER_PUBLISHER_STYLES)
-            prefs.remove(READER_LETTER_SPACING)
-            prefs.remove(READER_PARAGRAPH_SPACING)
-            prefs.remove(READER_MARGIN_SIDE)
-            prefs.remove(READER_MARGIN_TOP)
-            prefs.remove(READER_MARGIN_BOTTOM)
-        }
-    }
-
     fun validateStarDictFolder(uriString: String): Boolean {
         return try {
             val uri = Uri.parse(uriString)
             val dir = DocumentFile.fromTreeUri(context, uri)
-            if (dir == null || !dir.isDirectory || !dir.canRead()) return false
-            val files = dir.listFiles()
-            files.any { it.name?.endsWith(".idx", ignoreCase = true) == true }
+            dir?.let { it.isDirectory && it.canRead() && it.listFiles().any { f -> f.name?.endsWith(".idx", true) == true } } ?: false
         } catch (e: Exception) { false }
     }
 }
