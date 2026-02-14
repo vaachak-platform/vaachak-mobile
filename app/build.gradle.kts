@@ -10,11 +10,11 @@ plugins {
 }
 
 android {
-    namespace = "org.vaachak.reader"
+    namespace = "org.vaachak.reader.leisure"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "org.vaachak.reader"
+        applicationId = "org.vaachak.reader.leisure"
         minSdk = 30
         targetSdk = 36
         versionCode = 1

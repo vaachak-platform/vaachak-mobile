@@ -1,6 +1,6 @@
-# Vaachak (वाचक)
+# Leisure Vaachak (वाचक)
 
-**Vaachak** (Sanskrit for "Reader") is a minimalist, AI-enhanced Android e-reader application specifically optimized for E-Ink devices like the **Boox Leaf 3C**.
+**Leisure Vaachak** (Sanskrit for "Reader") is a minimalist, AI-enhanced e-reader application specifically optimized for E-Ink devices like the **Boox Leaf 3C**.
 
 This project marks my return to hands-on development, serving as a bridge between my years in management and my lifelong passion for building. It was developed using **Google Gemini** as a "vibe programmer" partner to demonstrate that architectural thinking and problem-solving are timeless skills.
 

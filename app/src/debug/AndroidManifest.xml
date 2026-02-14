@@ -23,10 +23,10 @@
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools"
-          package="org.vaachak.reader">
+          package="org.vaachak.reader.leisure">
 
     <application
-            android:name="org.vaachak.reader.VaachakApplication"
+            android:name="org.vaachak.reader.leisure.VaachakApplication"
             android:allowBackup="false"
             android:fullBackupContent="false"
             tools:replace="android:allowBackup,android:fullBackupContent">
