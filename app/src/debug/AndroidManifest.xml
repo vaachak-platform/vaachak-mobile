@@ -26,7 +26,7 @@
           package="org.vaachak.reader">
 
     <application
-            android:name="org.vaachak.VaachakApplication"
+            android:name="org.vaachak.reader.VaachakApplication"
             android:allowBackup="false"
             android:fullBackupContent="false"
             tools:replace="android:allowBackup,android:fullBackupContent">

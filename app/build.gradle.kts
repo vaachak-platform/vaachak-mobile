@@ -62,6 +62,8 @@ android {
 dependencies {
 implementation(libs.androidx.foundation)
     implementation(libs.material3)
+    implementation(libs.androidx.ui.text)
+    implementation(libs.foundation)
     // --- ADD THIS LINE ---
     coreLibraryDesugaring(libs.android.desugar)
     implementation(libs.androidx.core.ktx)

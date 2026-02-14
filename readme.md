@@ -11,7 +11,7 @@ Vaachak fills this gap: a tool built by a reader, for readers.
 
 ## ✨ Features
 
-### 📚 Immersive Reading Experience (v2.0)
+### 📚 Immersive Reading Experience 
 * **Pro-Level Book Settings:** A completely revamped, book-level settings interface with real-time previews.
   * **Dual-Tab Control:** Separate "Display" and "Layout" tabs for granular control.
   * **Typography:** Support for specialized fonts including **OpenDyslexic**, **Accessible DFA**, **IA Writer Duospace**, Serif, and Sans-Serif.
@@ -29,6 +29,13 @@ Vaachak fills this gap: a tool built by a reader, for readers.
   * Books added to library but opened remain in **Library** section
   * Books completed are added back to **Library** section
 
+### ☁️ Cross-Device Sync
+* **Self-Hosted Cloud:** Built on **Cloudflare Workers + D1 Database**. You own your data.
+* **Smart Sync:** Automatically syncs reading progress, highlights, and book metadata across devices.
+* **Device Awareness:** Identifies which device (e.g., "Onyx Boox" vs "Pixel 8") made the last read.
+* **Offline-First:** Read anywhere; changes queue up and sync automatically when back online.
+* **Custom Server Support:** Point the app to your own self-hosted sync worker or use the provided default.
+
 ### ✒️ E-Ink Optimization
 * **E-Ink Optimized UI:** Global bitonal theme, zero-animation transitions, and high-contrast UI components to prevent ghosting.
 * **Sharpness Engine:** A custom contrast slider to sharpen secondary text and dividers specifically for e-paper screens.
@@ -41,62 +48,37 @@ Vaachak fills this gap: a tool built by a reader, for readers.
 * **Knowledge Journaling:** Option to save AI summaries directly to your local Highlights database with a dedicated "Recap" tag.
 * **Self-Healing Pipeline:** Automatic fallback to text descriptions if image generation APIs fail.
 
-### 🛡️ Privacy & Offline Focus
-* **Offline Mode:** A dedicated toggle to disable all network features. When active, AI buttons are visually hidden to ensure a distraction-free experience.
-* **Book-Level Overrides:** You can enable AI features for a specific book even if the global setting is Offline (or vice versa).
-* **Local Privacy:** Your library and highlights remain stored locally on your device using Room Database.
-* **Secure API Configuration:** **Bring Your Own Keys (BYOK)**. No hardcoded secrets; keys are stored in encrypted DataStore preferences.
+### 🛡️ Privacy & Security
+* **Robust Authentication:** Secure Login/Register flow with "Save-before-Auth" architecture to prevent configuration loss.
+* **Bring Your Own Keys (BYOK):** API keys for Gemini and Cloudflare are stored securely in encrypted DataStore preferences.
+* **Offline Mode:** Dedicated toggle to disable all network features for privacy.
 
-###  🌐 Smart Catalog Browser:**
-* **Project Gutenberg Integration:** Seamlessly browse thousands of free books using the [Gutendex JSON API](https://gutendex.com/).
-* **OPDS Support:** Add custom OPDS feeds (e.g., ManyBooks, Calibre).
-* **Breadcrumb Navigation:** Easy deep-folder navigation with quick jump-back support.
-* **Library Detection:** Automatically detects if a book in the catalog is already downloaded and offers a "Read" button instead of "Download".
+### 🌐 Library & Catalog
+* **OPDS Support:** Browse and download from catalogs like Project Gutenberg (via Gutendex) and Standard Ebooks.
+* **Local Import:** Import EPUBs directly from device storage."Open With" from other apps.
+* **Deduplication:** Automatically detects if a book in the catalog is already downloaded.
 
-### 💾 Local Library Management:
-* **Import EPUBs** from file storage
-* **"Open With"** from other apps.
 ## 🛠️ Tech Stack
 * **Language:** Kotlin / Java (Android)
 * **LLM Partner:** Google Gemini (used for pair programming, boilerplate generation, and API orchestration).
 * **Target Hardware:** E-ink devices, Android Phones.
 
 
-### "Cloud-First" Synchronization Strategy
-Vaachak now uses a "Last Write Wins" strategy with a **Cloud-First** priority during initialization to prevent data loss.
-
-1.  **Opening a Book:**
-  - The app triggers an immediate `sync()` call *before* the Reader engine loads.
-  - If the Cloud has a newer `updated_at` timestamp, the app pulls that position immediately.
-  - **Priority Order:** `Pending Jump > Cloud CFI > Local JSON`.
-
-2.  **Conflict Resolution (The "Anti-Overwrite" Guard):**
-  - When the Reader opens, it often reports "0% progress" during initialization.
-  - The `ReaderViewModel` now checks the database timestamp before saving.
-  - **Logic:** `if (now > currentBook.lastRead) { save() }`
-  - This ensures that a stale local "0%" event never overwrites a recent sync from another device.
-
 ## 🏗️ Architecture
 
 Vaachak is built using **Modern Android Development (MAD)** standards and **Clean Architecture** principles, ensuring scalability and testability.
 
-* **UI Layer:** [Jetpack Compose](https://developer.android.com/jetpack/compose) (Material 3) with unidirectional data flow (UDF).
-* **Architecture Pattern:** MVVM (Model-View-ViewModel) with Kotlin Flows connecting layers.
-* **Reading Engine:** [Readium Kotlin Toolkit 3.1.2](https://github.com/readium/kotlin-toolkit). Uses `EpubNavigatorFragment` wrapped in AndroidView for Compose interoperability.
-* **Dependency Injection:** [Dagger Hilt](https://dagger.dev/hilt/).
+* **UI Layer:** [Jetpack Compose](https://developer.android.com/jetpack/compose) (Material 3).
+* **Navigation:** **"Hub & Spoke" Pattern**. A centralized Settings Hub branches into dedicated full-screen config pages (Sync, AI, Content) to maximize screen real estate on small E-Ink displays.
+* **Reading Engine:** [Readium Kotlin Toolkit](https://github.com/readium/kotlin-toolkit).
+* **Dependency Injection:** Dagger Hilt.
 * **Persistence:**
-  * **Settings:** Jetpack DataStore (Proto/Preferences) for secure key storage.
-  * **Data:** [Room Database](https://developer.android.com/training/data-storage/room) for Books, Highlights, and Reading Progress.
-* **Networking:** Retrofit 2 + OkHttp for AI API communication.
-* **AI Integration:**
-  * **Text/Logic:** Google Gemini 1.5 Flash (via Gemini API).
-  * **Image Generation:** Cloudflare Workers (Stable Diffusion XL Lightning).
-* **Project Gutenberg via Gutendex**
-  This app bypasses the complex RDF/XML parsing of standard [Gutenberg](https://gutendex.com/) feeds by utilizing the **Gutendex API**. 
-  * This provides:
-    - Faster search and category browsing.
-    - JSON-based responses for reliability.
-    - Support for [self-hosted Gutendex](https://github.com/garethbjohnson/gutendex) instances via the Catalog Manager URL.
+  * **Settings:** Jetpack DataStore (Proto/Preferences).
+  * **Data:** Room Database (Books, Highlights).
+* **Sync Engine:**
+  * **Backend:** Cloudflare Workers (TypeScript) + D1 (SQLite).
+  * **Strategy:** "Last Write Wins" with timestamps to resolve conflicts between devices.
+* **Networking:** Retrofit 2 + OkHttp (with dynamic base URL support for custom servers).
 
 ### 📂 Project Structure
 * `ui/bookshelf`: Dashboard, library grid, and file import logic.
@@ -109,18 +91,27 @@ Vaachak is built using **Modern Android Development (MAD)** standards and **Clea
 ## 🚀 How to Build and Run
 
 ### 1. Prerequisites
-* **Android Studio:** Koala Feature Drop or newer (recommended).
+* **Android Studio:** Koala Feature Drop or newer.
 * **JDK:** Java 17.
+* **Cloudflare Account:** (Optional) For Sync and Image Gen features.
 * **Android Device:** Minimum SDK 26 (Android 8.0). E-Ink device recommended but not required.
 
-### 2. Setup AI Services
+### 2. Setup Sync & AI (Self-Hosted)
 
-#### A. Setup Google Gemini (For Text/Recall)
+#### A. Setup Cloudflare Worker (Sync)
+To enable Sync, deploy the `vaachak-worker` (provided in the `backend/` folder of this repo).
+
+1.  **Create Worker:** Create a Cloudflare Worker project.
+2.  **Add D1 Database:** Create a D1 database named `vaachak_db` and bind it to the worker.
+3.  **Deploy:** Run `npx wrangler deploy`.
+4.  **Get URL:** Copy the worker URL (e.g., `https://vaachak-sync.yourname.workers.dev`).
+
+#### B. Setup Google Gemini (For Text/Recall)
 1.  Go to [Google AI Studio](https://aistudio.google.com/).
 2.  Click **"Get API key"**.
 3.  Copy the key. You will enter this in the app settings later.
 
-#### B. Setup Cloudflare Worker (For Visualize)
+#### C. Setup Cloudflare Worker (For Visualize)
 To enable the "Visualize" feature, you need a free Cloudflare Worker to act as a proxy for the Stable Diffusion model.
 
 1.  **Create Worker:** Log in to [Cloudflare Dashboard](https://dash.cloudflare.com/) > Compute (Workers) > Create Application > "Hello World" script. Name it `vaachak-art`.
@@ -161,6 +152,12 @@ export default {
 };
 ```
 5.  **Save URL:** Click Deploy and copy the Worker URL (e.g., `https://vaachak-art.yourname.workers.dev`).
+
+#### D. Configure App
+1.  Open Vaachak Reader> **Settings > Intelligence**.
+2.  Enter **Gemini API Key** (for text) and **Cloudflare URL/Token** (for images).
+3.  Go to **Settings > Sync Account**.
+4.  Register a new account. You can toggle "Use Custom Server" to point to your specific worker URL.
 
 ### 3. Build & Install
 1.  Clone the repository:
