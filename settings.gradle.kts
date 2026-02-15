@@ -20,5 +20,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Lesiure Vaachak"
-include(":app")
+rootProject.name = "vaachak-mobile"
+include(":leisure")
+include(":core")
