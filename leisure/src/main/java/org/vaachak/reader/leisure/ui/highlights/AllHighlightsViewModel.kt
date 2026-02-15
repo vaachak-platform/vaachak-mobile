@@ -25,10 +25,10 @@ package org.vaachak.reader.leisure.ui.highlights
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import org.vaachak.reader.leisure.data.local.BookDao
-import org.vaachak.reader.leisure.data.local.HighlightDao
-import org.vaachak.reader.leisure.data.local.HighlightEntity
-import org.vaachak.reader.leisure.data.repository.SettingsRepository
+import org.vaachak.reader.core.data.local.BookDao
+import org.vaachak.reader.core.data.local.HighlightDao
+import org.vaachak.reader.core.domain.model.HighlightEntity
+import org.vaachak.reader.core.data.repository.SettingsRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject

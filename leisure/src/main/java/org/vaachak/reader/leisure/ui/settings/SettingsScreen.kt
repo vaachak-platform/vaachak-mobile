@@ -20,9 +20,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
-import org.vaachak.reader.leisure.domain.models.SettingsSection
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
-import org.vaachak.reader.leisure.ui.theme.ThemeMode
 import org.vaachak.reader.leisure.navigation.Screen
 
 @Composable

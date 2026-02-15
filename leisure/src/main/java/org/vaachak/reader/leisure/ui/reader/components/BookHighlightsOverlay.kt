@@ -40,7 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import org.vaachak.reader.leisure.data.local.HighlightEntity
+import org.vaachak.reader.core.domain.model.HighlightEntity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

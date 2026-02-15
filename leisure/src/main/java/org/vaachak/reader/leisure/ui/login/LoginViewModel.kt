@@ -28,8 +28,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import org.vaachak.reader.leisure.data.repository.SettingsRepository
-import org.vaachak.reader.leisure.data.repository.SyncRepository
+import org.vaachak.reader.core.data.repository.SettingsRepository
+import org.vaachak.reader.core.data.repository.SyncRepository
 import javax.inject.Inject
 import kotlinx.coroutines.flow.first
 @HiltViewModel

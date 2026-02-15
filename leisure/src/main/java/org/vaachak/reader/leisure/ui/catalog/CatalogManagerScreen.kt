@@ -42,7 +42,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import org.vaachak.reader.leisure.data.local.OpdsEntity
+import org.vaachak.reader.core.domain.model.OpdsEntity
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 
 @OptIn(ExperimentalMaterial3Api::class)

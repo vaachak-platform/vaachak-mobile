@@ -26,7 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
-
+import org.vaachak.reader.core.domain.model.ThemeMode
 @Composable
 fun VaachakTheme(
     themeMode: ThemeMode = ThemeMode.E_INK,
@@ -71,8 +71,3 @@ fun VaachakTheme(
     )
 }
 
-enum class ThemeMode {
-    LIGHT,
-    DARK,
-    E_INK
-}

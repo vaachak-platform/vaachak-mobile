@@ -73,7 +73,7 @@ import org.vaachak.reader.leisure.ui.settings.SettingsScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsViewModel
 import org.vaachak.reader.leisure.ui.settings.AiConfigScreen
 import org.vaachak.reader.leisure.ui.settings.SyncSettingsScreen
-import org.vaachak.reader.leisure.ui.theme.ThemeMode
+import org.vaachak.reader.core.domain.model.ThemeMode
 import org.vaachak.reader.leisure.ui.theme.VaachakTheme
 import java.io.File
 import java.io.FileOutputStream

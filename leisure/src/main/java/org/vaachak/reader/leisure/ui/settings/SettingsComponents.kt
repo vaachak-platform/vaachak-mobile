@@ -41,7 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import org.vaachak.reader.leisure.domain.models.UserProfile
+import org.vaachak.reader.core.domain.model.UserProfile
 
 
 

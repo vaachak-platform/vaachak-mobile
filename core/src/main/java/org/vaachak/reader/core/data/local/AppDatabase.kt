@@ -20,39 +20,21 @@
  *  * SOFTWARE.
  */
 
-package org.vaachak.reader.leisure.ui.settings
+package org.vaachak.reader.core.data.local
 
+import androidx.room.Database
+import androidx.room.RoomDatabase
+import org.vaachak.reader.core.domain.model.BookEntity
+import org.vaachak.reader.core.domain.model.HighlightEntity
 import org.vaachak.reader.core.domain.model.OpdsEntity
-import org.vaachak.reader.core.domain.model.AiConfig
-import org.vaachak.reader.core.domain.model.SettingsSection
-import org.vaachak.reader.core.domain.model.UserProfile
-import org.vaachak.reader.core.domain.model.ThemeMode
 
-/**
- * Represents the single source of truth for the Settings Screen UI.
- * This state object is immutable and updated via the ViewModel.
- */
-data class SettingsUiState(
-    // --- 1. PROFILE & SYNC ---
-    val userProfile: UserProfile = UserProfile(),
-    val isSyncLoading: Boolean = false,
+@Database(entities = [HighlightEntity::class, BookEntity::class, OpdsEntity::class], version = 1, exportSchema = false)
+abstract class AppDatabase : RoomDatabase() {
+    abstract fun highlightDao(): HighlightDao
+    abstract fun bookDao(): BookDao
+    abstract fun opdsDao(): OpdsDao // Add this
+    companion object {
+        const val DATABASE_NAME = "vaachak_db"
 
-    // --- 2. GLOBAL CONTROLS ---
-    val isOfflineMode: Boolean = false,
-
-    // --- 3. CONTENT (Catalogs) ---
-    val catalogs: List<OpdsEntity> = emptyList(),
-
-    // --- 4. INTELLIGENCE (AI) ---
-    val aiConfig: AiConfig = AiConfig(),
-
-    // --- 5. UI LOGIC (View vs Edit Mode) ---
-    val activeEditSection: SettingsSection = SettingsSection.NONE,
-    val isAiMasked: Boolean = true, // Masks API keys by default (e.g., •••••)
-    val errorMessage: String? = null,
-
-    //--6. Theme
-    // --- ADD THESE TWO FIELDS ---
-    val themeMode: ThemeMode = ThemeMode.E_INK,
-    val einkContrast: Float = 0.5f
-)
+    }
+}

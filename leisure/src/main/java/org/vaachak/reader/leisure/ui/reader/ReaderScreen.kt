@@ -37,7 +37,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner // UPDATED IMPORT
-import org.vaachak.reader.leisure.data.local.HighlightEntity
+import org.vaachak.reader.core.domain.model.HighlightEntity
 import org.vaachak.reader.leisure.ui.reader.components.AiBottomSheet
 import org.vaachak.reader.leisure.ui.reader.components.BookHighlightsOverlay
 import org.vaachak.reader.leisure.ui.reader.components.BookSearchOverlay

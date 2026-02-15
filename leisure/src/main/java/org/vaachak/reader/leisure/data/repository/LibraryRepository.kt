@@ -26,8 +26,8 @@ import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import org.vaachak.reader.leisure.data.local.BookDao
-import org.vaachak.reader.leisure.data.local.BookEntity
+import org.vaachak.reader.core.data.local.BookDao
+import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.leisure.ui.reader.ReadiumManager
 import java.io.File
 import java.io.InputStream

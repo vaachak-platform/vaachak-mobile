@@ -32,7 +32,7 @@ import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
-import org.vaachak.reader.leisure.data.local.BookEntity
+import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 import java.io.File
 import androidx.compose.runtime.getValue // CRITICAL

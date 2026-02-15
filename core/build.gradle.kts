@@ -55,13 +55,14 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.serialization.json)
-
+    implementation(libs.androidx.documentfile)
     // Ktor (Used for some networking ops)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.json)
-
+    // Add this line for Logging:
+    implementation(libs.ktor.client.logging)
     // Database (Room)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
@@ -74,6 +75,7 @@ dependencies {
     // Readium (Shared Logic only - Navigator UI stays in Leisure for now)
     implementation(libs.readium.shared)
     implementation(libs.readium.streamer)
+    implementation(libs.readium.opds)
 
     // AI
     implementation(libs.google.generativeai)
@@ -82,4 +84,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
+    // Add Apache Commons for StarDict parsing
+    implementation(libs.apache.commons)
 }

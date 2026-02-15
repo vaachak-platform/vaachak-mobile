@@ -7,12 +7,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import org.vaachak.reader.leisure.data.local.BookDao
-import org.vaachak.reader.leisure.data.local.HighlightDao
-import org.vaachak.reader.leisure.data.local.HighlightEntity
-import org.vaachak.reader.leisure.data.repository.AiRepository
-import org.vaachak.reader.leisure.data.repository.DictionaryRepository
-import org.vaachak.reader.leisure.data.repository.SettingsRepository
+import org.vaachak.reader.core.data.local.BookDao
+import org.vaachak.reader.core.data.local.HighlightDao
+import org.vaachak.reader.core.domain.model.HighlightEntity
+import org.vaachak.reader.core.data.repository.AiRepository
+import org.vaachak.reader.core.data.repository.DictionaryRepository
+import org.vaachak.reader.core.data.repository.SettingsRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.NonCancellable
@@ -33,7 +33,7 @@ import org.readium.r2.shared.publication.services.search.SearchService
 import javax.inject.Inject
 import kotlin.math.abs
 import kotlin.math.round
-import org.vaachak.reader.leisure.data.repository.SyncRepository
+import org.vaachak.reader.core.data.repository.SyncRepository
 import kotlinx.coroutines.yield
 
 @OptIn(ExperimentalCoroutinesApi::class, ExperimentalReadiumApi::class, FlowPreview::class)

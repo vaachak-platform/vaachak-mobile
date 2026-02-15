@@ -38,7 +38,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
-import org.vaachak.reader.leisure.ui.theme.ThemeMode
+import org.vaachak.reader.core.domain.model.ThemeMode
 
 @Composable
 fun AiConfigScreen(

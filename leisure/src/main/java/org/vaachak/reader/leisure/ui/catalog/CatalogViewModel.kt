@@ -26,12 +26,12 @@ import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import org.vaachak.reader.leisure.data.local.OpdsDao
-import org.vaachak.reader.leisure.data.local.OpdsEntity
-import org.vaachak.reader.leisure.data.repository.GutendexRepository
+import org.vaachak.reader.core.data.local.OpdsDao
+import org.vaachak.reader.core.domain.model.OpdsEntity
+import org.vaachak.reader.core.data.repository.GutendexRepository
 import org.vaachak.reader.leisure.data.repository.LibraryRepository
-import org.vaachak.reader.leisure.data.repository.OpdsRepository
-import org.vaachak.reader.leisure.data.repository.SettingsRepository
+import org.vaachak.reader.core.data.repository.OpdsRepository
+import org.vaachak.reader.core.data.repository.SettingsRepository
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch

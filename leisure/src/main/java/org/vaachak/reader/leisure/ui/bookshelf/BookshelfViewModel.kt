@@ -23,9 +23,7 @@
 package org.vaachak.reader.leisure.ui.bookshelf
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.net.Uri
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,16 +32,14 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
-import org.vaachak.reader.leisure.data.local.BookDao
-import org.vaachak.reader.leisure.data.local.BookEntity
-import org.vaachak.reader.leisure.data.local.HighlightDao
-import org.vaachak.reader.leisure.data.local.HighlightEntity
-import org.vaachak.reader.leisure.data.repository.AiRepository
+import org.vaachak.reader.core.data.local.BookDao
+import org.vaachak.reader.core.domain.model.BookEntity
+import org.vaachak.reader.core.data.local.HighlightDao
+import org.vaachak.reader.core.domain.model.HighlightEntity
+import org.vaachak.reader.core.data.repository.AiRepository
 import org.vaachak.reader.leisure.data.repository.LibraryRepository
-import org.vaachak.reader.leisure.data.repository.SettingsRepository
-import org.vaachak.reader.leisure.data.repository.SyncRepository
-import java.io.File
-import java.io.FileOutputStream
+import org.vaachak.reader.core.data.repository.SettingsRepository
+import org.vaachak.reader.core.data.repository.SyncRepository
 import javax.inject.Inject
 
 /**

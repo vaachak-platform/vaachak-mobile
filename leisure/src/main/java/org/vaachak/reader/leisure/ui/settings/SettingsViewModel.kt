@@ -6,13 +6,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import org.vaachak.reader.leisure.data.local.OpdsEntity
-import org.vaachak.reader.leisure.data.repository.AiRepository
-import org.vaachak.reader.leisure.data.repository.OpdsRepository
-import org.vaachak.reader.leisure.data.repository.SettingsRepository
-import org.vaachak.reader.leisure.data.repository.SyncRepository
-import org.vaachak.reader.leisure.domain.models.*
-import org.vaachak.reader.leisure.ui.theme.ThemeMode
+import org.vaachak.reader.core.domain.model.AiConfig
+import org.vaachak.reader.core.domain.model.SettingsSection
+import org.vaachak.reader.core.domain.model.UserProfile
+import org.vaachak.reader.core.domain.model.OpdsEntity
+import org.vaachak.reader.core.data.repository.AiRepository
+import org.vaachak.reader.core.data.repository.OpdsRepository
+import org.vaachak.reader.core.data.repository.SettingsRepository
+import org.vaachak.reader.core.data.repository.SyncRepository
+import org.vaachak.reader.core.domain.model.ThemeMode
 import javax.inject.Inject
 
 @HiltViewModel

@@ -25,12 +25,12 @@ package org.vaachak.reader.leisure.ui.session
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import org.vaachak.reader.leisure.data.local.BookDao
-import org.vaachak.reader.leisure.data.local.HighlightDao
-import org.vaachak.reader.leisure.data.local.BookEntity
-import org.vaachak.reader.leisure.data.local.HighlightEntity
-import org.vaachak.reader.leisure.data.repository.AiRepository
-import org.vaachak.reader.leisure.data.repository.SettingsRepository // Ensure this import is correct
+import org.vaachak.reader.core.data.local.BookDao
+import org.vaachak.reader.core.data.local.HighlightDao
+import org.vaachak.reader.core.domain.model.BookEntity
+import org.vaachak.reader.core.domain.model.HighlightEntity
+import org.vaachak.reader.core.data.repository.AiRepository
+import org.vaachak.reader.core.data.repository.SettingsRepository // Ensure this import is correct
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject

@@ -50,7 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import org.vaachak.reader.leisure.data.local.HighlightEntity
+import org.vaachak.reader.core.domain.model.HighlightEntity
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
