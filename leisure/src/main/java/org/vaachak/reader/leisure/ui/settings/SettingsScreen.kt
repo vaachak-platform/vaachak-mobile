@@ -29,7 +29,7 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-    val syncMessage by viewModel.syncMessage.collectAsState() // NEW
+    // val syncMessage by viewModel.syncMessage.collectAsState() // Uncomment if needed
 
     val scrollState = rememberScrollState()
     val context = LocalContext.current
@@ -74,14 +74,29 @@ fun SettingsScreen(
                     }
                 )
 
-                // Dictionary
+                // [NEW] Default Appearance Tile
+                // 2. [NEW] App Appearance (Theme/Sharpness)
+                SettingsTile(
+                    icon = Icons.Default.Contrast,
+                    title = "App Appearance",
+                    subtitle = "Theme & E-ink Sharpness",
+                    onClick = { navController.navigate("settings/app_appearance") } // New Route
+                )
+
+                // 3. [RENAMED] Book Appearance
+                SettingsTile(
+                    icon = Icons.Default.FormatSize,
+                    title = "Default Book Appearance",
+                    subtitle = "Global fonts & styles for books",
+                    onClick = { navController.navigate("settings/appearance") }
+                )
+
+                // [UPDATED] Dictionary Tile
                 SettingsTile(
                     icon = Icons.Default.Book,
                     title = "Dictionary Settings",
                     subtitle = "Manage external dictionaries",
-                    onClick = {
-                        Toast.makeText(context, "Dictionary management coming in v1.3", Toast.LENGTH_SHORT).show()
-                    }
+                    onClick = { navController.navigate("settings/dictionary") }
                 )
             }
 
@@ -102,7 +117,7 @@ fun SettingsScreen(
                         icon = Icons.Default.AutoAwesome,
                         title = "AI Configuration",
                         subtitle = if (state.aiConfig.isEnabled) "Enabled" else "Configure AI keys",
-                        onClick = { navController.navigate(Screen.AiConfig.route) } // Navigates to dedicated screen
+                        onClick = { navController.navigate(Screen.AiConfig.route) }
                     )
                 }
             }
@@ -119,6 +134,5 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
         }
-
     }
 }

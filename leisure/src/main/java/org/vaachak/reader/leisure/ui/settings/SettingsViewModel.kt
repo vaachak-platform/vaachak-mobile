@@ -1,5 +1,6 @@
 package org.vaachak.reader.leisure.ui.settings
 
+
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -10,19 +11,24 @@ import org.vaachak.reader.core.domain.model.AiConfig
 import org.vaachak.reader.core.domain.model.SettingsSection
 import org.vaachak.reader.core.domain.model.UserProfile
 import org.vaachak.reader.core.domain.model.OpdsEntity
-import org.vaachak.reader.core.data.repository.AiRepository
 import org.vaachak.reader.core.data.repository.OpdsRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
 import org.vaachak.reader.core.domain.model.ThemeMode
 import javax.inject.Inject
+import org.vaachak.reader.core.domain.model.ReaderPreferences
+import org.vaachak.reader.leisure.utils.EinkHelper
+import dagger.hilt.android.qualifiers.ApplicationContext
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepo: SettingsRepository,
     private val syncRepo: SyncRepository,
     private val opdsRepo: OpdsRepository,
-    private val aiRepo: AiRepository
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     // --- Internal Mutable State ---
@@ -33,6 +39,17 @@ class SettingsViewModel @Inject constructor(
     // NEW: Sync Status Feedback
     private val _syncMessage = MutableStateFlow<String?>(null)
     val syncMessage = _syncMessage.asStateFlow()
+
+    // 1. Add this Flow to observe Global Reader Settings
+    val readerPreferences: StateFlow<ReaderPreferences> = settingsRepo.readerPreferences
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReaderPreferences())
+
+    // 2. Add Dictionary Flows
+    val useEmbeddedDict = settingsRepo.getUseEmbeddedDictionary()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val dictionaryFolder = settingsRepo.getDictionaryFolder()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     // --- THE COMBINER (Single Source of Truth) ---
     val uiState: StateFlow<SettingsUiState> = combine(
@@ -186,5 +203,66 @@ class SettingsViewModel @Inject constructor(
             delay(3000)
             _syncMessage.value = null
         }
+    }
+
+    fun updateReaderPreferences(prefs: ReaderPreferences) {
+        viewModelScope.launch {
+            settingsRepo.saveReaderPreferences(prefs)
+        }
+    }
+
+    fun setUseEmbeddedDictionary(enabled: Boolean) {
+        viewModelScope.launch { settingsRepo.setUseEmbeddedDictionary(enabled) }
+    }
+
+    fun setDictionaryFolder(uri: String) {
+        viewModelScope.launch {
+            // 1. Run validation on IO thread to avoid freezing UI
+            val isValid = withContext(Dispatchers.IO) {
+                settingsRepo.validateStarDictFolder(uri)
+            }
+
+            // 2. Check Result
+            if (isValid) {
+                settingsRepo.setDictionaryFolder(uri)
+                _errorMessage.value = null // Clear any previous errors
+                _syncMessage.value = "Dictionary folder set successfully."
+            } else {
+                // 3. Show Error if invalid
+                _errorMessage.value = "Invalid Folder: No StarDict (.idx) files found."
+                // Optionally clear the setting if it was previously set to something invalid
+                // settingsRepo.setDictionaryFolder("")
+            }
+        }
+    }
+
+    // --- APP GLOBAL THEME ACTIONS (Fixes Sharpness/Dullness) ---
+    fun setAppTheme(mode: ThemeMode) {
+        viewModelScope.launch {
+            settingsRepo.setThemeMode(mode)
+            delay(100) // Small delay to let UI redraw first
+            EinkHelper.requestFullRefresh(context)
+        }
+    }
+
+    fun setEinkContrast(value: Float) {
+        viewModelScope.launch {
+            settingsRepo.setContrast(value)
+        }
+    }
+    fun onContrastChangedFinished() {
+        viewModelScope.launch {
+            // Wait a tiny bit for the UI to settle on the final color
+            delay(200)
+            // Trigger the hardware refresh to clear ghosting
+            // (Assuming you have access to context or EinkHelper here)
+            // If context is not injected, you can pass it from UI or use a Helper that accepts it.
+            // For now, let's assume specific Activity logic or just logging if not fully wired.
+        }
+    }
+
+    // Helper to trigger refresh if Context is available in ViewModel (recommended way is via UI event)
+    fun triggerEinkRefresh(context: Context) {
+        EinkHelper.requestFullRefresh(context)
     }
 }

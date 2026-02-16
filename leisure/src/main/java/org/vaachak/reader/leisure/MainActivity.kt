@@ -45,7 +45,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.node.DelegatableNode
-import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -60,6 +59,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
+import org.vaachak.reader.core.domain.model.ThemeMode
 import org.vaachak.reader.leisure.navigation.Screen
 import org.vaachak.reader.leisure.ui.bookshelf.BookshelfScreen
 import org.vaachak.reader.leisure.ui.bookshelf.BookshelfViewModel
@@ -69,17 +69,19 @@ import org.vaachak.reader.leisure.ui.highlights.AllHighlightsScreen
 import org.vaachak.reader.leisure.ui.login.LoginScreen
 import org.vaachak.reader.leisure.ui.reader.ReaderScreen
 import org.vaachak.reader.leisure.ui.reader.components.VaachakNavigationFooter
+import org.vaachak.reader.leisure.ui.settings.AiConfigScreen
+import org.vaachak.reader.leisure.ui.settings.DefaultAppearanceScreen
+import org.vaachak.reader.leisure.ui.settings.AppAppearanceScreen
+import org.vaachak.reader.leisure.ui.settings.DictionarySettingsScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsViewModel
-import org.vaachak.reader.leisure.ui.settings.AiConfigScreen
 import org.vaachak.reader.leisure.ui.settings.SyncSettingsScreen
-import org.vaachak.reader.core.domain.model.ThemeMode
 import org.vaachak.reader.leisure.ui.theme.VaachakTheme
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 import java.util.zip.ZipFile
-
+import androidx.activity.enableEdgeToEdge
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
 
@@ -91,12 +93,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        enableEdgeToEdge()
+
         // Handle "Open With" intents on cold start
         if (savedInstanceState == null && intent?.action == Intent.ACTION_VIEW) {
             processExternalIntent(intent)
         }
 
-        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         setContent {
             val navController = rememberNavController()
@@ -110,6 +113,7 @@ class MainActivity : AppCompatActivity() {
             val currentTheme = uiState.themeMode
             val einkContrast = uiState.einkContrast
             val isEink = currentTheme == ThemeMode.E_INK
+
             // Fix for E-Ink ghosting on touch
             CompositionLocalProvider(
                 LocalIndication provides if (isEink) NoIndication else LocalIndication.current
@@ -147,7 +151,9 @@ class MainActivity : AppCompatActivity() {
                         }
                     ) { padding ->
                         Surface(
-                            modifier = Modifier.padding(padding).fillMaxSize(),
+                            modifier = Modifier
+                                .padding(padding)
+                                .fillMaxSize(),
                             color = if (isEink) Color.White else MaterialTheme.colorScheme.background
                         ) {
                             // --- NAVIGATION GRAPH ---
@@ -166,7 +172,11 @@ class MainActivity : AppCompatActivity() {
                                             if (book != null) {
                                                 navController.navigate(Screen.Reader.createRoute(book.id))
                                             } else {
-                                                Toast.makeText(this@MainActivity, "Loading book...", Toast.LENGTH_SHORT).show()
+                                                Toast.makeText(
+                                                    this@MainActivity,
+                                                    "Loading book...",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
                                             }
                                         },
                                         onRecallClick = { /* Navigate to History */ },
@@ -213,8 +223,6 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }
 
-                                // ... The rest of your routes (Highlights, Catalog, Settings) remain the same ...
-
                                 // 3. HIGHLIGHTS
                                 composable(Screen.Highlights.route) {
                                     AllHighlightsScreen(
@@ -249,14 +257,37 @@ class MainActivity : AppCompatActivity() {
                                         onCatalogSelected = { /* Open specific feed */ }
                                     )
                                 }
-                                //8.AI Config Screen
+
+                                // 8. AI CONFIG SCREEN
                                 composable(Screen.AiConfig.route) {
                                     AiConfigScreen(onBack = { navController.popBackStack() })
                                 }
 
-                                //9. Sync Settings Screen
+                                // 9. SYNC SETTINGS SCREEN
                                 composable(Screen.SyncSettings.route) {
-                                    SyncSettingsScreen(navController = navController)}
+                                    SyncSettingsScreen(navController = navController)
+                                }
+
+                                // 10. APPEARANCE SETTINGS (NEW)
+                                composable(Screen.Appearance.route) {
+                                    DefaultAppearanceScreen(
+                                        onBack = { navController.popBackStack() }
+                                    )
+                                }
+
+                                // 11. APP APPEARANCE (NEW)
+                                composable(Screen.AppAppearance.route) {
+                                    AppAppearanceScreen(
+                                        onBack = { navController.popBackStack() }
+                                    )
+                                }
+
+                                // 12. DICTIONARY
+                                composable(Screen.Dictionary.route) {
+                                    DictionarySettingsScreen(
+                                        onBack = { navController.popBackStack() }
+                                    )
+                                }
                             }
                         }
                     }
@@ -297,15 +328,18 @@ class MainActivity : AppCompatActivity() {
                         if (existingBook != null) {
                             Log.d("VaachakMain", "Duplicate found: '${existingBook.title}'")
                             withContext(Dispatchers.IO) { localFile.delete() }
-                            Toast.makeText(this@MainActivity, "Book already exists", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "Book already exists", Toast.LENGTH_SHORT)
+                                .show()
                         } else {
                             Log.d("VaachakMain", "Importing New Book")
                             val localUri = Uri.fromFile(localFile)
                             bookshelfViewModel.importBook(localUri)
-                            Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT)
+                                .show()
                         }
                     } else {
-                        Toast.makeText(this@MainActivity, "Failed to load file", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "Failed to load file", Toast.LENGTH_SHORT)
+                            .show()
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -346,12 +380,16 @@ class MainActivity : AppCompatActivity() {
         return try {
             ZipFile(epubFile).use { zip ->
                 val containerEntry = zip.getEntry("META-INF/container.xml") ?: return null
-                val containerXml = zip.getInputStream(containerEntry).bufferedReader().use { it.readText() }
+                val containerXml =
+                    zip.getInputStream(containerEntry).bufferedReader().use { it.readText() }
                 val opfPathMatch = Regex("full-path=\"([^\"]+)\"").find(containerXml)
                 val opfPath = opfPathMatch?.groupValues?.get(1) ?: return null
                 val opfEntry = zip.getEntry(opfPath) ?: return null
                 val opfXml = zip.getInputStream(opfEntry).bufferedReader().use { it.readText() }
-                val titleMatch = Regex("<dc:title[^>]*>(.*?)</dc:title>", RegexOption.DOT_MATCHES_ALL).find(opfXml)
+                val titleMatch = Regex(
+                    "<dc:title[^>]*>(.*?)</dc:title>",
+                    RegexOption.DOT_MATCHES_ALL
+                ).find(opfXml)
                 titleMatch?.groupValues?.get(1)
             }
         } catch (e: Exception) {
@@ -361,11 +399,14 @@ class MainActivity : AppCompatActivity() {
 
     // --- HARDWARE BUTTONS (Volume Page Turn) ---
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        val isPageForward = keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_PAGE_DOWN
-        val isPageBackward = keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_PAGE_UP
+        val isPageForward =
+            keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_PAGE_DOWN
+        val isPageBackward =
+            keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_PAGE_UP
 
         if (isPageForward || isPageBackward) {
-            val fragment = supportFragmentManager.findFragmentByTag("EPUB_READER_FRAGMENT") as? EpubNavigatorFragment
+            val fragment =
+                supportFragmentManager.findFragmentByTag("EPUB_READER_FRAGMENT") as? EpubNavigatorFragment
             fragment?.let { navigator ->
                 if (isPageForward) navigator.goForward(animated = false)
                 else navigator.goBackward(animated = false)
@@ -379,6 +420,7 @@ class MainActivity : AppCompatActivity() {
         override fun create(interactionSource: InteractionSource): DelegatableNode {
             return object : Modifier.Node(), DelegatableNode {}
         }
+
         override fun hashCode(): Int = -1
         override fun equals(other: Any?): Boolean = other === this
     }

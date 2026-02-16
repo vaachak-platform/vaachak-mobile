@@ -22,30 +22,56 @@
 
 package org.vaachak.reader.leisure.ui.settings
 
-
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
-
 import androidx.compose.material.icons.filled.Person
-
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import org.readium.r2.navigator.preferences.FontFamily
+import org.readium.r2.navigator.preferences.Theme
 import org.vaachak.reader.core.domain.model.UserProfile
+import org.vaachak.reader.leisure.R // Ensure R is imported
+import java.util.Locale
 
+// --- SHARED FONT DEFINITIONS ---
+val OpenDyslexicFamily = androidx.compose.ui.text.font.FontFamily(
+    Font(R.font.open_dyslexic_regular, FontWeight.Normal),
+    Font(R.font.open_dyslexic_bold, FontWeight.Bold)
+)
 
+val IAWriterFamily = androidx.compose.ui.text.font.FontFamily(
+    Font(R.font.ia_writer_duospace_regular, FontWeight.Normal),
+    Font(R.font.ia_writer_duospace_bold, FontWeight.Bold)
+)
 
-// --- 1. The Container for Sections (iOS/Android Hybrid Style) ---
+val AccessibleDfaFamily = androidx.compose.ui.text.font.FontFamily(
+    Font(R.font.accessible_dfa_regular, FontWeight.Normal)
+)
+
+val MonospaceFamily = androidx.compose.ui.text.font.FontFamily(
+    Font(R.font.monospace_regular, FontWeight.Normal),
+    Font(R.font.monospace_bold, FontWeight.Bold)
+)
+
+// --- 1. The Container for Sections ---
 @Composable
 fun SettingsGroup(
     title: String,
@@ -53,19 +79,17 @@ fun SettingsGroup(
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(modifier = modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        // Section Header
         Text(
             text = title.uppercase(),
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(start = 24.dp, bottom = 8.dp)
         )
-        // The "Card" Look
         Card(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(16.dp), // Modern rounded look
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
             )
         ) {
             Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -75,14 +99,13 @@ fun SettingsGroup(
     }
 }
 
-// --- 2. The Standard Row (The "Spoke") ---
+// --- 2. The Standard Row ---
 @Composable
 fun SettingsTile(
     icon: ImageVector,
     title: String,
     subtitle: String? = null,
     onClick: () -> Unit,
-    // Optional: Add a trailing element (Switch, Text, or Chevron)
     trailing: @Composable (() -> Unit)? = {
         Icon(
             imageVector = Icons.Default.ChevronRight,
@@ -98,20 +121,19 @@ fun SettingsTile(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Leading Icon
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = MaterialTheme.colorScheme.secondary,
             modifier = Modifier.size(24.dp)
         )
         Spacer(modifier = Modifier.width(16.dp))
 
-        // Text Content
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
             )
             if (subtitle != null) {
                 Text(
@@ -122,7 +144,6 @@ fun SettingsTile(
             }
         }
 
-        // Trailing Widget (Arrow or Switch)
         if (trailing != null) {
             Spacer(modifier = Modifier.width(8.dp))
             trailing()
@@ -130,7 +151,7 @@ fun SettingsTile(
     }
 }
 
-// --- 3. The "Hub" (User Profile Card) ---
+// --- 3. The User Profile Card ---
 @Composable
 fun UserProfileCard(
     profile: UserProfile,
@@ -142,7 +163,7 @@ fun UserProfileCard(
             .fillMaxWidth()
             .padding(16.dp)
             .clickable { if (profile.isAuthenticated) onManageClick() else onLoginClick() },
-        shape = RoundedCornerShape(24.dp), // Extra rounded for emphasis
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (profile.isAuthenticated)
                 MaterialTheme.colorScheme.primaryContainer
@@ -154,7 +175,6 @@ fun UserProfileCard(
             modifier = Modifier.padding(20.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar Circle
             Box(
                 modifier = Modifier
                     .size(56.dp)
@@ -172,13 +192,13 @@ fun UserProfileCard(
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            // Text Info
             Column(modifier = Modifier.weight(1f)) {
                 if (profile.isAuthenticated) {
                     Text(
                         text = profile.username ?: "User",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "Sync Active • ${profile.deviceName}",
@@ -189,7 +209,8 @@ fun UserProfileCard(
                     Text(
                         text = "Sign in to Sync",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = "Backup your library & progress",
@@ -199,7 +220,6 @@ fun UserProfileCard(
                 }
             }
 
-            // Chevron
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = null,
@@ -208,6 +228,300 @@ fun UserProfileCard(
         }
     }
 }
+
+// --- Preview Components ---
+
+@Composable
+fun CustomThemePreviewCard(
+    themeStr: String,
+    fontName: String,
+    fontSize: Double,
+    lineHeight: Double
+) {
+    val theme = when(themeStr) { "dark" -> Theme.DARK; "sepia" -> Theme.SEPIA; else -> Theme.LIGHT }
+    val (bg, fg) = when(theme) {
+        Theme.DARK -> Color(0xFF121212) to Color(0xFFE0E0E0)
+        Theme.SEPIA -> Color(0xFFF5E6D3) to Color(0xFF5F4B32)
+        else -> Color.White to Color.Black
+    }
+
+    val name = fontName.lowercase()
+    val previewFont = when {
+        name.contains("writer") -> IAWriterFamily
+        name.contains("dyslexic") -> OpenDyslexicFamily
+        name.contains("accessible") -> AccessibleDfaFamily
+        name.contains("mono") -> MonospaceFamily
+        name.contains("serif") && !name.contains("sans") -> androidx.compose.ui.text.font.FontFamily.Serif
+        name.contains("cursive") -> androidx.compose.ui.text.font.FontFamily.Cursive
+        name.contains("sans") -> androidx.compose.ui.text.font.FontFamily.SansSerif
+        else -> androidx.compose.ui.text.font.FontFamily.Default
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = bg),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "The quick brown fox jumps over the lazy dog.\nThis is a second line to demonstrate height.\nAnd a third line for good measure.",
+                color = fg,
+                fontSize = (16 * fontSize).sp,
+                lineHeight = (16 * fontSize * lineHeight).sp,
+                fontFamily = previewFont,
+                textAlign = TextAlign.Start
+            )
+        }
+    }
+}
+
+@Composable
+fun FontFamilyGrid(
+    currentFamily: FontFamily?,
+    enabled: Boolean,
+    onSelect: (FontFamily?) -> Unit
+) {
+    val fonts = listOf(
+        "Original" to null,
+        "Sans" to FontFamily.SANS_SERIF,
+        "Serif" to FontFamily.SERIF,
+        "Mono" to FontFamily.MONOSPACE,
+        "Cursive" to FontFamily.CURSIVE,
+        "Dyslexic" to FontFamily.OPEN_DYSLEXIC,
+        "Accessible" to FontFamily.ACCESSIBLE_DFA,
+        "Writer" to FontFamily.IA_WRITER_DUOSPACE
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        fonts.chunked(4).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { (name, family) ->
+                    val isSelected = currentFamily?.name == family?.name
+                    val bgColor = if (isSelected && enabled) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                    val borderColor = when {
+                        !enabled -> MaterialTheme.colorScheme.outline.copy(alpha=0.2f)
+                        isSelected -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.outline
+                    }
+                    val textColor = when {
+                        !enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha=0.38f)
+                        isSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(bgColor)
+                            .border(if(isSelected) 2.dp else 1.dp, borderColor, RoundedCornerShape(8.dp))
+                            .clickable(enabled = enabled) { onSelect(family) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = name,
+                            fontSize = 11.sp,
+                            fontWeight = if(isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = textColor,
+                            maxLines = 1,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LabelledSlider(
+    label: String,
+    value: Float?, // Nullable for Auto
+    defaultVisualValue: Float,
+    range: ClosedFloatingPointRange<Float>,
+    unit: String,
+    activeColor: Color,
+    enabled: Boolean,
+    onValueChange: (Float) -> Unit
+) {
+    val isOverridden = (value != null)
+
+    val currentColor = if (isOverridden && enabled) activeColor else Color.Gray.copy(alpha = 0.6f)
+    val labelText = if (isOverridden) String.format(Locale.US, "%.1f%s", value, unit) else "Auto"
+    val labelFontWeight = if (isOverridden) FontWeight.Bold else FontWeight.Normal
+
+    Column {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.bodySmall, fontSize = 12.sp, color = if(enabled) Color.Unspecified else Color.Gray)
+            Text(labelText, style = MaterialTheme.typography.bodySmall, fontSize = 12.sp, fontWeight = labelFontWeight, color = currentColor)
+        }
+        Slider(
+            value = value ?: defaultVisualValue,
+            onValueChange = onValueChange,
+            valueRange = range,
+            enabled = enabled,
+            modifier = Modifier.height(16.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = currentColor,
+                activeTrackColor = currentColor,
+                inactiveTrackColor = currentColor.copy(alpha = 0.24f),
+                disabledThumbColor = Color.Gray,
+                disabledActiveTrackColor = Color.Gray.copy(alpha=0.3f)
+            )
+        )
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
+fun ThemeOption(
+    name: String,
+    bg: Color,
+    fg: Color,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable(enabled = enabled) { onClick() }
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(if (enabled) bg else Color.Gray.copy(alpha=0.1f))
+                .border(
+                    if (selected && enabled) 2.dp else 1.dp,
+                    if (enabled) (if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline) else Color.Transparent,
+                    CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "Aa",
+                color = if (enabled) fg else Color.Gray,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp
+            )
+        }
+        Text(
+            name,
+            style = MaterialTheme.typography.labelSmall,
+            color = if(enabled) MaterialTheme.colorScheme.onSurface else Color.Gray,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+@Composable
+fun CompactSettingsToggle(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    primaryColor: Color,
+    isEink: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val borderColor = if (isEink) Color.Black else Color.Gray.copy(alpha = 0.3f)
+    val bgColor = if (checked) primaryColor.copy(alpha = 0.05f) else Color.Transparent
+
+    Column(
+        modifier = modifier
+            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor)
+            .clickable { onCheckedChange(!checked) }
+            .padding(12.dp),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+            )
+            Switch(
+                checked = checked,
+                onCheckedChange = null,
+                modifier = Modifier.scale(0.7f).height(24.dp),
+                colors = SwitchDefaults.colors(checkedTrackColor = primaryColor)
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.Gray,
+            fontSize = 11.sp,
+            lineHeight = 12.sp
+        )
+    }
+}
+
+@Composable
+fun AlignmentOption(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    activeColor: Color,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.width(60.dp).clickable(enabled = enabled) { onClick() }
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (selected && enabled) activeColor.copy(alpha=0.1f) else Color.Transparent)
+                .border(
+                    1.dp,
+                    if(selected && enabled) activeColor else Color.Gray.copy(alpha = if(enabled) 0.5f else 0.2f),
+                    RoundedCornerShape(8.dp)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                icon,
+                null,
+                tint = if(!enabled) Color.Gray.copy(alpha=0.5f) else if(selected) activeColor else Color.Gray,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+            fontWeight = if(selected) FontWeight.Bold else FontWeight.Normal,
+            color = if(enabled) Color.Unspecified else Color.Gray
+        )
+    }
+}
+
+@Composable
+fun SettingsSectionTitle(title: String) {
+    Text(
+        text = title.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(bottom = 2.dp)
+    )
+}
+
 
 
 

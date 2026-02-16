@@ -39,7 +39,7 @@ import javax.inject.Singleton
 //UI rewrite
 import kotlinx.coroutines.flow.combine
 import org.vaachak.reader.core.domain.model.AiConfig
-
+import org.vaachak.reader.core.domain.model.ReaderPreferences
 
 @Singleton
 class SettingsRepository @Inject constructor(
@@ -122,16 +122,36 @@ class SettingsRepository @Inject constructor(
     }
 
     // --- READER PREF FLOWS ---
+    // CHANGE: Remove the `?: 1.0` defaults. Return nullable types.
+    val readerLineHeight: Flow<Double?> = dataStore.data.map { it[READER_LINE_HEIGHT] }
+    val readerTextAlign: Flow<String?> = dataStore.data.map { it[READER_TEXT_ALIGN] }
+    val readerParaSpacing: Flow<Double?> = dataStore.data.map { it[READER_PARAGRAPH_SPACING] }
+    val readerMarginSide: Flow<Double?> = dataStore.data.map { it[READER_MARGIN_SIDE] }
+    val readerLetterSpacing: Flow<Double?> = dataStore.data.map { it[READER_LETTER_SPACING] }
+
+    // KEEP these as non-null defaults (Display Settings)
     val readerFontFamily: Flow<String?> = dataStore.data.map { it[READER_FONT_FAMILY] }
     val readerFontSize: Flow<Double> = dataStore.data.map { it[READER_FONT_SIZE] ?: 1.0 }
-    val readerTextAlign: Flow<String> = dataStore.data.map { it[READER_TEXT_ALIGN] ?: "justify" }
     val readerTheme: Flow<String> = dataStore.data.map { it[READER_THEME] ?: "light" }
     val readerPublisherStyles: Flow<Boolean> = dataStore.data.map { it[READER_PUBLISHER_STYLES] ?: true }
-    val readerLetterSpacing: Flow<Double> = dataStore.data.map { it[READER_LETTER_SPACING] ?: 1.0 }
-    val readerLineHeight: Flow<Double> = dataStore.data.map { it[READER_LINE_HEIGHT] ?: 1.0}
-    val readerParaSpacing: Flow<Double> = dataStore.data.map { it[READER_PARAGRAPH_SPACING]  ?: 1.0 }
-    val readerMarginSide: Flow<Double> = dataStore.data.map { it[READER_MARGIN_SIDE] ?: 1.0 }
 
+    // UPDATE: The Combine Block to handle nulls
+    val readerPreferences: Flow<ReaderPreferences> = combine(
+        readerFontFamily, readerFontSize, readerTextAlign, readerTheme, readerPublisherStyles,
+        readerLineHeight, readerLetterSpacing, readerParaSpacing, readerMarginSide
+    ) { args ->
+        ReaderPreferences(
+            fontFamily = args[0] as? String,
+            fontSize = args[1] as Double,
+            textAlign = args[2] as? String,  // Now Nullable
+            theme = args[3] as String,
+            publisherStyles = args[4] as Boolean,
+            lineHeight = args[5] as? Double, // Now Nullable
+            letterSpacing = args[6] as? Double,
+            paragraphSpacing = args[7] as? Double,
+            pageMargins = args[8] as? Double
+        )
+    }
     // Dictionary Flows
     fun getUseEmbeddedDictionary(): Flow<Boolean> = dataStore.data.map { it[USE_EMBEDDED_DICT] ?: false }
     fun getDictionaryFolder(): Flow<String> = dataStore.data.map { it[DICTIONARY_FOLDER_KEY] ?: "" }
@@ -209,17 +229,10 @@ class SettingsRepository @Inject constructor(
     suspend fun clearSettings() { dataStore.edit { it.clear() } }
 
     suspend fun updateReaderPreferences(
-        fontFamily: String? = null,
-        fontSize: Double? = null,
-        textAlign: String? = null,
-        theme: String? = null,
-        publisherStyles: Boolean? = null,
-        letterSpacing: Double? = null,
-        lineHeight: Double? = null,
-        paraSpacing: Double? = null,
-        marginSide: Double? = null,
-        marginTop: Double? = null,
-        marginBottom: Double? = null
+        fontFamily: String? = null, fontSize: Double? = null, textAlign: String? = null,
+        theme: String? = null, publisherStyles: Boolean? = null, letterSpacing: Double? = null,
+        lineHeight: Double? = null, paraSpacing: Double? = null, marginSide: Double? = null,
+        marginTop: Double? = null, marginBottom: Double? = null
     ) {
         dataStore.edit { prefs ->
             fontFamily?.let { prefs[READER_FONT_FAMILY] = it }
@@ -280,6 +293,69 @@ class SettingsRepository @Inject constructor(
             prefs[CF_URL] = cfUrl.trim().removeSuffix("/")
             prefs[CF_TOKEN] = token.trim()
             prefs[AUTO_SAVE_RECAPS_KEY] = autoSave
+        }
+    }
+
+
+    // --- NEW: Unified Save Function ---
+    suspend fun saveReaderPreferences(prefs: ReaderPreferences) {
+        dataStore.edit { preferences ->
+            // 1. Meta-settings (Theme/Publisher Styles are Non-Null in model, so always save)
+            preferences[READER_THEME] = prefs.theme
+
+            // 2. CHECK: Is Publisher Styles ON?
+            if (prefs.publisherStyles) {
+                // --- DESTRUCTIVE RESET ---
+                preferences[READER_PUBLISHER_STYLES] = true
+
+                preferences.remove(READER_FONT_FAMILY)
+                preferences.remove(READER_FONT_SIZE)
+                preferences.remove(READER_TEXT_ALIGN)
+                preferences.remove(READER_LINE_HEIGHT)
+                preferences.remove(READER_LETTER_SPACING)
+                preferences.remove(READER_PARAGRAPH_SPACING)
+                preferences.remove(READER_MARGIN_SIDE)
+            } else {
+                // --- NORMAL SAVE ---
+                preferences[READER_PUBLISHER_STYLES] = false
+
+                // Font Family (Nullable)
+                if (prefs.fontFamily != null) {
+                    preferences[READER_FONT_FAMILY] = prefs.fontFamily!!
+                } else {
+                    preferences.remove(READER_FONT_FAMILY)
+                }
+
+                // Font Size (Double, Non-Nullable in model)
+                // WARNING FIX: Removed 'if (prefs.fontSize != null)' check
+                preferences[READER_FONT_SIZE] = prefs.fontSize
+
+                // Text Align (Nullable)
+                if (prefs.textAlign != null) {
+                    preferences[READER_TEXT_ALIGN] = prefs.textAlign!!
+                } else {
+                    preferences.remove(READER_TEXT_ALIGN)
+                }
+
+                // Layout (Nullable)
+                if (prefs.lineHeight != null) preferences[READER_LINE_HEIGHT] = prefs.lineHeight!! else preferences.remove(READER_LINE_HEIGHT)
+                if (prefs.letterSpacing != null) preferences[READER_LETTER_SPACING] = prefs.letterSpacing!! else preferences.remove(READER_LETTER_SPACING)
+                if (prefs.paragraphSpacing != null) preferences[READER_PARAGRAPH_SPACING] = prefs.paragraphSpacing!! else preferences.remove(READER_PARAGRAPH_SPACING)
+                if (prefs.pageMargins != null) preferences[READER_MARGIN_SIDE] = prefs.pageMargins!! else preferences.remove(READER_MARGIN_SIDE)
+            }
+        }
+    }
+    suspend fun resetLayoutPreferences() {
+        dataStore.edit { preferences ->
+            // Remove specific layout keys
+            preferences.remove(READER_LINE_HEIGHT)
+            preferences.remove(READER_TEXT_ALIGN)
+            preferences.remove(READER_PARAGRAPH_SPACING)
+            preferences.remove(READER_MARGIN_SIDE)
+            preferences.remove(READER_LETTER_SPACING)
+
+            // Ensure Publisher Styles is OFF so custom fonts (if set) still show
+            preferences[READER_PUBLISHER_STYLES] = false
         }
     }
 

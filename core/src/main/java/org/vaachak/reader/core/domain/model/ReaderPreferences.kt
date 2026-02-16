@@ -20,25 +20,28 @@
  *  * SOFTWARE.
  */
 
-package org.vaachak.reader.leisure.navigation
+package org.vaachak.reader.core.domain.model
 
-sealed class Screen(val route: String) {
-    data object Library : Screen("library")
-    data object Highlights : Screen("highlights")
-    data object CatalogBrowser : Screen("catalog_browser")
-    data object Settings : Screen("settings")
-    data object Login : Screen("login")
-    data object CatalogManage : Screen("catalog_manage")
+/**
+ * Pure Kotlin Data Class holding all visual preferences.
+ * Uses Primitives (String, Double) to ensure KMP compatibility.
+ */
+data class ReaderPreferences(
+    val theme: String = "light",
+    val fontSize: Double = 1.0,
+    val publisherStyles: Boolean = true,
 
-    // Dynamic Route for Reader
-    data object Reader : Screen("reader/{bookId}") {
-        fun createRoute(bookId: Long) = "reader/$bookId"
-    }
-
-    // Settings Sub-screens
-    data object AiConfig : Screen("ai_config")
-    data object SyncSettings : Screen("sync_settings")
-    data object Appearance : Screen("settings/appearance")
-    data object AppAppearance : Screen("settings/app_appearance")
-    data object Dictionary : Screen("settings/dictionary")
-}
+    // CHANGE: These must be nullable to support "Original Layout"
+    val fontFamily: String? = null,
+    val textAlign: String? = null,
+    val lineHeight: Double? = null,
+    val letterSpacing: Double? = null,
+    val paragraphSpacing: Double? = null,
+    val pageMargins: Double? = null,
+    val wordSpacing: Double? = null,
+    val paragraphIndent: Double? = null,
+    val hyphens: Boolean? = null,
+    val ligatures: Boolean? = null,
+    val marginTop: Double? = null,
+    val marginBottom: Double? = null
+)

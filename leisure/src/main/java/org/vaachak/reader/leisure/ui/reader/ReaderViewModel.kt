@@ -592,6 +592,10 @@ class ReaderViewModel @Inject constructor(
             }
         }
     }
-
+    fun resetLayoutToDefaults() {
+        viewModelScope.launch {
+            settingsRepo.resetLayoutPreferences()
+        }
+    }
 
 }
