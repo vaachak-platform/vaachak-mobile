@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 
@@ -57,22 +58,21 @@ import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 @Composable
 fun CatalogBrowserScreen(
     onBack: () -> Unit,
-    onReadBook: (String) -> Unit,        // NEW: Open Reader
-    onGoToBookshelf: () -> Unit,         // NEW: Navigate to Bookshelf
+    onReadBook: (String) -> Unit,
+    onGoToBookshelf: () -> Unit,
     viewModel: CatalogViewModel = hiltViewModel()
 ) {
-    val feedItems by viewModel.feedItems.collectAsState()
-    val screenTitle by viewModel.screenTitle.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val isEink by viewModel.isEinkEnabled.collectAsState()
-    val isOffline by viewModel.isOfflineMode.collectAsState()
+    val feedItems by viewModel.feedItems.collectAsStateWithLifecycle()
+    val screenTitle by viewModel.screenTitle.collectAsStateWithLifecycle()
+    val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val isEink by viewModel.isEinkEnabled.collectAsStateWithLifecycle()
+    val isOffline by viewModel.isOfflineMode.collectAsStateWithLifecycle()
 
-    val breadcrumbs by viewModel.breadcrumbs.collectAsState()
+    val breadcrumbs by viewModel.breadcrumbs.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     val paginationItem = feedItems.filterIsInstance<CatalogItem.Pagination>().firstOrNull()
 
-    // NEW: Handle UI Events
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collect { event ->
             when (event) {
@@ -82,10 +82,8 @@ fun CatalogBrowserScreen(
                         actionLabel = event.actionLabel,
                         duration = SnackbarDuration.Short
                     )
-                    if (result == SnackbarResult.ActionPerformed) {
-                        if (event.actionLabel == "View Library") {
-                            onGoToBookshelf()
-                        }
+                    if (result == SnackbarResult.ActionPerformed && event.actionLabel == "View Library") {
+                        onGoToBookshelf()
                     }
                 }
                 is CatalogUiEvent.NavigateToReader -> {
@@ -148,6 +146,7 @@ fun CatalogBrowserScreen(
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(feedItems) { item ->
                             when (item) {
+                                is CatalogItem.Server -> CatalogServerItem(item, isEink) { viewModel.handleItemClick(item) }
                                 is CatalogItem.Folder -> CatalogFolderItem(item, isEink) { viewModel.handleItemClick(item) }
                                 is CatalogItem.Book -> CatalogBookItem(item, isEink) { viewModel.handleItemClick(item) }
                                 is CatalogItem.Pagination -> {
@@ -172,6 +171,19 @@ fun CatalogBrowserScreen(
 }
 
 // --- COMPONENTS ---
+
+@Composable
+fun CatalogServerItem(item: CatalogItem.Server, isEink: Boolean, onClick: () -> Unit) {
+    val textColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
+    ListItem(
+        colors = ListItemDefaults.colors(containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.surface, headlineColor = textColor),
+        headlineContent = { Text(item.title, fontWeight = FontWeight.Bold) },
+        supportingContent = { Text(item.url, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall) },
+        leadingContent = { Icon(Icons.Default.Dns, null, tint = if(isEink) Color.Black else MaterialTheme.colorScheme.primary) },
+        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color.Gray) },
+        modifier = Modifier.clickable(onClick = onClick)
+    )
+}
 
 @Composable
 fun CatalogPaginationItem(
@@ -261,17 +273,13 @@ fun CatalogBookItem(item: CatalogItem.Book, isEink: Boolean, onClick: () -> Unit
     val textColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
     val subColor = if (isEink) Color.DarkGray else MaterialTheme.colorScheme.onSurfaceVariant
     val isNavigable = item.format == "DETAIL"
-
-    // Check if book exists using the new existingBookUri property
     val isDownloaded = item.existingBookUri != null
 
     val icon = when {
-        isDownloaded -> Icons.AutoMirrored.Filled.MenuBook // "Read" icon
+        isDownloaded -> Icons.AutoMirrored.Filled.MenuBook
         isNavigable -> Icons.AutoMirrored.Filled.ArrowForwardIos
         else -> Icons.Default.CloudDownload
     }
-
-    // Green tint if downloaded
     val iconTint = if (isEink) Color.Black else if (isDownloaded) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary
 
     ListItem(

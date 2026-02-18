@@ -30,14 +30,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 import java.io.File
-import androidx.compose.runtime.getValue // CRITICAL
-import androidx.compose.runtime.setValue // CRITICAL
-import androidx.compose.runtime.collectAsState
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -47,21 +45,20 @@ fun BookshelfScreen(
     onRecallClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onCatalogClick: () -> Unit,
+    onHighlightsClick: () -> Unit,
     viewModel: BookshelfViewModel = hiltViewModel()
 ) {
-    val allBooks by viewModel.allBooks.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
-    val libraryBooks by viewModel.filteredLibraryBooks.collectAsState()
-    val continueReadingBooks by viewModel.recentBooks.collectAsState()
-    val isEink by viewModel.isEinkEnabled.collectAsState()
-    val isOfflineMode by viewModel.isOfflineModeEnabled.collectAsState()
+    val allBooks by viewModel.allBooks.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val libraryBooks by viewModel.filteredLibraryBooks.collectAsStateWithLifecycle()
+    val continueReadingBooks by viewModel.recentBooks.collectAsStateWithLifecycle()
+    val isEink by viewModel.isEinkEnabled.collectAsStateWithLifecycle()
+    val isOfflineMode by viewModel.isOfflineModeEnabled.collectAsStateWithLifecycle()
 
-    // Sync States
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
-    val lastSyncTime by viewModel.lastSyncTime.collectAsState(initial = 0L)
-    val syncUsername by viewModel.syncUserName.collectAsState()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val lastSyncTime by viewModel.lastSyncTime.collectAsStateWithLifecycle(initialValue = 0L)
+    val syncUsername by viewModel.syncUserName.collectAsStateWithLifecycle()
 
-    // Ticker to refresh "Relative Time" every minute
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -71,14 +68,14 @@ fun BookshelfScreen(
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val snackbarMessage by viewModel.snackbarMessage.collectAsState()
-    val sortOrder by viewModel.sortOrder.collectAsState()
+    val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
+    val sortOrder by viewModel.sortOrder.collectAsStateWithLifecycle()
     var showSortMenu by remember { mutableStateOf(false) }
-    val recapState by viewModel.recapState.collectAsState()
-    val loadingUri by viewModel.isLoadingRecap.collectAsState()
+    val recapState by viewModel.recapState.collectAsStateWithLifecycle()
+    val loadingUri by viewModel.isLoadingRecap.collectAsStateWithLifecycle()
 
-    val bookmarksSheetUri by viewModel.bookmarksSheetBookUri.collectAsState()
-    val selectedBookBookmarks by viewModel.selectedBookBookmarks.collectAsState()
+    val bookmarksSheetUri by viewModel.bookmarksSheetBookUri.collectAsStateWithLifecycle()
+    val selectedBookBookmarks by viewModel.selectedBookBookmarks.collectAsStateWithLifecycle()
 
     LaunchedEffect(snackbarMessage) {
         snackbarMessage?.let { message ->
@@ -112,7 +109,9 @@ fun BookshelfScreen(
                                 Icon(Icons.Default.Sync, "Sync Library", Modifier.size(22.dp))
                             }
                         }
-
+                        IconButton(onClick = onHighlightsClick) {
+                            Icon(Icons.Default.EditNote, "My Highlights", Modifier.size(22.dp))
+                        }
                         if (!isOfflineMode) {
                             IconButton(onClick = onCatalogClick) {
                                 Icon(Icons.Default.Public, "Online Catalog", Modifier.size(22.dp))
@@ -127,7 +126,6 @@ fun BookshelfScreen(
                     }
                 )
 
-                // --- SYNC STATUS BAR ---
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -136,30 +134,17 @@ fun BookshelfScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val isError = snackbarMessage?.contains("failed", ignoreCase = true) == true
-
                     val statusText = when {
                         isRefreshing -> "Syncing..."
                         isError -> "Sync error"
-                        else -> if (lastSyncTime > 0) {
-                            "Last synced for $syncUsername: ${formatRelativeTime(lastSyncTime)}"
-                        } else {
-                            "Not synced yet"
-                        }
+                        else -> if (lastSyncTime > 0) "Last synced for $syncUsername: ${formatRelativeTime(lastSyncTime)}" else "Not synced yet"
                     }
-
                     val statusColor = when {
                         isRefreshing -> if (isEink) Color.Black else MaterialTheme.colorScheme.primary
                         isError -> MaterialTheme.colorScheme.error
                         else -> if (isEink) Color.Black else Color.Gray
                     }
-
-
-
-                    Text(
-                        text = statusText,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = statusColor
-                    )
+                    Text(text = statusText, style = MaterialTheme.typography.labelSmall, color = statusColor)
                 }
             }
         },
@@ -179,26 +164,18 @@ fun BookshelfScreen(
         containerColor = containerColor
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-
             if (allBooks.isEmpty()) {
                 EmptyShelfPlaceholder(PaddingValues(0.dp), isEink)
             } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 88.dp)
-                ) {
+                LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
                     if (continueReadingBooks.isNotEmpty() && searchQuery.isEmpty()) {
                         item {
                             BookshelfSectionLabel("Continue Reading", isEink)
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
+                            LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 items(continueReadingBooks, key = { it.id }) { book ->
                                     BookCard(
                                         book = book, isCompact = true, isEink = isEink,
-                                        showRecap = !isOfflineMode,
-                                        showBookmarks = true,
+                                        showRecap = !isOfflineMode, showBookmarks = true,
                                         isLoadingRecap = loadingUri == book.uriString,
                                         onClick = { onBookClick(book.uriString) },
                                         onDelete = { viewModel.deleteBookByUri(book.uriString) },
@@ -208,20 +185,13 @@ fun BookshelfScreen(
                                 }
                             }
                             Spacer(modifier = Modifier.height(16.dp))
-                            HorizontalDivider(
-                                modifier = Modifier.padding(horizontal = 16.dp),
-                                thickness = if (isEink) 1.dp else 0.5.dp,
-                                color = if (isEink) Color.Black else MaterialTheme.colorScheme.outlineVariant
-                            )
+                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = if (isEink) 1.dp else 0.5.dp, color = if (isEink) Color.Black else MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
 
                     item {
                         LibraryControls(
-                            searchQuery = searchQuery,
-                            sortOrder = sortOrder,
-                            showSortMenu = showSortMenu,
-                            isEink = isEink,
+                            searchQuery = searchQuery, sortOrder = sortOrder, showSortMenu = showSortMenu, isEink = isEink,
                             onSearchChange = { viewModel.updateSearchQuery(it) },
                             onSortClick = { showSortMenu = true },
                             onSortDismiss = { showSortMenu = false },
@@ -233,10 +203,7 @@ fun BookshelfScreen(
                         item { SearchEmptyState(searchQuery, isEink) { viewModel.updateSearchQuery("") } }
                     } else {
                         items(libraryBooks.chunked(3)) { rowBooks ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 for (book in rowBooks) {
                                     Box(modifier = Modifier.weight(1f)) {
                                         BookCard(
@@ -258,7 +225,6 @@ fun BookshelfScreen(
             }
         }
 
-        // --- Dialogs & BottomSheets (Remain unchanged) ---
         continueReadingBooks.forEach { book ->
             recapState[book.uriString]?.let { recap ->
                 AlertDialog(
@@ -284,7 +250,15 @@ fun BookshelfScreen(
                         LazyColumn {
                             items(selectedBookBookmarks) { bookmark ->
                                 Card(
-                                    onClick = { viewModel.dismissBookmarksSheet(); onBookmarkClick(bookmark.publicationId, bookmark.locatorJson) },
+                                    // FIX: Safe call with Elvis operator
+                                    onClick = {
+                                        viewModel.dismissBookmarksSheet()
+                                        val pubId = bookmark.publicationId ?: ""
+                                        val loc = bookmark.locatorJson ?: ""
+                                        if (pubId.isNotEmpty() && loc.isNotEmpty()) {
+                                            onBookmarkClick(pubId, loc)
+                                        }
+                                    },
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                                 ) {
                                     Column(modifier = Modifier.padding(12.dp)) { Text(bookmark.text ?: "Bookmark") }
@@ -297,24 +271,7 @@ fun BookshelfScreen(
         }
     }
 }
-
-// --- HELPER FUNCTIONS ---
-
-fun formatRelativeTime(timestamp: Long): String {
-    if (timestamp == 0L) return "Never synced"
-    val now = System.currentTimeMillis()
-    val diff = now - timestamp
-
-    return when {
-        diff < 60_000 -> "Just now"
-        diff < 3600_000 -> "${diff / 60_000}m ago"
-        diff < 86400_000 -> "${diff / 3600_000}h ago"
-        else -> "${diff / 86400_000}d ago"
-    }
-}
-
-// --- COMPONENTS ---
-
+// ... [Helper functions remain same as previous version] ...
 @Composable
 fun BookshelfSectionLabel(text: String, isEink: Boolean) {
     Text(
@@ -424,19 +381,8 @@ fun BookCard(
                         if (book.progress > .99) pct = 100
 
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "${pct}% read",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if(isEink) Color.Black else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(bottom = 2.dp)
-                        )
-                        LinearProgressIndicator(
-                            progress = { book.progress.toFloat() },
-                            modifier = Modifier.fillMaxWidth().height(3.dp),
-                            color = if(isEink) Color.Black else MaterialTheme.colorScheme.primary,
-                            trackColor = Color.LightGray,
-                        )
+                        Text(text = "${pct}% read", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if(isEink) Color.Black else MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 2.dp))
+                        LinearProgressIndicator(progress = { book.progress.toFloat() }, modifier = Modifier.fillMaxWidth().height(3.dp), color = if(isEink) Color.Black else MaterialTheme.colorScheme.primary, trackColor = Color.LightGray)
                     }
                 }
             }
@@ -454,14 +400,7 @@ fun BookCard(
 }
 
 @Composable
-fun SmallIconButton(
-    icon: ImageVector,
-    onClick: () -> Unit,
-    isLoading: Boolean = false,
-    isEink: Boolean,
-    isDestructive: Boolean,
-    isPrimary: Boolean = false
-) {
+fun SmallIconButton(icon: ImageVector, onClick: () -> Unit, isLoading: Boolean = false, isEink: Boolean, isDestructive: Boolean, isPrimary: Boolean = false) {
     val bgColor = when {
         isEink && isDestructive -> Color.Black
         isEink -> Color.White
@@ -481,5 +420,17 @@ fun SmallIconButton(
             if (isLoading) CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp, color = iconColor)
             else Icon(icon, null, modifier = Modifier.size(14.dp), tint = iconColor)
         }
+    }
+}
+fun formatRelativeTime(timestamp: Long): String {
+    if (timestamp == 0L) return "Never synced"
+    val now = System.currentTimeMillis()
+    val diff = now - timestamp
+
+    return when {
+        diff < 60_000 -> "Just now"
+        diff < 3600_000 -> "${diff / 60_000}m ago"
+        diff < 86400_000 -> "${diff / 3600_000}h ago"
+        else -> "${diff / 86400_000}d ago"
     }
 }

@@ -39,6 +39,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.readium.r2.shared.publication.Link
 
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TableOfContents(
     toc: List<Link>,
@@ -56,16 +58,23 @@ fun TableOfContents(
 
     Scaffold(
         topBar = {
-            VaachakHeader(
-                title = "Table of Contents",
-                showBackButton = false,
-                isEink = isEink,
-                onBack = {},
-                actions = {
+            TopAppBar(
+                title = { Text("Table of Contents") },
+                // MOVED TO LEFT (navigationIcon)
+                navigationIcon = {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = contentColor)
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close TOC",
+                            tint = contentColor
+                        )
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = containerColor,
+                    titleContentColor = contentColor,
+                    navigationIconContentColor = contentColor
+                )
             )
         },
         containerColor = containerColor

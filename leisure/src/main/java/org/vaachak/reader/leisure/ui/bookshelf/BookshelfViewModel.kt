@@ -42,15 +42,8 @@ import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
 import javax.inject.Inject
 
-/**
- * Enum representing the sorting order for books.
- */
 enum class SortOrder { TITLE, AUTHOR, DATE_ADDED }
 
-/**
- * ViewModel for the Bookshelf screen.
- * Manages the list of books, importing new books, sorting, and sync.
- */
 @HiltViewModel
 class BookshelfViewModel @Inject constructor(
     private val bookDao: BookDao,
@@ -58,38 +51,32 @@ class BookshelfViewModel @Inject constructor(
     private val highlightDao: HighlightDao,
     private val aiRepository: AiRepository,
     private val settingsRepo: SettingsRepository,
-    private val syncRepository: SyncRepository, // NEW: Sync Logic
+    private val syncRepository: SyncRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    // In BookshelfViewModel.kt
+    // --- SYNC & SETTINGS ---
     val lastSyncTime: StateFlow<Long> = settingsRepo.lastSyncTimestamp
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = 0L
-        )
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
     val syncUserName: StateFlow<String> = settingsRepo.syncUsername
-        .stateIn(
-            scope = viewModelScope, SharingStarted.WhileSubscribed(5000),"")
-    // --- STATE: THEME ---
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
     val isEinkEnabled: StateFlow<Boolean> = settingsRepo.isEinkEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val isOfflineModeEnabled: StateFlow<Boolean> = settingsRepo.isOfflineModeEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    // --- STATE: SYNC ---
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing = _isRefreshing.asStateFlow()
 
-    // --- STATE: SNACKBAR ---
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage = _snackbarMessage.asStateFlow()
 
     fun clearSnackbarMessage() { _snackbarMessage.value = null }
 
-    // --- STATE: BOOKS ---
+    // --- BOOKS & SORTING ---
     val allBooks: StateFlow<List<BookEntity>> = bookDao.getAllBooksSortedByRecent()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -102,12 +89,8 @@ class BookshelfViewModel @Inject constructor(
     val filteredLibraryBooks: StateFlow<List<BookEntity>> =
         combine(allBooks, searchQuery, _sortOrder) { books, query, order ->
             val filtered = books.filter { book ->
-                // A book stays in Library ONLY if:
-                // 1. Progress is exactly 0
-                // 2. AND there is no saved CFI location (meaning it's never been opened or synced)
                 val hasNotBeenOpened = book.progress <= 0.0 && book.lastCfiLocation.isNullOrBlank()
                 val isFinished = book.progress >= 0.99
-
                 (hasNotBeenOpened || isFinished) && book.title.contains(query, ignoreCase = true)
             }
             when (order) {
@@ -118,75 +101,48 @@ class BookshelfViewModel @Inject constructor(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val recentBooks: StateFlow<List<BookEntity>> = allBooks.map { books ->
-        books.filter { // A book moves to "Continue Reading" ONLY if:
-            // It has a CFI location (from opening locally OR from a sync)
-            // AND it's not finished yet.
+        books.filter {
             val hasStarted = !it.lastCfiLocation.isNullOrBlank() || it.progress > 0.0
             val isNotFinished = it.progress < 0.99
-
-            hasStarted && isNotFinished }
-            .sortedByDescending { it.lastRead }
+            hasStarted && isNotFinished
+        }.sortedByDescending { it.lastRead }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // --- RECAP STATE ---
+    // --- RECAP ---
     private val _recapState = MutableStateFlow<Map<String, String>>(emptyMap())
     val recapState: StateFlow<Map<String, String>> = _recapState.asStateFlow()
 
     private val _isLoadingRecap = MutableStateFlow<String?>(null)
     val isLoadingRecap: StateFlow<String?> = _isLoadingRecap.asStateFlow()
 
-    // --- NEW: BOOKMARKS SHEET STATE ---
+    // --- BOOKMARKS SHEET ---
     private val _bookmarksSheetBookUri = MutableStateFlow<String?>(null)
     val bookmarksSheetBookUri = _bookmarksSheetBookUri.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val selectedBookBookmarks: StateFlow<List<HighlightEntity>> = _bookmarksSheetBookUri
         .flatMapLatest { uri ->
-            if (uri == null) {
-                flowOf(emptyList())
-            } else {
-                highlightDao.getHighlightsForBook(uri).map { list ->
-                    list.filter { it.tag == "BOOKMARK" }
-                }
-            }
+            if (uri == null) flowOf(emptyList())
+            else highlightDao.getHighlightsForBook(uri).map { list -> list.filter { it.tag == "BOOKMARK" } }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
 
     init {
         triggerSilentSync()
     }
 
-    // --- SYNC ACTIONS ---
-
-    /**
-     * Rule 1: Silent Sync on App Start
-     */
     private fun triggerSilentSync() = viewModelScope.launch {
-        try {
-            syncRepository.sync()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            // We do not show errors on silent sync to avoid annoyance
-        }
+        try { syncRepository.sync() } catch (_: Exception) {}
     }
 
-    /**
-     * Rule 4: Manual "Pull to Refresh"
-     */
     fun refreshLibrary() {
         viewModelScope.launch {
             _isRefreshing.value = true
             val result = syncRepository.sync()
             _isRefreshing.value = false
-
-            result.onFailure {
-                _snackbarMessage.value = "Sync failed: Check your connection"
-            }
+            result.onFailure { _snackbarMessage.value = "Sync failed: Check your connection" }
         }
     }
-
-    // --- ACTIONS ---
 
     fun updateSearchQuery(query: String) { _searchQuery.value = query }
     fun updateSortOrder(order: SortOrder) { _sortOrder.value = order }
@@ -194,11 +150,8 @@ class BookshelfViewModel @Inject constructor(
     fun importBook(uri: Uri) {
         viewModelScope.launch {
             val result = libraryRepository.importBook(uri)
-            result.onSuccess { msg ->
-                _snackbarMessage.value = msg
-            }.onFailure { e ->
-                _snackbarMessage.value = e.message ?: "Failed to import book"
-            }
+            result.onSuccess { msg -> _snackbarMessage.value = msg }
+                .onFailure { e -> _snackbarMessage.value = e.message ?: "Failed to import book" }
         }
     }
 
@@ -220,8 +173,6 @@ class BookshelfViewModel @Inject constructor(
     }
 
     fun clearRecap(uri: String) { _recapState.value = _recapState.value - uri }
-
-    // --- BOOKMARKS ACTIONS ---
 
     fun openBookmarksSheet(uri: String) { _bookmarksSheetBookUri.value = uri }
     fun dismissBookmarksSheet() { _bookmarksSheetBookUri.value = null }

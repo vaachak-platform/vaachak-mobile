@@ -443,6 +443,8 @@ fun ReaderScreen(
 }
 
 // Helper Composable for Bookmarks List
+// Helper Composable for Bookmarks List
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookBookmarksOverlay(
     bookmarks: List<HighlightEntity>,
@@ -453,26 +455,41 @@ fun BookBookmarksOverlay(
     val containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.surface
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
 
-    Surface(color = containerColor, modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Bookmarks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = contentColor)
-                IconButton(onClick = onDismiss) {
-                    Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = contentColor)
-                }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        "Bookmarks",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                // MOVED TO LEFT (navigationIcon)
+                navigationIcon = {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close Bookmarks",
+                            tint = contentColor
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = containerColor,
+                    titleContentColor = contentColor,
+                    navigationIconContentColor = contentColor
+                )
+            )
+        },
+        containerColor = containerColor
+    ) { padding ->
+        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
             if (bookmarks.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("No bookmarks added yet.", color = Color.Gray)
                 }
             } else {
-                LazyColumn {
+                LazyColumn(modifier = Modifier.padding(16.dp)) {
                     items(bookmarks.size) { i ->
                         val bookmark = bookmarks[i]
                         Card(

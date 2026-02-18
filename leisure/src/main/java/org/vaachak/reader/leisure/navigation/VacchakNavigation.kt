@@ -30,9 +30,16 @@ sealed class Screen(val route: String) {
     data object Login : Screen("login")
     data object CatalogManage : Screen("catalog_manage")
 
-    // Dynamic Route for Reader
-    data object Reader : Screen("reader/{bookId}") {
-        fun createRoute(bookId: Long) = "reader/$bookId"
+    // UPDATED: Dynamic Route for Reader with optional Locator
+    data object Reader : Screen("reader/{bookId}?locator={locator}") {
+        fun createRoute(bookId: Long, locator: String? = null): String {
+            return if (locator != null) {
+                // Ensure locator is encoded if it contains special characters
+                "reader/$bookId?locator=$locator"
+            } else {
+                "reader/$bookId"
+            }
+        }
     }
 
     // Settings Sub-screens

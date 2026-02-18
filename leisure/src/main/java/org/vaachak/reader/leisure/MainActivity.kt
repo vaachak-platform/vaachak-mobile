@@ -19,6 +19,7 @@
  *  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  *  * SOFTWARE.
  */
+
 package org.vaachak.reader.leisure
 
 import android.content.Intent
@@ -28,6 +29,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.IndicationNodeFactory
@@ -70,8 +72,8 @@ import org.vaachak.reader.leisure.ui.login.LoginScreen
 import org.vaachak.reader.leisure.ui.reader.ReaderScreen
 import org.vaachak.reader.leisure.ui.reader.components.VaachakNavigationFooter
 import org.vaachak.reader.leisure.ui.settings.AiConfigScreen
-import org.vaachak.reader.leisure.ui.settings.DefaultAppearanceScreen
 import org.vaachak.reader.leisure.ui.settings.AppAppearanceScreen
+import org.vaachak.reader.leisure.ui.settings.DefaultAppearanceScreen
 import org.vaachak.reader.leisure.ui.settings.DictionarySettingsScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsViewModel
@@ -79,9 +81,10 @@ import org.vaachak.reader.leisure.ui.settings.SyncSettingsScreen
 import org.vaachak.reader.leisure.ui.theme.VaachakTheme
 import java.io.File
 import java.io.FileOutputStream
+import java.net.URLEncoder
 import java.util.UUID
 import java.util.zip.ZipFile
-import androidx.activity.enableEdgeToEdge
+
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
 
@@ -92,7 +95,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         enableEdgeToEdge()
 
         // Handle "Open With" intents on cold start
@@ -100,13 +102,12 @@ class MainActivity : AppCompatActivity() {
             processExternalIntent(intent)
         }
 
-
         setContent {
             val navController = rememberNavController()
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentRoute = navBackStackEntry?.destination?.route
 
-            // 1. COLLECT THE FULL STATE (This fixes "Unresolved reference")
+            // 1. COLLECT THE FULL STATE
             val uiState by settingsViewModel.uiState.collectAsState()
 
             // 2. READ PROPERTIES FROM STATE
@@ -122,12 +123,12 @@ class MainActivity : AppCompatActivity() {
                     Scaffold(
                         containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.background,
                         bottomBar = {
-                            // Only show Footer on top-level tabs
-                            val showFooter = currentRoute in listOf(
-                                Screen.Library.route,
-                                Screen.Highlights.route,
-                                Screen.CatalogBrowser.route
-                            )
+                            // Only show Footer on top-level tabs if needed
+                            // (Note: We removed Highlights link from Bookshelf bottom bar per request,
+                            // effectively removing the bottom bar from Bookshelf.
+                            // However, if you want a global nav bar for other screens, keep logic here.
+                            // Currently, only Library root might show it, but BookshelfScreen handles its own layout now.)
+                            val showFooter = false // DISABLED: Bookshelf now handles its own nav
 
                             if (showFooter) {
                                 VaachakNavigationFooter(
@@ -142,7 +143,6 @@ class MainActivity : AppCompatActivity() {
                                         }
                                     },
                                     onAboutClick = {
-                                        // "About" is now inside Settings
                                         navController.navigate(Screen.Settings.route)
                                     },
                                     isEink = isEink
@@ -167,38 +167,43 @@ class MainActivity : AppCompatActivity() {
                                     BookshelfScreen(
                                         viewModel = bookshelfViewModel,
                                         onBookClick = { uri ->
-                                            // It is SAFE to read .value inside a click listener (lambda)
+                                            // Encode URI to be safe in route
+                                            val encodedUri = URLEncoder.encode(uri, "UTF-8")
+                                            // Note: Route logic expects ID or URI? Screen.Reader usually takes ID.
+                                            // Let's resolve ID from URI for safety if your route is "reader/{bookId}"
                                             val book = bookshelfViewModel.allBooks.value.find { it.uriString == uri }
                                             if (book != null) {
                                                 navController.navigate(Screen.Reader.createRoute(book.id))
                                             } else {
-                                                Toast.makeText(
-                                                    this@MainActivity,
-                                                    "Loading book...",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
+                                                Toast.makeText(this@MainActivity, "Loading book...", Toast.LENGTH_SHORT).show()
                                             }
                                         },
-                                        onRecallClick = { /* Navigate to History */ },
+                                        onBookmarkClick = { bookId, locatorJson ->
+                                            // Handle deep link to bookmark
+                                            // Assuming Screen.Reader route can handle optional arguments or we pass it via savedStateHandle
+                                            // For now, simple navigation to book:
+                                            // You might need to update Screen.Reader to accept ?locator={locator}
+                                            navController.navigate(Screen.Reader.createRoute(bookId.toLongOrNull() ?: 0L, locatorJson))
+                                        },
+                                        onRecallClick = { /* Navigate to History/Recall feature */ },
                                         onSettingsClick = { navController.navigate(Screen.Settings.route) },
-                                        onBookmarkClick = { uri, _ ->
-                                            val book = bookshelfViewModel.allBooks.value.find { it.uriString == uri }
-                                            if (book != null) {
-                                                navController.navigate(Screen.Reader.createRoute(book.id))
-                                            }
-                                        },
-                                        onCatalogClick = { navController.navigate(Screen.CatalogBrowser.route) }
+                                        onCatalogClick = { navController.navigate(Screen.CatalogBrowser.route) },
+                                        onHighlightsClick = { navController.navigate(Screen.Highlights.route) } // NEW: Added
                                     )
                                 }
 
-                                // 2. READER (With ID Argument)
+                                // 2. READER (With ID Argument and Optional Locator)
                                 composable(
                                     route = Screen.Reader.route,
-                                    arguments = listOf(navArgument("bookId") { type = NavType.LongType })
+                                    arguments = listOf(
+                                        navArgument("bookId") { type = NavType.LongType },
+                                        navArgument("locator") { type = NavType.StringType; nullable = true }
+                                    )
                                 ) { backStackEntry ->
                                     val bookId = backStackEntry.arguments?.getLong("bookId") ?: 0L
+                                    val locatorJson = backStackEntry.arguments?.getString("locator")
 
-                                    // --- FIX: Collect state here instead of reading .value ---
+                                    // Collect state here instead of reading .value
                                     val allBooks by bookshelfViewModel.allBooks.collectAsState()
                                     val book = allBooks.find { it.id == bookId }
 
@@ -206,19 +211,18 @@ class MainActivity : AppCompatActivity() {
                                         ReaderScreen(
                                             bookId = bookId,
                                             initialUri = book.uriString,
-                                            // Pass null so ReaderViewModel loads the last saved position from DB
-                                            initialLocatorJson = null,
+                                            initialLocatorJson = locatorJson,
                                             onBack = { navController.popBackStack() }
                                         )
                                     } else {
-                                        // Fallback logic
                                         Box(Modifier.fillMaxSize()) {
                                             Text("Loading Book...", Modifier.align(Alignment.Center))
                                         }
-                                        // If book is missing (e.g. fresh start), pop back after a moment
                                         LaunchedEffect(Unit) {
                                             delay(1000)
-                                            navController.popBackStack()
+                                            if (bookshelfViewModel.allBooks.value.none { it.id == bookId }) {
+                                                navController.popBackStack()
+                                            }
                                         }
                                     }
                                 }
@@ -227,16 +231,27 @@ class MainActivity : AppCompatActivity() {
                                 composable(Screen.Highlights.route) {
                                     AllHighlightsScreen(
                                         onBack = { navController.popBackStack() },
-                                        onHighlightClick = { _, _ -> /* Navigate to reader */ }
+                                        onHighlightClick = { bookId, locator ->
+                                            navController.navigate(Screen.Reader.createRoute(bookId.toLong(), locator))
+                                        }
                                     )
                                 }
 
                                 // 4. CATALOG BROWSER
                                 composable(Screen.CatalogBrowser.route) {
                                     CatalogBrowserScreen(
-                                        onBack = { navController.navigate(Screen.Library.route) },
-                                        onReadBook = { uri -> /* Trigger download/read */ },
-                                        onGoToBookshelf = { navController.navigate(Screen.Library.route) }
+                                        onBack = { navController.popBackStack() },
+                                        onReadBook = { uri ->
+                                            // Find book ID from URI to navigate
+                                            val book = bookshelfViewModel.allBooks.value.find { it.uriString == uri }
+                                            if (book != null) {
+                                                navController.popBackStack(Screen.Library.route, false)
+                                                navController.navigate(Screen.Reader.createRoute(book.id))
+                                            }
+                                        },
+                                        onGoToBookshelf = {
+                                            navController.popBackStack(Screen.Library.route, false)
+                                        }
                                     )
                                 }
 
@@ -253,8 +268,7 @@ class MainActivity : AppCompatActivity() {
                                 // 7. CATALOG MANAGER SPOKE
                                 composable(Screen.CatalogManage.route) {
                                     CatalogManagerScreen(
-                                        onNavigateBack = { navController.popBackStack() },
-                                        onCatalogSelected = { /* Open specific feed */ }
+                                        onBack = { navController.popBackStack() }
                                     )
                                 }
 
@@ -425,4 +439,3 @@ class MainActivity : AppCompatActivity() {
         override fun equals(other: Any?): Boolean = other === this
     }
 }
-

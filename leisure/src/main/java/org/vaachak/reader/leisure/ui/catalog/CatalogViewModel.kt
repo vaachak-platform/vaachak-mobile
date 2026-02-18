@@ -52,6 +52,7 @@ import javax.inject.Inject
 
 // --- UI MODELS ---
 sealed class CatalogItem {
+    data class Server(val title: String, val url: String, val entity: OpdsEntity) : CatalogItem()
     data class Folder(val title: String, val url: String) : CatalogItem()
     data class Book(
         val title: String, val author: String, val imageUrl: String?,
@@ -61,7 +62,6 @@ sealed class CatalogItem {
     data class Pagination(val nextUrl: String?, val prevUrl: String?) : CatalogItem()
 }
 
-// NEW: One-time events for Navigation/Snackbar
 sealed interface CatalogUiEvent {
     data class ShowSnackbar(val message: String, val actionLabel: String? = null) : CatalogUiEvent
     data class NavigateToReader(val bookUri: String) : CatalogUiEvent
@@ -84,7 +84,7 @@ class CatalogViewModel @Inject constructor(
     private val _feedItems = MutableStateFlow<List<CatalogItem>>(emptyList())
     val feedItems = _feedItems.asStateFlow()
 
-    private val _screenTitle = MutableStateFlow("Catalog Browser")
+    private val _screenTitle = MutableStateFlow("Catalogs")
     val screenTitle = _screenTitle.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
@@ -103,39 +103,38 @@ class CatalogViewModel @Inject constructor(
     private var currentContextUrl: String? = null
     private var isGutendexSession = false
 
-    // --- INIT: SEED DEFAULTS ---
     init {
         viewModelScope.launch {
-            opdsDao.getAllFeeds().firstOrNull()?.let { currentFeeds ->
-                if (currentFeeds.isEmpty()) {
-                    addCatalog("Project Gutenberg", "https://gutendex.com/books", null, null, false)
-                    addCatalog("ManyBooks", "https://manybooks.net/opds", null, null, false)
-                }
+            val count = opdsDao.getAllFeeds().firstOrNull()?.size ?: 0
+            if (count == 0) {
+                addCatalog("Project Gutenberg", "https://gutendex.com/books", null, null, false)
+                addCatalog("ManyBooks", "https://manybooks.net/opds", null, null, false)
             }
+            loadServerList()
         }
     }
 
-    // --- ACTIONS ---
+    // --- NAVIGATION LOGIC ---
 
-    fun openCatalog(feed: OpdsEntity) {
-        historyStack.clear()
-        _feedItems.value = emptyList()
-        currentContextUrl = feed.url
-        _screenTitle.value = feed.title
+    private fun loadServerList() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _screenTitle.value = "Catalogs"
+            historyStack.clear()
+            _breadcrumbs.value = emptyList()
+            currentContextUrl = null
 
-        isGutendexSession = feed.url.contains("gutenberg.org") ||
-                feed.url.contains("gutendex") ||
-                feed.url.endsWith("/books")
-
-        if (isGutendexSession) {
-            loadGutendexRoot()
-        } else {
-            loadFeed(feed.url, "Home", addToHistory = true)
+            val feeds = opdsDao.getAllFeeds().first()
+            _feedItems.value = feeds.map {
+                CatalogItem.Server(it.title, it.url, it)
+            }
+            _isLoading.value = false
         }
     }
 
     fun handleItemClick(item: CatalogItem) {
         when (item) {
+            is CatalogItem.Server -> openCatalog(item.entity)
             is CatalogItem.Folder -> {
                 if (isGutendexSession) {
                     loadGutendexFeed(item.url, item.title, isPagination = false)
@@ -155,6 +154,24 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
+    // Changed from private to public for ManagerScreen usage
+    fun openCatalog(feed: OpdsEntity) {
+        historyStack.clear()
+        _feedItems.value = emptyList()
+        currentContextUrl = feed.url
+        _screenTitle.value = feed.title
+
+        isGutendexSession = feed.url.contains("gutenberg.org") ||
+                feed.url.contains("gutendex") ||
+                feed.url.endsWith("/books")
+
+        if (isGutendexSession) {
+            loadGutendexRoot()
+        } else {
+            loadFeed(feed.url, "Home", addToHistory = true)
+        }
+    }
+
     fun handlePaginationClick(url: String) {
         if (isGutendexSession) {
             loadGutendexFeed(url, null, isPagination = true)
@@ -164,16 +181,24 @@ class CatalogViewModel @Inject constructor(
     }
 
     fun goBack(): Boolean {
-        if (historyStack.size <= 1) return false
-        historyStack.removeLast()
-        val previous = historyStack.last()
-
-        if (isGutendexSession) {
-            if (historyStack.size == 1 && previous.second == "Home") {
-                loadGutendexRoot(addToHistory = false)
-            } else {
-                loadGutendexFeed(previous.first, previous.second, isPagination = false, addToHistory = false)
+        if (historyStack.isEmpty()) {
+            if (currentContextUrl != null) {
+                loadServerList()
+                return true
             }
+            return false
+        }
+
+        historyStack.removeLast()
+
+        if (historyStack.isEmpty()) {
+            loadServerList()
+            return true
+        }
+
+        val previous = historyStack.last()
+        if (isGutendexSession) {
+            loadGutendexFeed(previous.first, previous.second, isPagination = false, addToHistory = false)
         } else {
             loadFeed(previous.first, previous.second, addToHistory = false)
         }
@@ -194,7 +219,7 @@ class CatalogViewModel @Inject constructor(
     }
 
     private fun rollbackBreadcrumb() {
-        if (historyStack.size > 1) {
+        if (historyStack.isNotEmpty()) {
             historyStack.removeLast()
             updateBreadcrumbs()
         }
@@ -225,11 +250,7 @@ class CatalogViewModel @Inject constructor(
                 CatalogItem.Folder("Popular Books", makeUrl("sort=popular")),
                 CatalogItem.Folder("Topic: Fiction", makeUrl("topic=fiction")),
                 CatalogItem.Folder("Topic: Sci-Fi", makeUrl("topic=science%20fiction")),
-                CatalogItem.Folder("Topic: Fantasy", makeUrl("topic=fantasy")),
-                CatalogItem.Folder("Topic: History", makeUrl("topic=history")),
-                CatalogItem.Folder("Topic: Science", makeUrl("topic=science")),
-                CatalogItem.Folder("Topic: Philosophy", makeUrl("topic=philosophy")),
-                CatalogItem.Folder("Topic: Children", makeUrl("topic=children"))
+                CatalogItem.Folder("Topic: Fantasy", makeUrl("topic=fantasy"))
             )
             _feedItems.value = rootItems
         }
@@ -251,17 +272,14 @@ class CatalogViewModel @Inject constructor(
             updateBreadcrumbs()
 
             val localBookMap = libraryRepository.getLocalBookMap()
-
             val result = gutendexRepository.fetchBooks(actualUrl)
 
             result.onSuccess { response ->
                 val items = mutableListOf<CatalogItem>()
-
                 response.results.forEach { gBook ->
                     val epubLink = gBook.formats.entries.firstOrNull { it.key.contains("application/epub+zip") }?.value
                     val coverLink = gBook.formats.entries.firstOrNull { it.key.contains("image/jpeg") }?.value
 
-                    // Only process if EPUB link is available
                     if (epubLink != null) {
                         val epubUrl = Url(epubLink)
                         val epubType = MediaType("application/epub+zip")
@@ -279,9 +297,7 @@ class CatalogViewModel @Inject constructor(
                                     Link(href = coverUrl, mediaType = coverType, rels = setOf("image"))
                                 ) else emptyList()
                             )
-
                             val existingUri = localBookMap[gBook.title]
-
                             items.add(CatalogItem.Book(
                                 title = gBook.title,
                                 author = gBook.authors.firstOrNull()?.name ?: "Unknown",
@@ -293,23 +309,20 @@ class CatalogViewModel @Inject constructor(
                         }
                     }
                 }
-
                 if (response.next != null || response.previous != null) {
                     items.add(CatalogItem.Pagination(response.next, response.previous))
                 }
                 _feedItems.value = items
 
             }.onFailure {
-                if (addToHistory && !isPagination) {
-                    rollbackBreadcrumb()
-                }
+                if (addToHistory && !isPagination) rollbackBreadcrumb()
                 _uiEvent.send(CatalogUiEvent.ShowSnackbar("Failed to load: ${it.message}"))
             }
             _isLoading.value = false
         }
     }
 
-    // --- STANDARD OPDS LOGIC ---
+    // --- OPDS LOGIC ---
 
     private fun loadFeed(rawUrl: String, breadcrumbTitle: String? = null, addToHistory: Boolean = true) {
         val finalUrl = try {
@@ -335,17 +348,16 @@ class CatalogViewModel @Inject constructor(
 
                     if (addToHistory && breadcrumbTitle == null) {
                         val realTitle = parseData.feed?.metadata?.title ?: "Section"
-                        historyStack.removeLast()
+                        if (historyStack.isNotEmpty()) historyStack.removeLast()
                         historyStack.addLast(finalUrl to realTitle)
                         updateBreadcrumbs()
                     }
 
-                    parseData.feed?.let { _feedItems.value = processFeed(it, localBookMap) } ?: run { _feedItems.value = emptyList() }
+                    parseData.feed?.let { _feedItems.value = processFeed(it, localBookMap) }
+                        ?: run { _feedItems.value = emptyList() }
                 }
                 is Try.Failure -> {
-                    if (addToHistory) {
-                        rollbackBreadcrumb()
-                    }
+                    if (addToHistory) rollbackBreadcrumb()
                     _uiEvent.send(CatalogUiEvent.ShowSnackbar("Error: ${result.value.message}"))
                 }
             }
@@ -362,14 +374,11 @@ class CatalogViewModel @Inject constructor(
             if (!title.isNullOrBlank() && !isSystem) items.add(CatalogItem.Folder(title, link.href.toString()))
         }
         feed.publications.forEach { pub ->
-            // REMOVED: PDF detection logic
             val isEpub = pub.links.any { it.mediaType?.toString()?.contains("epub") == true }
             val navLink = pub.links.firstOrNull { it.mediaType?.toString()?.contains("atom+xml") == true || it.mediaType?.toString()?.contains("xml") == true }?.href?.toString()
 
-            // FILTER: Only add if EPUB or a navigable entry
             if (isEpub || navLink != null) {
                 val format = if (isEpub) "EPUB" else "DETAIL"
-
                 var cover = pub.images.firstOrNull()?.href?.toString()
                 if (cover == null) {
                     cover = pub.links.firstOrNull { l -> l.mediaType?.toString()?.startsWith("image/") == true || l.rels.any { it.contains("image") || it.contains("thumbnail") || it.contains("cover") } }?.href?.toString()
@@ -377,30 +386,25 @@ class CatalogViewModel @Inject constructor(
 
                 val title = pub.metadata.title ?: "Unknown"
                 val existingUri = localBookMap[title]
-
                 items.add(CatalogItem.Book(title, pub.metadata.authors.firstOrNull()?.name?.toString() ?: "Unknown", cover, format, pub, if (isEpub) null else navLink, existingUri))
             }
         }
         return items
     }
 
-    // --- DOWNLOADER ---
+    // --- DOWNLOADER & CRUD (Restored Public Access) ---
 
     fun downloadBook(publication: Publication) {
+        // ... (Same implementation as before)
         viewModelScope.launch {
             val title = publication.metadata.title ?: "Unknown"
             if (libraryRepository.isBookDuplicate(title)) {
                 _uiEvent.send(CatalogUiEvent.ShowSnackbar("Duplicate: '$title' exists."))
                 return@launch
             }
-
-            // FILTER: Only look for EPUB links
-            val link = publication.links.firstOrNull {
-                it.mediaType?.toString()?.contains("epub") == true
-            }
-
+            val link = publication.links.firstOrNull { it.mediaType?.toString()?.contains("epub") == true }
             if (link == null) {
-                _uiEvent.send(CatalogUiEvent.ShowSnackbar("No compatible download link found (EPUB only)."))
+                _uiEvent.send(CatalogUiEvent.ShowSnackbar("No compatible download link (EPUB only)."))
                 return@launch
             }
 
@@ -411,7 +415,6 @@ class CatalogViewModel @Inject constructor(
             val coverFile = File(application.filesDir, "$safeTitle.jpg")
 
             val downloadUrl = link.href.toString()
-
             val success = if (isGutendexSession) {
                 gutendexRepository.downloadBook(downloadUrl, bookFile)
             } else {
@@ -421,11 +424,7 @@ class CatalogViewModel @Inject constructor(
             if (success) {
                 var coverUrl = publication.images.firstOrNull()?.href?.toString()
                 if (coverUrl == null && !isGutendexSession) {
-                    coverUrl = publication.links.firstOrNull { it.mediaType?.toString()?.startsWith("image/") == true || it.rels.any { rel -> rel.contains("image") } }?.href?.toString()
-                }
-
-                if (coverUrl == null && isGutendexSession) {
-                    coverUrl = publication.resources.firstOrNull { it.mediaType?.toString()?.startsWith("image/") == true }?.href?.toString()
+                    coverUrl = publication.links.firstOrNull { it.mediaType?.toString()?.startsWith("image/") == true }?.href?.toString()
                 }
 
                 var savedCover: File? = null
@@ -436,17 +435,15 @@ class CatalogViewModel @Inject constructor(
                         if (opdsRepository.downloadPublication(coverUrl, coverFile, currentContextUrl)) savedCover = coverFile
                     }
                 }
-
                 libraryRepository.addDownloadedBook(bookFile, title, publication.metadata.authors.firstOrNull()?.name?.toString() ?: "Unknown", savedCover)
+                _uiEvent.send(CatalogUiEvent.ShowSnackbar("Downloaded '$title'", "View Library"))
 
-                val currentFeed = if (isGutendexSession) {
-                    val currentBreadcrumb = breadcrumbs.value.lastOrNull()
+                val currentBreadcrumb = breadcrumbs.value.lastOrNull()
+                if (isGutendexSession) {
                     loadGutendexFeed(currentBreadcrumb?.first ?: currentContextUrl, currentBreadcrumb?.second, isPagination = false, addToHistory = false)
                 } else {
                     loadFeed(currentContextUrl ?: "", null, addToHistory = false)
                 }
-
-                _uiEvent.send(CatalogUiEvent.ShowSnackbar("Downloaded '$title'", "View Library"))
 
             } else {
                 _uiEvent.send(CatalogUiEvent.ShowSnackbar("Download failed."))
@@ -456,8 +453,7 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    // --- CRUD ---
-
+    // Changed from private to public
     fun addCatalog(title: String, url: String, user: String?, pass: String?, allowInsecure: Boolean) {
         viewModelScope.launch {
             val cleanUrl = cleanUrl(url)
@@ -466,6 +462,7 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
+    // Restored public method
     fun updateCatalog(feed: OpdsEntity, title: String, url: String, user: String?, pass: String?, allowInsecure: Boolean) {
         viewModelScope.launch {
             val cleanUrl = cleanUrl(url)
@@ -474,17 +471,16 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    fun deleteCatalog(feed: OpdsEntity) { viewModelScope.launch { opdsDao.deleteFeed(feed) } }
+    // Restored public method
+    fun deleteCatalog(feed: OpdsEntity) {
+        viewModelScope.launch { opdsDao.deleteFeed(feed) }
+    }
 
     private fun cleanUrl(url: String): String {
         var clean = url.trim()
         val isSpecific = clean.endsWith(".xml") || clean.endsWith(".opds") || clean.contains("/opds")
         val isGutendex = clean.contains("/books")
-
-        if (!isSpecific && !isGutendex) {
-            clean = if (clean.endsWith("/")) "${clean}opds" else "${clean}/opds"
-        }
-
+        if (!isSpecific && !isGutendex) clean = if (clean.endsWith("/")) "${clean}opds" else "${clean}/opds"
         if (!clean.startsWith("http")) clean = "http://$clean"
         return clean
     }

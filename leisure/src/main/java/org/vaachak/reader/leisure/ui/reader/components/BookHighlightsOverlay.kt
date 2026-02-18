@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -60,25 +61,28 @@ fun BookHighlightsOverlay(
                 contentColor = contentColor,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
+                // Close icon on LEFT
+                TopAppBar(
+                    title = {
                         Text(
                             text = "Highlights & Notes",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(start = 16.dp)
+                            fontWeight = FontWeight.Bold
                         )
-                    }
-                    HorizontalDivider(thickness = 1.dp, color = if(isEink) Color.Black else MaterialTheme.colorScheme.outlineVariant)
-                }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close Highlights"
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = containerColor,
+                        titleContentColor = contentColor,
+                        navigationIconContentColor = contentColor
+                    )
+                )
             }
         },
         containerColor = containerColor
