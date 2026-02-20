@@ -22,6 +22,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.vaachak.reader.core.domain.model.TtsSettings
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -57,7 +58,7 @@ class SettingsViewModel @Inject constructor(
         settingsRepo.deviceName,        // 1
         settingsRepo.lastSyncTimestamp, // 2
         settingsRepo.isOfflineModeEnabled, // 3
-        opdsRepo.allFeeds,              // 4
+        opdsRepo.catalogs,              // 4
         settingsRepo.geminiKey,         // 5
         settingsRepo.cfUrl,             // 6
         settingsRepo.cfToken,           // 7
@@ -66,7 +67,8 @@ class SettingsViewModel @Inject constructor(
         _isAiMasked,                    // 10
         _errorMessage,                  // 11
         settingsRepo.themeMode,         // 12
-        settingsRepo.einkContrast       // 13
+        settingsRepo.einkContrast,
+        settingsRepo.ttsSettings,// 13
     ) { params ->
         val username = params[0] as String
         val device = params[1] as String
@@ -83,7 +85,7 @@ class SettingsViewModel @Inject constructor(
         val error = params[11] as String?
         val theme = params[12] as ThemeMode
         val contrast = params[13] as Float
-
+        val tts = params[14] as TtsSettings
         val isAuthenticated = username.isNotBlank()
 
         SettingsUiState(
@@ -106,7 +108,8 @@ class SettingsViewModel @Inject constructor(
             isAiMasked = masked,
             errorMessage = error,
             themeMode = theme,
-            einkContrast = contrast
+            einkContrast = contrast,
+            ttsSettings = tts,
         )
     }.stateIn(
         viewModelScope,
@@ -160,11 +163,31 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun deleteCatalog(feedId: Long) {
-        viewModelScope.launch { opdsRepo.deleteFeed(feedId) }
+    fun clearError() { _errorMessage.value = null }
+
+    // --- NEW TTS ACTIONS ---
+
+
+
+    fun updateTtsSpeed(newSpeed: Float) {
+        viewModelScope.launch {
+            // Constrain speed between 0.5x and 2.5x for safety
+            val clampedSpeed = newSpeed.coerceIn(0.5f, 2.5f)
+            settingsRepo.setTtsDefaultSpeed(clampedSpeed)
+        }
     }
 
-    fun clearError() { _errorMessage.value = null }
+    fun setTtsAutoPageTurn(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepo.setTtsAutoPageTurn(enabled)
+        }
+    }
+
+    fun setTtsVisualStyle(style: String) {
+        viewModelScope.launch {
+            settingsRepo.setTtsVisualStyle(style)
+        }
+    }
 
     // --- NEW SYNC FUNCTIONS ---
 
@@ -264,5 +287,31 @@ class SettingsViewModel @Inject constructor(
     // Helper to trigger refresh if Context is available in ViewModel (recommended way is via UI event)
     fun triggerEinkRefresh(context: Context) {
         EinkHelper.requestFullRefresh(context)
+    }
+    // --- TTS LANGUAGE OVERRIDE ---
+    fun setTtsLanguage(language: String) {
+        viewModelScope.launch {
+            // language will be "default", "en", or "hi"
+            settingsRepo.setTtsLanguage(language)
+        }
+    }
+
+    // --- TTS PITCH CONTROL ---
+    fun updateTtsPitch(pitch: Float) {
+        viewModelScope.launch {
+            // 1. Clamp the pitch between 0.1f and 2.0f to prevent engine crashes
+            // 2. Round to 1 decimal place to prevent floating point weirdness (e.g. 0.9000001f)
+            val safePitch = (pitch.coerceIn(0.1f, 2.0f) * 10f).toInt() / 10f
+            settingsRepo.setTtsPitch(safePitch)
+        }
+    }
+
+
+    // --- SLEEP TIMER ---
+    fun setSleepTimer(minutes: Int) {
+        viewModelScope.launch {
+            // minutes will be 0 (off), 15, 30, or 60
+            settingsRepo.setTtsSleepTimer(minutes)
+        }
     }
 }

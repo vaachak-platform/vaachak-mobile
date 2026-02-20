@@ -8,20 +8,33 @@ import android.view.View
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
@@ -36,7 +49,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.compose.LocalLifecycleOwner // UPDATED IMPORT
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.vaachak.reader.core.domain.model.HighlightEntity
 import org.vaachak.reader.leisure.ui.reader.components.AiBottomSheet
 import org.vaachak.reader.leisure.ui.reader.components.BookHighlightsOverlay
@@ -54,6 +67,9 @@ import org.readium.r2.navigator.input.TapEvent
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.util.AbsoluteUrl
+import org.vaachak.reader.leisure.ui.reader.components.TtsSettingsBottomSheet
+import kotlin.math.roundToInt
+import org.readium.navigator.media.tts.android.AndroidTtsEngine.Voice
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalReadiumApi::class)
 @Composable
@@ -62,6 +78,7 @@ fun ReaderScreen(
     initialUri: String?,
     initialLocatorJson: String?,
     onBack: () -> Unit,
+    onTtsStatusChange: (Boolean) -> Unit,
     viewModel: ReaderViewModel = hiltViewModel()
 ) {
     val activity = LocalContext.current as AppCompatActivity
@@ -86,7 +103,6 @@ fun ReaderScreen(
     val showHighlights by viewModel.showHighlights.collectAsState()
     val highlightsList by viewModel.bookmarksList.collectAsState()
 
-    // Bookmarks State
     val showBookmarks by viewModel.showBookmarks.collectAsState()
     val savedBookmarks by viewModel.savedBookmarks.collectAsState()
     val isPageBookmarked by viewModel.isCurrentPageBookmarked.collectAsState()
@@ -95,8 +111,13 @@ fun ReaderScreen(
     val recapText by viewModel.recapText.collectAsState()
     val isRecapLoading by viewModel.isRecapLoading.collectAsState()
 
-    var showDeleteDialogId by remember { mutableStateOf<Long?>(null) }
+    // TTS State
+    val isTtsActive by viewModel.isTtsActive.collectAsState()
+    // NEW: Collect the bar visibility and the settings
+    val showTtsBar by viewModel.showTtsBar.collectAsState()
+    val ttsSettings by viewModel.ttsSettings.collectAsState()
 
+    var showDeleteDialogId by remember { mutableStateOf<Long?>(null) }
 
     val isBottomSheetVisible by viewModel.isBottomSheetVisible.collectAsState()
     val aiResponse by viewModel.aiResponse.collectAsState()
@@ -113,6 +134,9 @@ fun ReaderScreen(
     val scope = rememberCoroutineScope()
     var currentNavigatorFragment by remember { mutableStateOf<EpubNavigatorFragment?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val showTtsSettingsSheet by viewModel.showTtsSettingsSheet.collectAsState()
+
+    val hasChapterError by viewModel.hasChapterError.collectAsState()
 
     LaunchedEffect(snackbarMessage) {
         snackbarMessage?.let {
@@ -121,24 +145,51 @@ fun ReaderScreen(
         }
     }
 
+    // NEW: Notify Activity when TTS state changes
+    LaunchedEffect(isTtsActive) {
+        onTtsStatusChange(isTtsActive)
+    }
+
+    // --- FIX 1: Hook up the visual navigator provider to the ViewModel ---
+    // This removes the "visualNavigatorProvider is NULL" error from your logs
+    LaunchedEffect(currentNavigatorFragment) {
+        if (currentNavigatorFragment != null) {
+            viewModel.setVisualNavigatorProvider { currentNavigatorFragment }
+        }
+    }
+
+    // --- FIX 2: INITIALIZE TTS (No arguments) ---
+    LaunchedEffect(currentNavigatorFragment, publication) {
+        if (currentNavigatorFragment != null && publication != null) {
+            viewModel.initTts()
+        }
+    }
+    // Inside ReaderScreen.kt
+    val ttsDecoration by viewModel.ttsDecoration.collectAsState()
+
+    LaunchedEffect(ttsDecoration, currentNavigatorFragment) {
+        val navigator = currentNavigatorFragment ?: return@LaunchedEffect
+        if (navigator.view != null) {
+            // 'tts_highlights' is a separate group from 'user_highlights'
+            navigator.applyDecorations(ttsDecoration, "tts_highlights")
+        }
+    }
+
     // --- SYNC LIFECYCLE OBSERVER ---
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
-                // Triggered on Home button / App switch
                 val json = currentLocator?.toJSON()?.toString() ?: ""
-                viewModel.onReaderPause( json)
+                viewModel.onReaderPause(json)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            // Triggered on Back button (returning to Bookshelf)
             val json = currentLocator?.toJSON()?.toString() ?: ""
-            viewModel.onReaderPause( json)
+            viewModel.onReaderPause(json)
         }
     }
-    // ------------------------------------
 
     DisposableEffect(Unit) {
         val window = (view.context as? Activity)?.window
@@ -155,19 +206,19 @@ fun ReaderScreen(
     LaunchedEffect(Unit) { viewModel.navigationEvent.collect { link -> currentNavigatorFragment?.go(link, animated = false) } }
     LaunchedEffect(Unit) { viewModel.jumpEvent.collect { locator -> currentNavigatorFragment?.go(locator, animated = false) } }
 
-    // Apply Preferences
     LaunchedEffect(epubPreferences, currentNavigatorFragment) {
         if (currentNavigatorFragment?.view != null) {
             currentNavigatorFragment?.submitPreferences(epubPreferences)
         }
     }
-    // Main Highlight Application (Reactive)
+
     LaunchedEffect(savedHighlights, currentNavigatorFragment) {
         val navigator = currentNavigatorFragment ?: return@LaunchedEffect
         if (navigator.view != null) {
             navigator.applyDecorations(savedHighlights, "user_highlights")
         }
     }
+
     LaunchedEffect(initialUri, initialLocatorJson) {
         if (initialUri != null) {
             viewModel.setInitialLocation(initialLocatorJson)
@@ -179,7 +230,6 @@ fun ReaderScreen(
         object : EpubNavigatorFragment.Listener {
             override fun onJumpToLocator(locator: Locator) { viewModel.updateProgress(locator) }
             override fun onExternalLinkActivated(url: AbsoluteUrl) {}
-
         }
     }
 
@@ -213,16 +263,12 @@ fun ReaderScreen(
             override fun onTap(event: TapEvent): Boolean {
                 val screenWidth = view.width.toFloat()
                 val x = event.point.x
-
                 val leftZoneEnd = screenWidth * 0.2f
                 val rightZoneStart = screenWidth * 0.8f
-
                 return if (x > leftZoneEnd && x < rightZoneStart) {
                     viewModel.toggleReaderSettings()
                     true
-                } else {
-                    false
-                }
+                } else false
             }
         }
     }
@@ -277,10 +323,7 @@ fun ReaderScreen(
     val aiSelectionCallback = remember(isAiEnabled) {
         object : ActionMode.Callback {
             override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean {
-                if (isAiEnabled) {
-                    menu?.add(Menu.NONE, 101, 0, "Ask AI")
-
-                }
+                if (isAiEnabled) menu?.add(Menu.NONE, 101, 0, "Ask AI")
                 menu?.add(Menu.NONE, 102, 1, "Highlight")
                 menu?.add(Menu.NONE, 103, 2, "Define")
                 return true
@@ -311,6 +354,7 @@ fun ReaderScreen(
                 isEink = isEink,
                 showRecap = isAiEnabled,
                 isBookmarked = isPageBookmarked,
+                isTtsActive = isTtsActive,
                 onBack = { viewModel.closeBook(); onBack() },
                 onTocClick = { viewModel.toggleToc() },
                 onSearchClick = { viewModel.toggleSearch() },
@@ -318,13 +362,20 @@ fun ReaderScreen(
                 onBookmarksListClick = { viewModel.toggleBookmarksList() },
                 onBookmarkToggleClick = { viewModel.toggleBookmarkOnCurrentPage() },
                 onRecapClick = { viewModel.onRecapClicked() },
+                onTtsClick = { viewModel.toggleTts() },
                 onSettingsClick = { viewModel.toggleReaderSettings() }
             )
         },
         bottomBar = {
-            if (publication != null && !showReaderSettings && !showToc && !showSearch && !showHighlights && !showBookmarks) {
-                ReaderSystemFooter(chapterTitle = pageInfo, isEink = isEink)
+            Column (
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.Bottom // Push everything to the bottom
+            ){
+                if (publication != null && !showReaderSettings && !showToc && !showSearch && !showHighlights && !showBookmarks) {
+                    ReaderSystemFooter(chapterTitle = pageInfo, isEink = isEink)
+                }
             }
+
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
@@ -357,16 +408,20 @@ fun ReaderScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-
+            if (hasChapterError) {
+                ChapterErrorOverlay(
+                    isEink = isEink,
+                    onReturnToLibrary = { viewModel.dismissChapterErrorAndClose() }
+                )
+            }
+            // --- OVERLAYS (Unchanged) ---
             if (isRecapLoading) {
                 AlertDialog(onDismissRequest = {}, title = { Text("Generating Recap...") }, text = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }, confirmButton = {}, modifier = Modifier.zIndex(20f))
             }
 
             if (showRecapConfirmation) {
                 AlertDialog(
-                    onDismissRequest = { viewModel.dismissRecapConfirmation()
-                        viewModel.dismissRecap()
-                    },
+                    onDismissRequest = { viewModel.dismissRecapConfirmation(); viewModel.dismissRecap() },
                     title = { Text("Quick Recap") },
                     text = { Text("Would you like to generate a quick recap summary of the book so far?") },
                     confirmButton = { TextButton(onClick = { viewModel.getQuickRecap() }) { Text("Yes", fontWeight = FontWeight.Bold) } },
@@ -400,12 +455,7 @@ fun ReaderScreen(
 
             if (showBookmarks) {
                 Surface(modifier = Modifier.fillMaxSize().zIndex(15f)) {
-                    BookBookmarksOverlay(
-                        bookmarks = savedBookmarks,
-                        onBookmarkClick = { viewModel.onBookmarkClicked(it) },
-                        onDismiss = { viewModel.toggleBookmarksList() },
-                        isEink = isEink
-                    )
+                    BookBookmarksOverlay(bookmarks = savedBookmarks, onBookmarkClick = { viewModel.onBookmarkClicked(it) }, onDismiss = { viewModel.toggleBookmarksList() }, isEink = isEink)
                 }
             }
 
@@ -417,11 +467,7 @@ fun ReaderScreen(
 
             if (showReaderSettings) {
                 Surface(modifier = Modifier.fillMaxSize().zIndex(10f)) {
-                    ReaderSettingsSheet(
-                        viewModel = viewModel,
-                        isEink = isEink,
-                        onDismiss = { viewModel.dismissReaderSettings() }
-                    )
+                    ReaderSettingsSheet(viewModel = viewModel, isEink = isEink, onDismiss = { viewModel.dismissReaderSettings() })
                 }
             }
 
@@ -434,15 +480,57 @@ fun ReaderScreen(
             }
 
             if (showDeleteDialogId != null) {
-                AlertDialog(onDismissRequest = { showDeleteDialogId = null
-                    viewModel.dismissRecap()
-                }, title = { Text("Delete Highlight?") }, text = { Text("This action cannot be undone.") }, confirmButton = { TextButton(onClick = { viewModel.deleteHighlight(showDeleteDialogId!!); showDeleteDialogId = null }) { Text("Delete", color = Color.Red) } }, dismissButton = { TextButton(onClick = { showDeleteDialogId = null }) { Text("Cancel") } }, modifier = Modifier.zIndex(4f))
+                AlertDialog(onDismissRequest = { showDeleteDialogId = null; viewModel.dismissRecap() }, title = { Text("Delete Highlight?") }, text = { Text("This action cannot be undone.") }, confirmButton = { TextButton(onClick = { viewModel.deleteHighlight(showDeleteDialogId!!); showDeleteDialogId = null }) { Text("Delete", color = Color.Red) } }, dismissButton = { TextButton(onClick = { showDeleteDialogId = null }) { Text("Cancel") } }, modifier = Modifier.zIndex(4f))
+            }
+            // --- THE NEW FLOATING TTS PILL ---
+            if (showTtsBar) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 16.dp) // Hovers comfortably above the footer
+                        .zIndex(20f),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    TtsVerticalFloatingPill(
+                        isVisible = showTtsBar,
+                        isPlaying = isTtsActive,
+                        isEink = isEink,
+                        onPlayPause = { viewModel.toggleTts() },
+                        onStop = { viewModel.closeTts() },
+                        onSkipForward = { viewModel.skipForward() },
+                        onSkipBackward = { viewModel.skipBackward() },
+                        onOpenSettings = { viewModel.openTtsSettings() }
+                    )
+                    // --- THE FULL TTS SETTINGS OVERLAY ---
+                    TtsSettingsBottomSheet(
+                        isVisible = showTtsSettingsSheet,
+                        onDismiss = { viewModel.closeTtsSettings() },
+                        ttsSettings = ttsSettings,
+                        isEink = isEink,
+                        onSpeedChange = { speed: Float ->
+                            viewModel.updateTtsSpeed(speed)
+                        },
+                        onPitchChange = { pitch: Float ->
+                            viewModel.updateTtsPitch(pitch)
+                        },
+                        onStyleChange = { style: String ->
+                            viewModel.setTtsVisualStyle(style)
+                        },
+                        onAutoPageTurnChange = { enabled: Boolean ->
+                            viewModel.setTtsAutoPageTurn(enabled)
+                        },
+                        onVoiceChange = { voice: Voice ->
+                            viewModel.setBookSpecificVoice(voice)
+                        },
+                        viewModel =viewModel,
+                        onLanguageChange = { languageCode: String -> viewModel.setTtsLanguage(languageCode)}
+                    )
+                }
             }
         }
     }
 }
 
-// Helper Composable for Bookmarks List
 // Helper Composable for Bookmarks List
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -464,7 +552,6 @@ fun BookBookmarksOverlay(
                         fontWeight = FontWeight.Bold
                     )
                 },
-                // MOVED TO LEFT (navigationIcon)
                 navigationIcon = {
                     IconButton(onClick = onDismiss) {
                         Icon(
@@ -540,4 +627,135 @@ fun TagSelectorDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
         modifier = Modifier.zIndex(5f)
     )
+}
+
+@Composable
+fun TtsVerticalFloatingPill(
+    isVisible: Boolean,
+    isPlaying: Boolean,
+    isEink: Boolean,
+    onPlayPause: () -> Unit,
+    onStop: () -> Unit,
+    onSkipForward: () -> Unit,
+    onSkipBackward: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    if (!isVisible) return
+
+    val backgroundColor = if (isEink) Color.White else MaterialTheme.colorScheme.surfaceVariant
+    val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurfaceVariant
+
+    var offsetX by remember { mutableStateOf(0f) }
+    var offsetY by remember { mutableStateOf(0f) }
+
+    Surface(
+        modifier = Modifier
+            .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+            .pointerInput(Unit) {
+                detectDragGestures { change, dragAmount ->
+                    change.consume()
+                    offsetX += dragAmount.x
+                    offsetY += dragAmount.y
+                }
+            }
+            .width(56.dp)
+            .wrapContentHeight(),
+        shape = RoundedCornerShape(28.dp),
+        color = backgroundColor, // Restored solid background
+        shadowElevation = if (isEink) 0.dp else 8.dp, // Restored shadows for non-eink
+        border = if (isEink) BorderStroke(2.dp, contentColor) else null // Restored solid border
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            IconButton(onClick = onStop) { Icon(Icons.Default.Close, "Exit", tint = contentColor) }
+
+            if (isEink) Spacer(modifier = Modifier.height(1.dp).width(24.dp).background(Color.Black))
+            else Spacer(modifier = Modifier.height(1.dp).width(24.dp).background(Color.Gray.copy(alpha = 0.5f)))
+
+            IconButton(onClick = onSkipBackward) { Icon(Icons.Default.SkipPrevious, "Previous", tint = contentColor) }
+
+            FilledIconButton(
+                onClick = onPlayPause,
+                modifier = Modifier.size(48.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = if (isEink) Color.Black else MaterialTheme.colorScheme.primary,
+                    contentColor = if (isEink) Color.White else MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = "Toggle Playback"
+                )
+            }
+
+            IconButton(onClick = onSkipForward) { Icon(Icons.Default.SkipNext, "Next", tint = contentColor) }
+
+            if (isEink) Spacer(modifier = Modifier.height(1.dp).width(24.dp).background(Color.Black))
+            else Spacer(modifier = Modifier.height(1.dp).width(24.dp).background(Color.Gray.copy(alpha = 0.5f)))
+
+            IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Tune, "Settings", tint = contentColor) }
+        }
+    }
+}
+
+@Composable
+fun ChapterErrorOverlay(
+    isEink: Boolean,
+    onReturnToLibrary: () -> Unit
+) {
+    val backgroundColor = if (isEink) Color.White else MaterialTheme.colorScheme.background
+    val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundColor)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.WarningAmber,
+                contentDescription = "Formatting Error",
+                modifier = Modifier.size(64.dp),
+                tint = contentColor
+            )
+
+            Text(
+                text = "Chapter Formatting Error",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = contentColor
+            )
+
+            Text(
+                text = "This specific section of the book contains structural formatting errors (like a missing closing tag) and cannot be rendered by the reading engine.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = contentColor,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+
+            // ESCAPE BUTTON
+            OutlinedButton(
+                onClick = onReturnToLibrary,
+                modifier = Modifier.fillMaxWidth(0.8f).height(56.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = contentColor
+                ),
+                border = BorderStroke(2.dp, contentColor)
+            ) {
+                Text("Return to Library", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+    }
 }

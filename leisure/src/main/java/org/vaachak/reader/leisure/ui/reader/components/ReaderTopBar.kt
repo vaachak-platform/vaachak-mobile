@@ -29,34 +29,36 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 @Composable
 fun ReaderTopBar(
     bookTitle: String,
     isEink: Boolean,
     showRecap: Boolean,
-    isBookmarked: Boolean, // NEW: State of current page
+    isBookmarked: Boolean,
+    isTtsActive: Boolean,
     onBack: () -> Unit,
     onTocClick: () -> Unit,
     onSearchClick: () -> Unit,
     onHighlightsClick: () -> Unit,
-    onBookmarksListClick: () -> Unit, // NEW: Open List
-    onBookmarkToggleClick: () -> Unit, // NEW: Toggle current page
+    onBookmarksListClick: () -> Unit,
+    onBookmarkToggleClick: () -> Unit,
     onRecapClick: () -> Unit,
+    onTtsClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
     val containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.surface
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
     val dividerColor = if (isEink) Color.Black else MaterialTheme.colorScheme.outlineVariant
+
+    var showMenu by remember { mutableStateOf(false) }
 
     Surface(
         color = containerColor,
@@ -67,75 +69,86 @@ fun ReaderTopBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
+                    .height(56.dp)
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 1. Back Button
                 IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = contentColor)
                 }
 
-                // 2. Title
                 Text(
                     text = bookTitle,
                     style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 16.sp,
                         fontWeight = if (isEink) FontWeight.Bold else FontWeight.Medium
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .weight(1f)
-                        .padding(end = 8.dp)
+                        .padding(horizontal = 8.dp)
                 )
 
-                // 3. Actions Row
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(0.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Current Page Bookmark Toggle
-                    IconButton(onClick = onBookmarkToggleClick, modifier = Modifier.size(40.dp)) {
-                        Icon(
-                            imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder,
-                            contentDescription = "Toggle Bookmark",
-                            modifier = Modifier.size(20.dp),
-                            tint = if(isBookmarked && !isEink) MaterialTheme.colorScheme.primary else LocalContentColor.current
+                IconButton(onClick = onTtsClick) {
+                    Icon(
+                        imageVector = if (isTtsActive) Icons.Default.PauseCircle else Icons.Default.Headphones,
+                        contentDescription = "Read Aloud",
+                        tint = if (isTtsActive && !isEink) MaterialTheme.colorScheme.primary else contentColor
+                    )
+                }
+
+                IconButton(onClick = onBookmarkToggleClick) {
+                    Icon(
+                        imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder,
+                        contentDescription = "Bookmark",
+                        tint = if (isBookmarked && !isEink) MaterialTheme.colorScheme.primary else contentColor
+                    )
+                }
+
+                IconButton(onClick = onTocClick) {
+                    Icon(Icons.AutoMirrored.Filled.List, "Table of Contents", tint = contentColor)
+                }
+
+                IconButton(onClick = onBookmarksListClick) {
+                    Icon(Icons.Default.Bookmarks, "Bookmarks List", tint = contentColor)
+                }
+
+                IconButton(onClick = onHighlightsClick) {
+                    Icon(Icons.Default.Edit, "Highlights", tint = contentColor)
+                }
+
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Default.MoreVert, "More Options", tint = contentColor)
+                    }
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        containerColor = containerColor
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Search") },
+                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            onClick = { showMenu = false; onSearchClick() }
+                        )
+                        if (showRecap) {
+                            DropdownMenuItem(
+                                text = { Text("Recap") },
+                                leadingIcon = { Icon(Icons.Default.History, null) },
+                                onClick = { showMenu = false; onRecapClick() }
+                            )
+                        }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Settings") },
+                            leadingIcon = { Icon(Icons.Default.Settings, null) },
+                            onClick = { showMenu = false; onSettingsClick() }
                         )
                     }
-
-                    ReaderActionIcon(Icons.AutoMirrored.Filled.List, "TOC", onTocClick)
-
-                    // Bookmarks List Icon
-                    ReaderActionIcon(Icons.Default.Bookmarks, "Bookmarks List", onBookmarksListClick)
-
-                    ReaderActionIcon(Icons.Default.Search, "Search", onSearchClick)
-                    ReaderActionIcon(Icons.Default.Edit, "Highlights", onHighlightsClick)
-
-                    if (showRecap) {
-                        ReaderActionIcon(Icons.Default.History, "Recap", onRecapClick)
-                    }
-
-                    ReaderActionIcon(Icons.Default.Settings, "Settings", onSettingsClick)
                 }
             }
             HorizontalDivider(thickness = if (isEink) 1.dp else 0.5.dp, color = dividerColor)
         }
-    }
-}
-
-@Composable
-fun ReaderActionIcon(icon: ImageVector, desc: String, onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) {
-        Icon(
-            imageVector = icon,
-            contentDescription = desc,
-            modifier = Modifier.size(20.dp)
-        )
     }
 }

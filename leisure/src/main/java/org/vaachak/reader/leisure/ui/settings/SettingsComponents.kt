@@ -30,8 +30,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -522,7 +524,64 @@ fun SettingsSectionTitle(title: String) {
     )
 }
 
+@Composable
+fun TtsFilterOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+        )
+    )
+}
 
-
-
-
+@Composable
+fun TtsOptionChip(label: String, selected: Boolean, isEink: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = if (isEink) Color.Black else MaterialTheme.colorScheme.primary,
+            selectedLabelColor = if (isEink) Color.White else MaterialTheme.colorScheme.onPrimary
+        ),
+        border = if (isEink && !selected) BorderStroke(1.dp, Color.Black) else null
+    )
+}
+@Composable
+fun SettingsToggleTile(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+@Composable
+fun TtsStepperSetting(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueFormatter: (Float) -> String
+) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            OutlinedIconButton(onClick = { onValueChange(value - 0.1f) }) { Icon(Icons.Default.Remove, null) }
+            Text(text = valueFormatter(value), style = MaterialTheme.typography.headlineSmall)
+            OutlinedIconButton(onClick = { onValueChange(value + 0.1f) }) { Icon(Icons.Default.Add, null) }
+        }
+    }
+}

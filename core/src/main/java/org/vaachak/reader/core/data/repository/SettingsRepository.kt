@@ -36,10 +36,13 @@ import org.vaachak.reader.core.domain.model.ThemeMode
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+
 //UI rewrite
 import kotlinx.coroutines.flow.combine
-import org.vaachak.reader.core.domain.model.AiConfig
 import org.vaachak.reader.core.domain.model.ReaderPreferences
+
+//TTS
+import org.vaachak.reader.core.domain.model.TtsSettings
 
 @Singleton
 class SettingsRepository @Inject constructor(
@@ -49,6 +52,7 @@ class SettingsRepository @Inject constructor(
 
     companion object {
         // --- APP GLOBAL SETTINGS ---
+        val IS_AI_ENABLED = booleanPreferencesKey("is_ai_enabled")
         val GEMINI_KEY = stringPreferencesKey("gemini_api_key")
         val CF_URL = stringPreferencesKey("cloudflare_url")
         val CF_TOKEN = stringPreferencesKey("cloudflare_token")
@@ -59,6 +63,18 @@ class SettingsRepository @Inject constructor(
         val DICTIONARY_FOLDER_KEY = stringPreferencesKey("dictionary_folder")
         val USE_EMBEDDED_DICT = booleanPreferencesKey("use_embedded_dict")
         val OFFLINE_MODE_KEY = booleanPreferencesKey("offline_mode")
+
+        // --- TTS SETTINGS ---
+
+        val TTS_DEFAULT_SPEED = floatPreferencesKey("tts_default_speed")
+        val TTS_AUTO_PAGE_TURN = booleanPreferencesKey("tts_auto_page_turn")
+        val TTS_VISUAL_STYLE = stringPreferencesKey("tts_visual_style")
+        val TTS_LANGUAGE = stringPreferencesKey("tts_language")
+        val TTS_PITCH = floatPreferencesKey("tts_pitch")
+        val TTS_BACKGROUND_PLAYBACK = booleanPreferencesKey("tts_background_playback")
+        val TTS_SLEEP_TIMER = intPreferencesKey("tts_sleep_timer")
+
+        val TTS_VOICE = stringPreferencesKey("tts_voice")
 
         // --- SYNC SETTINGS ---
         val SYNC_CLOUD_URL = stringPreferencesKey("sync_cloud_url")
@@ -100,6 +116,21 @@ class SettingsRepository @Inject constructor(
         try { ThemeMode.valueOf(name) } catch (_: Exception) { ThemeMode.E_INK }
     }
 
+    // --- TTS FLOWS ---
+    // Combined TTS Config for easier UI consumption mapped directly from DataStore
+    val ttsSettings: Flow<TtsSettings> = dataStore.data.map { preferences ->
+        TtsSettings(
+            defaultSpeed = preferences[TTS_DEFAULT_SPEED] ?: 1.0f,
+            pitch = preferences[TTS_PITCH] ?: 1.0f,
+            visualStyle = preferences[TTS_VISUAL_STYLE] ?: "underline",
+            isAutoPageTurnEnabled = preferences[TTS_AUTO_PAGE_TURN] ?: true,
+            language = preferences[TTS_LANGUAGE] ?: "default",
+            isBackgroundPlaybackEnabled = preferences[TTS_BACKGROUND_PLAYBACK] ?: false,
+            sleepTimerMinutes = preferences[TTS_SLEEP_TIMER] ?: 0,
+            voice = preferences[TTS_VOICE] ?: "default"
+        )
+    }
+
     // --- SYNC FLOWS ---
     val syncCloudUrl: Flow<String> = dataStore.data.map { it[SYNC_CLOUD_URL] ?: "" }
     val useLocalServer: Flow<Boolean> = dataStore.data.map { it[USE_LOCAL_SERVER] ?: false }
@@ -122,20 +153,17 @@ class SettingsRepository @Inject constructor(
     }
 
     // --- READER PREF FLOWS ---
-    // CHANGE: Remove the `?: 1.0` defaults. Return nullable types.
     val readerLineHeight: Flow<Double?> = dataStore.data.map { it[READER_LINE_HEIGHT] }
     val readerTextAlign: Flow<String?> = dataStore.data.map { it[READER_TEXT_ALIGN] }
     val readerParaSpacing: Flow<Double?> = dataStore.data.map { it[READER_PARAGRAPH_SPACING] }
     val readerMarginSide: Flow<Double?> = dataStore.data.map { it[READER_MARGIN_SIDE] }
     val readerLetterSpacing: Flow<Double?> = dataStore.data.map { it[READER_LETTER_SPACING] }
 
-    // KEEP these as non-null defaults (Display Settings)
     val readerFontFamily: Flow<String?> = dataStore.data.map { it[READER_FONT_FAMILY] }
     val readerFontSize: Flow<Double> = dataStore.data.map { it[READER_FONT_SIZE] ?: 1.0 }
     val readerTheme: Flow<String> = dataStore.data.map { it[READER_THEME] ?: "light" }
     val readerPublisherStyles: Flow<Boolean> = dataStore.data.map { it[READER_PUBLISHER_STYLES] ?: true }
 
-    // UPDATE: The Combine Block to handle nulls
     val readerPreferences: Flow<ReaderPreferences> = combine(
         readerFontFamily, readerFontSize, readerTextAlign, readerTheme, readerPublisherStyles,
         readerLineHeight, readerLetterSpacing, readerParaSpacing, readerMarginSide
@@ -143,26 +171,30 @@ class SettingsRepository @Inject constructor(
         ReaderPreferences(
             fontFamily = args[0] as? String,
             fontSize = args[1] as Double,
-            textAlign = args[2] as? String,  // Now Nullable
+            textAlign = args[2] as? String,
             theme = args[3] as String,
             publisherStyles = args[4] as Boolean,
-            lineHeight = args[5] as? Double, // Now Nullable
+            lineHeight = args[5] as? Double,
             letterSpacing = args[6] as? Double,
             paragraphSpacing = args[7] as? Double,
             pageMargins = args[8] as? Double
         )
     }
+
     // Dictionary Flows
     fun getUseEmbeddedDictionary(): Flow<Boolean> = dataStore.data.map { it[USE_EMBEDDED_DICT] ?: false }
     fun getDictionaryFolder(): Flow<String> = dataStore.data.map { it[DICTIONARY_FOLDER_KEY] ?: "" }
 
-    // --- SYNC ACTIONS ---
+    // --- TTS ACTIONS ---
+    suspend fun setTtsDefaultSpeed(speed: Float) { dataStore.edit { it[TTS_DEFAULT_SPEED] = speed } }
+    suspend fun setTtsAutoPageTurn(enabled: Boolean) { dataStore.edit { it[TTS_AUTO_PAGE_TURN] = enabled } }
+    suspend fun setTtsVisualStyle(style: String) { dataStore.edit { it[TTS_VISUAL_STYLE] = style } }
+    suspend fun setTtsLanguage(language: String) { dataStore.edit { it[TTS_LANGUAGE] = language } }
+    suspend fun setTtsPitch(pitch: Float) { dataStore.edit { it[TTS_PITCH] = pitch } }
 
-    suspend fun saveDeviceName(name: String) {
-        dataStore.edit { preferences ->
-            preferences[DEVICE_NAME] = name
-        }
-    }
+    suspend fun setTtsSleepTimer(minutes: Int) { dataStore.edit { it[TTS_SLEEP_TIMER] = minutes } }
+
+    // --- SYNC ACTIONS ---
 
     suspend fun updateSyncProfile(user: String, pass: String, name: String) {
         dataStore.edit { prefs ->
@@ -172,22 +204,17 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    /**
-     * Updates sync configuration.
-     * Now optionally saves the Device Name to ensure accurate identification during login.
-     */
     suspend fun saveSyncSettings(
         syncCloudUrl: String,
         localUrl: String,
         useLocal: Boolean,
-        deviceName: String? = null // <--- ADD THIS PARAMETER
+        deviceName: String? = null
     ) {
         dataStore.edit { prefs ->
             prefs[SYNC_CLOUD_URL] = syncCloudUrl.trim().removeSuffix("/")
             prefs[LOCAL_SERVER_URL] = localUrl.trim().removeSuffix("/")
             prefs[USE_LOCAL_SERVER] = useLocal
 
-            // If provided, save the device name too
             if (!deviceName.isNullOrBlank()) {
                 prefs[DEVICE_NAME] = deviceName.trim()
             }
@@ -226,7 +253,6 @@ class SettingsRepository @Inject constructor(
     suspend fun setUseEmbeddedDictionary(enabled: Boolean) { dataStore.edit { it[USE_EMBEDDED_DICT] = enabled } }
     suspend fun setDictionaryFolder(uri: String) { dataStore.edit { it[DICTIONARY_FOLDER_KEY] = uri } }
     suspend fun setOfflineMode(enabled: Boolean) { dataStore.edit { it[OFFLINE_MODE_KEY] = enabled } }
-    suspend fun clearSettings() { dataStore.edit { it.clear() } }
 
     suspend fun updateReaderPreferences(
         fontFamily: String? = null, fontSize: Double? = null, textAlign: String? = null,
@@ -257,55 +283,14 @@ class SettingsRepository @Inject constructor(
         } catch (e: Exception) { false }
     }
 
-    //UI rewrite code
-    // --- NEW: Combined Flows for UI State ---
-
-    // 1. Unified AI Config Flow
-    // This allows the ViewModel to get a single "AiConfig" object
-    val aiConfig: Flow<AiConfig> = combine(
-        geminiKey,
-        cfUrl,
-        cfToken,
-        isAutoSaveRecapsEnabled
-    ) { key, url, token, autoSave ->
-        AiConfig(
-            // If key is present, we assume AI is "Enabled" for now.
-            // You can add a specific IS_AI_ENABLED preference later if you want a master switch.
-            isEnabled = key.isNotBlank(),
-            geminiKey = key,
-            cloudflareUrl = url,
-            authToken = token,
-            autoSaveRecaps = autoSave
-        )
-    }
-
-    // 2. Unified AI Update Function
-    suspend fun updateAiConfig(
-        enabled: Boolean,
-        geminiKey: String,
-        cfUrl: String,
-        token: String,
-        autoSave: Boolean
-    ) {
-        dataStore.edit { prefs ->
-            // If we add a master switch later, save 'enabled' here
-            prefs[GEMINI_KEY] = geminiKey.trim()
-            prefs[CF_URL] = cfUrl.trim().removeSuffix("/")
-            prefs[CF_TOKEN] = token.trim()
-            prefs[AUTO_SAVE_RECAPS_KEY] = autoSave
-        }
-    }
 
 
     // --- NEW: Unified Save Function ---
     suspend fun saveReaderPreferences(prefs: ReaderPreferences) {
         dataStore.edit { preferences ->
-            // 1. Meta-settings (Theme/Publisher Styles are Non-Null in model, so always save)
             preferences[READER_THEME] = prefs.theme
 
-            // 2. CHECK: Is Publisher Styles ON?
             if (prefs.publisherStyles) {
-                // --- DESTRUCTIVE RESET ---
                 preferences[READER_PUBLISHER_STYLES] = true
 
                 preferences.remove(READER_FONT_FAMILY)
@@ -316,28 +301,22 @@ class SettingsRepository @Inject constructor(
                 preferences.remove(READER_PARAGRAPH_SPACING)
                 preferences.remove(READER_MARGIN_SIDE)
             } else {
-                // --- NORMAL SAVE ---
                 preferences[READER_PUBLISHER_STYLES] = false
 
-                // Font Family (Nullable)
                 if (prefs.fontFamily != null) {
                     preferences[READER_FONT_FAMILY] = prefs.fontFamily!!
                 } else {
                     preferences.remove(READER_FONT_FAMILY)
                 }
 
-                // Font Size (Double, Non-Nullable in model)
-                // WARNING FIX: Removed 'if (prefs.fontSize != null)' check
                 preferences[READER_FONT_SIZE] = prefs.fontSize
 
-                // Text Align (Nullable)
                 if (prefs.textAlign != null) {
                     preferences[READER_TEXT_ALIGN] = prefs.textAlign!!
                 } else {
                     preferences.remove(READER_TEXT_ALIGN)
                 }
 
-                // Layout (Nullable)
                 if (prefs.lineHeight != null) preferences[READER_LINE_HEIGHT] = prefs.lineHeight!! else preferences.remove(READER_LINE_HEIGHT)
                 if (prefs.letterSpacing != null) preferences[READER_LETTER_SPACING] = prefs.letterSpacing!! else preferences.remove(READER_LETTER_SPACING)
                 if (prefs.paragraphSpacing != null) preferences[READER_PARAGRAPH_SPACING] = prefs.paragraphSpacing!! else preferences.remove(READER_PARAGRAPH_SPACING)
@@ -345,18 +324,17 @@ class SettingsRepository @Inject constructor(
             }
         }
     }
+
     suspend fun resetLayoutPreferences() {
         dataStore.edit { preferences ->
-            // Remove specific layout keys
             preferences.remove(READER_LINE_HEIGHT)
             preferences.remove(READER_TEXT_ALIGN)
             preferences.remove(READER_PARAGRAPH_SPACING)
             preferences.remove(READER_MARGIN_SIDE)
             preferences.remove(READER_LETTER_SPACING)
 
-            // Ensure Publisher Styles is OFF so custom fonts (if set) still show
             preferences[READER_PUBLISHER_STYLES] = false
         }
     }
-
 }
+

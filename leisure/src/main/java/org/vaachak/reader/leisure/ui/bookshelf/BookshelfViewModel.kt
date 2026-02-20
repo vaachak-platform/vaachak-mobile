@@ -37,7 +37,7 @@ import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.core.data.local.HighlightDao
 import org.vaachak.reader.core.domain.model.HighlightEntity
 import org.vaachak.reader.core.data.repository.AiRepository
-import org.vaachak.reader.leisure.data.repository.LibraryRepository
+import org.vaachak.reader.core.data.repository.LibraryRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
 import javax.inject.Inject

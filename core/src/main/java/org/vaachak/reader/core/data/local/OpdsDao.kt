@@ -85,4 +85,7 @@ interface OpdsDao {
     // UI rewrite
     @Query("DELETE FROM opds_feeds WHERE id = :id")
     suspend fun deleteFeedById(id: Long)
+
+    @Query("SELECT COUNT(*) FROM opds_feeds")
+    suspend fun getFeedsCount(): Int
 }

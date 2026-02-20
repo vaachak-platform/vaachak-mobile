@@ -25,7 +25,7 @@ package org.vaachak.reader.leisure.utils
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
+import timber.log.Timber
 
 object EinkHelper {
 
@@ -69,11 +69,11 @@ object EinkHelper {
 
                 // GENERIC FALLBACK (Experimental)
                 else -> {
-                    Log.d("EinkHelper", "Unknown E-ink brand, skipping refresh trigger.")
+                    Timber.tag("EinkHelper").d("Unknown E-ink brand, skipping refresh trigger.")
                 }
             }
         } catch (e: Exception) {
-            Log.e("EinkHelper", "Failed to request E-ink refresh", e)
+            Timber.tag("EinkHelper").e(e, "Failed to request E-ink refresh")
         }
     }
 }

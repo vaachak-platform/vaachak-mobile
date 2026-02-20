@@ -27,6 +27,7 @@ import org.vaachak.reader.core.domain.model.AiConfig
 import org.vaachak.reader.core.domain.model.SettingsSection
 import org.vaachak.reader.core.domain.model.UserProfile
 import org.vaachak.reader.core.domain.model.ThemeMode
+import org.vaachak.reader.core.domain.model.TtsSettings
 
 /**
  * Represents the single source of truth for the Settings Screen UI.
@@ -54,5 +55,12 @@ data class SettingsUiState(
     //--6. Theme
     // --- ADD THESE TWO FIELDS ---
     val themeMode: ThemeMode = ThemeMode.E_INK,
-    val einkContrast: Float = 0.5f
+    val einkContrast: Float = 0.5f,
+    val ttsSettings: TtsSettings = TtsSettings(
+        defaultSpeed = 1.0f,
+        isAutoPageTurnEnabled = true,
+        visualStyle = "underline",
+        pitch = 0.5f,
+        voice = "default"
+    )
 )

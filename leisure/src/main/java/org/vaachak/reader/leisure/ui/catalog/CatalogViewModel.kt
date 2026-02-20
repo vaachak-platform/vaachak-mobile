@@ -29,7 +29,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import org.vaachak.reader.core.data.local.OpdsDao
 import org.vaachak.reader.core.domain.model.OpdsEntity
 import org.vaachak.reader.core.data.repository.GutendexRepository
-import org.vaachak.reader.leisure.data.repository.LibraryRepository
+import org.vaachak.reader.core.data.repository.LibraryRepository
 import org.vaachak.reader.core.data.repository.OpdsRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import kotlinx.coroutines.channels.Channel
@@ -73,12 +73,11 @@ class CatalogViewModel @Inject constructor(
     private val gutendexRepository: GutendexRepository,
     private val settingsRepo: SettingsRepository,
     private val libraryRepository: LibraryRepository,
-    private val opdsDao: OpdsDao,
     private val application: Application
 ) : ViewModel() {
 
     // --- STATE FLOWS ---
-    val catalogs: StateFlow<List<OpdsEntity>> = opdsDao.getAllFeeds()
+    val catalogs: StateFlow<List<OpdsEntity>> = opdsRepository.catalogs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _feedItems = MutableStateFlow<List<CatalogItem>>(emptyList())
@@ -105,14 +104,10 @@ class CatalogViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            val count = opdsDao.getAllFeeds().firstOrNull()?.size ?: 0
-            if (count == 0) {
-                addCatalog("Project Gutenberg", "https://gutendex.com/books", null, null, false)
-                addCatalog("ManyBooks", "https://manybooks.net/opds", null, null, false)
-            }
             loadServerList()
         }
     }
+
 
     // --- NAVIGATION LOGIC ---
 
@@ -124,7 +119,7 @@ class CatalogViewModel @Inject constructor(
             _breadcrumbs.value = emptyList()
             currentContextUrl = null
 
-            val feeds = opdsDao.getAllFeeds().first()
+            val feeds = opdsRepository.allFeeds.first()
             _feedItems.value = feeds.map {
                 CatalogItem.Server(it.title, it.url, it)
             }
@@ -454,11 +449,11 @@ class CatalogViewModel @Inject constructor(
     }
 
     // Changed from private to public
-    fun addCatalog(title: String, url: String, user: String?, pass: String?, allowInsecure: Boolean) {
+    fun     addCatalog(title: String, url: String, user: String?, pass: String?, allowInsecure: Boolean) {
         viewModelScope.launch {
             val cleanUrl = cleanUrl(url)
             val newFeed = OpdsEntity(title = title.ifBlank { "Library" }, url = cleanUrl, username = user?.ifBlank{null}, password = pass?.ifBlank{null}, allowInsecure = allowInsecure)
-            opdsDao.insertFeed(newFeed)
+            opdsRepository.insertFeed(newFeed)
         }
     }
 
@@ -467,13 +462,13 @@ class CatalogViewModel @Inject constructor(
         viewModelScope.launch {
             val cleanUrl = cleanUrl(url)
             val updatedFeed = feed.copy(title = title, url = cleanUrl, username = user?.ifBlank{null}, password = pass?.ifBlank{null}, allowInsecure = allowInsecure)
-            opdsDao.updateFeed(updatedFeed)
+            opdsRepository.updateFeed(updatedFeed)
         }
     }
 
     // Restored public method
     fun deleteCatalog(feed: OpdsEntity) {
-        viewModelScope.launch { opdsDao.deleteFeed(feed) }
+        viewModelScope.launch { opdsRepository.deleteFeed(feed) }
     }
 
     private fun cleanUrl(url: String): String {

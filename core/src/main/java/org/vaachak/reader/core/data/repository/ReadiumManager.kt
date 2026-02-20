@@ -20,7 +20,7 @@
  *  * SOFTWARE.
  */
 
-package org.vaachak.reader.leisure.ui.reader
+package org.vaachak.reader.core.data.repository
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -114,7 +114,7 @@ class ReadiumManager @Inject constructor(
      * Retrieves the cover image of a publication.
      *
      * @param publication The publication to retrieve the cover from.
-     * @return The cover [Bitmap], or null if not available.
+     * @return The cover [android.graphics.Bitmap], or null if not available.
      */
     suspend fun getPublicationCover(publication: Publication): Bitmap? {
         return try {

@@ -5,7 +5,7 @@
 
 package org.vaachak.reader.leisure.ui.settings
 
-import android.widget.Toast
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -22,6 +22,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 import org.vaachak.reader.leisure.navigation.Screen
+import androidx.compose.material.icons.filled.RecordVoiceOver
 
 @Composable
 fun SettingsScreen(
@@ -81,6 +82,14 @@ fun SettingsScreen(
                     title = "App Appearance",
                     subtitle = "Theme & E-ink Sharpness",
                     onClick = { navController.navigate("settings/app_appearance") } // New Route
+                )
+
+                // [NEW] TTS Settings Tile
+                SettingsTile(
+                    icon = Icons.Default.RecordVoiceOver,
+                    title = "Speech & Narration",
+                    subtitle = "Voice, speed, and visual follow-along",
+                    onClick = { navController.navigate("settings/tts") }
                 )
 
                 // 3. [RENAMED] Book Appearance

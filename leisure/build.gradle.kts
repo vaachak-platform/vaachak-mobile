@@ -69,6 +69,7 @@ android {
 dependencies {
     // --- CONNECT TO CORE MODULE ---
     implementation(project(":core"))
+    implementation(libs.androidx.foundation.layout)
 
     // Desugaring
     coreLibraryDesugaring(libs.android.desugar)
@@ -114,6 +115,10 @@ dependencies {
     implementation(libs.readium.navigator)
     implementation(libs.readium.opds)
     implementation(libs.readium.lcp)
+    implementation(libs.readium.navigator.media.tts)
+    // ADD THESE for TTS Navigator support
+    implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.media3.common)
 
     // AI & Utilities
     implementation(libs.google.generativeai)
@@ -132,6 +137,9 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
+    implementation(libs.timber)
+
 
 }
 

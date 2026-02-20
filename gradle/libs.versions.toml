@@ -53,6 +53,11 @@ junitVersion = "1.1.5"
 espressoCore = "3.5.1"
 dokka = "1.9.20"
 
+timber = "5.0.1"
+
+media3 ="1.9.0"
+foundationLayout = "1.10.3"
+
 [libraries]
 # -- Android Core --
 android-desugar = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar" }
@@ -105,8 +110,10 @@ readium-streamer = { group = "org.readium.kotlin-toolkit", name = "readium-strea
 readium-navigator = { group = "org.readium.kotlin-toolkit", name = "readium-navigator", version.ref = "readium" }
 readium-opds = { group = "org.readium.kotlin-toolkit", name = "readium-opds", version.ref = "readium" }
 readium-lcp = { group = "org.readium.kotlin-toolkit", name = "readium-lcp", version.ref = "readium" }
+readium-navigator-media-tts = { group = "org.readium.kotlin-toolkit", name = "readium-navigator-media-tts", version.ref = "readium" }
 google-generativeai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "gemini" }
-
+androidx-media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
+androidx-media3-common = { group = "androidx.media3", name = "media3-common", version.ref = "media3" }
 # -- Utilities --
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
@@ -118,6 +125,8 @@ apache-commons = { group = "org.apache.commons", name = "commons-compress", vers
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }
+androidx-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "foundationLayout" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -129,3 +138,4 @@ devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 jetbrains-dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
 kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+

@@ -78,6 +78,7 @@ import org.vaachak.reader.leisure.ui.settings.DictionarySettingsScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsViewModel
 import org.vaachak.reader.leisure.ui.settings.SyncSettingsScreen
+import org.vaachak.reader.leisure.ui.settings.TtsSettingsScreen
 import org.vaachak.reader.leisure.ui.theme.VaachakTheme
 import java.io.File
 import java.io.FileOutputStream
@@ -92,6 +93,9 @@ class MainActivity : AppCompatActivity() {
     // that might happen before UI loads.
     private val settingsViewModel: SettingsViewModel by viewModels()
     private val bookshelfViewModel: BookshelfViewModel by viewModels()
+
+    // NEW: Track TTS state to handle volume keys
+    private var isTtsActive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -212,7 +216,14 @@ class MainActivity : AppCompatActivity() {
                                             bookId = bookId,
                                             initialUri = book.uriString,
                                             initialLocatorJson = locatorJson,
-                                            onBack = { navController.popBackStack() }
+                                            onBack = {
+                                                // Reset TTS state on exit just in case
+                                                isTtsActive = false
+                                                navController.popBackStack()
+                                            },
+                                            onTtsStatusChange = { active ->
+                                                isTtsActive = active // Update Activity state
+                                            }
                                         )
                                     } else {
                                         Box(Modifier.fillMaxSize()) {
@@ -285,6 +296,13 @@ class MainActivity : AppCompatActivity() {
                                 // 10. APPEARANCE SETTINGS (NEW)
                                 composable(Screen.Appearance.route) {
                                     DefaultAppearanceScreen(
+                                        onBack = { navController.popBackStack() }
+                                    )
+                                }
+
+                                //  TTS (NEW)
+                                composable(Screen.TTS.route) {
+                                    TtsSettingsScreen(
                                         onBack = { navController.popBackStack() }
                                     )
                                 }
@@ -413,20 +431,36 @@ class MainActivity : AppCompatActivity() {
 
     // --- HARDWARE BUTTONS (Volume Page Turn) ---
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        val isPageForward =
-            keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || keyCode == KeyEvent.KEYCODE_PAGE_DOWN
-        val isPageBackward =
-            keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_PAGE_UP
+        val isVolumeDown = keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
+        val isVolumeUp = keyCode == KeyEvent.KEYCODE_VOLUME_UP
+        val isPageDown = keyCode == KeyEvent.KEYCODE_PAGE_DOWN
+        val isPageUp = keyCode == KeyEvent.KEYCODE_PAGE_UP
 
-        if (isPageForward || isPageBackward) {
-            val fragment =
-                supportFragmentManager.findFragmentByTag("EPUB_READER_FRAGMENT") as? EpubNavigatorFragment
+        // Check if the key is relevant to us
+        if (isVolumeDown || isVolumeUp || isPageDown || isPageUp) {
+
+            // CRITICAL FIX: If TTS is active and the user presses a Volume key,
+            // let the system handle it (adjust volume).
+            if (isTtsActive && (isVolumeDown || isVolumeUp)) {
+                return super.onKeyDown(keyCode, event)
+            }
+
+            // Otherwise, hijack the key for Page Turning
+            val fragment = supportFragmentManager.findFragmentByTag("EPUB_READER_FRAGMENT") as? EpubNavigatorFragment
+
             fragment?.let { navigator ->
-                if (isPageForward) navigator.goForward(animated = false)
-                else navigator.goBackward(animated = false)
-                return true
+                // Volume Down / Page Down -> Next Page
+                if (isVolumeDown || isPageDown) {
+                    navigator.goForward(animated = false)
+                }
+                // Volume Up / Page Up -> Previous Page
+                else {
+                    navigator.goBackward(animated = false)
+                }
+                return true // We consumed the event (prevent system default)
             }
         }
+
         return super.onKeyDown(keyCode, event)
     }
 

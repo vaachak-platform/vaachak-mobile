@@ -20,7 +20,7 @@
  *  * SOFTWARE.
  */
 
-package org.vaachak.reader.leisure.data.repository
+package org.vaachak.reader.core.data.repository
 
 import android.content.Context
 import android.content.Intent
@@ -98,4 +98,6 @@ class LibraryPlatformHelper @Inject constructor(
             null
         }
     }
+
+
 }

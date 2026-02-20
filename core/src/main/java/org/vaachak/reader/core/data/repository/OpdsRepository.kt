@@ -54,6 +54,8 @@ import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.count
+import kotlinx.coroutines.flow.onStart
 import java.net.URL
 
 /**
@@ -80,6 +82,21 @@ class OpdsRepository @Inject constructor(
     // --- CLIENTS ---
     private val safeClient: OkHttpClient = createClient(unsafe = false)
     private val unsafeClient: OkHttpClient = createClient(unsafe = true)
+
+    // We observe the catalogs as a Flow
+    val catalogs: Flow<List<OpdsEntity>> = opdsDao.getAllFeeds()
+        .onStart {
+            // This runs the moment the UI starts observing the catalog list
+            val count = opdsDao.getFeedsCount()
+            if (count == 0) {
+                val newFeed = OpdsEntity(title = "Project Gutenberg", url = "https://gutendex.com/books")
+                val newFeed2 = OpdsEntity(title = "ManyBooks", url = "https://manybooks.net/opds")
+                opdsDao.insertFeed(newFeed)
+                opdsDao.insertFeed(newFeed2)
+            }
+
+        }
+
 
     /**
      * Creates and configures an [OkHttpClient] for network requests.
@@ -358,8 +375,31 @@ class OpdsRepository @Inject constructor(
     // Expose the Flow from DAO
     val allFeeds: Flow<List<OpdsEntity>> = opdsDao.getAllFeeds()
 
-    // In OpdsRepository.kt
-    suspend fun deleteFeed(id: Long) {
-        opdsDao.deleteFeedById(id)
+    suspend fun insertFeed(feed: OpdsEntity): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            opdsDao.insertFeed(feed)
+            Result.success("Catalog has been saved")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Result.failure(e)
+        }
+    }
+    suspend fun updateFeed(feed: OpdsEntity): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            opdsDao.updateFeed(feed)
+            Result.success("Catalog has been updated")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Result.failure(e)
+        }
+    }
+    suspend fun deleteFeed(feed: OpdsEntity): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            opdsDao.deleteFeed(feed)
+            Result.success("Catalog has been deleted")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Result.failure(e)
+        }
     }
 }
