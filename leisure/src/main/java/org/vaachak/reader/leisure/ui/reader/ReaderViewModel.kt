@@ -172,7 +172,7 @@ class ReaderViewModel @Inject constructor(
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage = _snackbarMessage.asStateFlow()
 
-    private val _currentBookId = MutableStateFlow<String?>(null)
+    private val _currentBookHash = MutableStateFlow<String?>(null)
     private var currentSelectedText = ""
     private var pendingJumpLocator: String? = null
     private var pendingHighlightLocator: Locator? = null
@@ -183,7 +183,7 @@ class ReaderViewModel @Inject constructor(
 
 
     // --- DATA STREAMS ---
-    private val allBookItems = _currentBookId.filterNotNull()
+    private val allBookItems =_currentBookHash.filterNotNull()
         .flatMapLatest { id -> highlightDao.getHighlightsForBook(id) }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -288,7 +288,7 @@ class ReaderViewModel @Inject constructor(
             _bookAiEnabled.value = !isGlobalOffline
         }
 
-        _currentBookId.value = uri.toString()
+       _currentBookHash.value = uri.toString()
 
         viewModelScope.launch {
             syncRepository.sync()
@@ -321,7 +321,7 @@ class ReaderViewModel @Inject constructor(
 
     fun toggleBookmarkOnCurrentPage() {
         val locator = _currentLocator.value ?: return
-        val bookId = _currentBookId.value ?: return
+        val bookId =_currentBookHash.value ?: return
         val isBookmarked = isCurrentPageBookmarked.value
         viewModelScope.launch {
             if (isBookmarked) {
@@ -344,7 +344,7 @@ class ReaderViewModel @Inject constructor(
                 }
             } else {
                 val bookmark = HighlightEntity(
-                    publicationId = bookId,
+                    bookHashId = bookId,
                     locatorJson = locator.toJSON().toString(),
                     text = "Bookmark at ${currentPageInfo.value}",
                     color = Color.TRANSPARENT, tag = "BOOKMARK"
@@ -439,7 +439,7 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             val title = _publication.value?.metadata?.title ?: "Unknown Book"
             val currentContext = "Current Position: ${_currentPageInfo.value}"
-            val highlights = highlightDao.getHighlightsForBook(_currentBookId.value ?: "")
+            val highlights = highlightDao.getHighlightsForBook(_currentBookHash.value ?: "")
                 .first().take(10).joinToString("\n") { "- ${it.text}" }
             val summary = aiRepository.generateRecap(title, highlights, currentContext)
             _recapText.value = summary
@@ -449,12 +449,12 @@ class ReaderViewModel @Inject constructor(
 
     fun saveRecapAsHighlight() {
         val summary = _recapText.value ?: return
-        val currentUri = _currentBookId.value ?: return
+        val currentUri =_currentBookHash.value ?: return
         val locator = _currentLocator.value ?: return
         val isEink = isEinkEnabled.value
         viewModelScope.launch {
             val highlight = HighlightEntity(
-                publicationId = currentUri, locatorJson = locator.toJSON().toString(),
+                bookHashId = currentUri, locatorJson = locator.toJSON().toString(),
                 text = "RECAP: $summary", color = if (isEink) Color.DKGRAY else Color.CYAN, tag = "recap"
             )
             highlightDao.insertHighlight(highlight)
@@ -550,13 +550,13 @@ class ReaderViewModel @Inject constructor(
         if (prog > 0.99) pct = 100
         _currentPageInfo.value = if (pos > 0) "Page $pos ($pct%)" else "$pct% completed"
 
-        val uri = _currentBookId.value ?: return
+        val uri =_currentBookHash.value ?: return
         val json = l.toJSON().toString()
         viewModelScope.launch {
             val currentBook = bookDao.getBookByUri(uri)
             val now = System.currentTimeMillis()
             if (currentBook == null || now > currentBook.lastRead) {
-                bookDao.updateBookProgress(uri, prog, json, now)
+                bookDao.updateBookProgressByUri(uri, prog, json, now)
             } else {
                 Log.d("SyncDebug", "Ignored progress update to avoid overwriting newer cloud data.")
             }
@@ -582,12 +582,12 @@ class ReaderViewModel @Inject constructor(
 
     fun saveHighlightWithTag(tag: String) {
         val l = pendingHighlightLocator ?: return;
-        val u = _currentBookId.value ?: return;
+        val u =_currentBookHash.value ?: return;
         val e = isEinkEnabled.value
         viewModelScope.launch {
             highlightDao.insertHighlight(
                 HighlightEntity(
-                    publicationId = u,
+                    bookHashId = u,
                     locatorJson = l.toJSON().toString(),
                     text = l.text.highlight ?: "Selected",
                     color = if (e) Color.DKGRAY else Color.YELLOW,
@@ -598,7 +598,7 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    fun deleteHighlight(id: Long) {
+    fun deleteHighlight(id: String) {
         viewModelScope.launch { highlightDao.deleteHighlightById(id) }
     }
 
@@ -698,7 +698,7 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun onReaderPause(locationJson: String) {
-        val uri = _currentBookId.value ?: return
+        val uri =_currentBookHash.value ?: return
         if (locationJson.isBlank() && _currentLocator.value == null) return
         viewModelScope.launch {
             val prog = try {
@@ -711,7 +711,7 @@ class ReaderViewModel @Inject constructor(
             } catch (e: Exception) {
                 0.0
             }
-            bookDao.updateBookProgress(uri, prog, locationJson, System.currentTimeMillis())
+            bookDao.updateBookProgressByUri(uri, prog, locationJson, System.currentTimeMillis())
             yield()
             withContext(Dispatchers.IO + NonCancellable) { syncRepository.sync() }
         }

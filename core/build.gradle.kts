@@ -1,21 +1,82 @@
 plugins {
-    alias(libs.plugins.android.library) // Using Library plugin
-    alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.dagger.hilt.android) // Hilt is needed for DI in Core
-    alias(libs.plugins.devtools.ksp) // KSP needed for Room
+    alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.android.library)
+    alias(libs.plugins.devtools.ksp)
+    alias(libs.plugins.androidx.room)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.kotlin.parcelize)
+    alias(libs.plugins.dagger.hilt.android)
 }
 
+// 1. KOTLIN MULTIPLATFORM BLOCK
+kotlin {
+    androidTarget {
+        compilations.all {
+            kotlinOptions.jvmTarget = "17"
+        }
+    }
+
+    // Define iOS targets for shared KMP
+    listOf(
+        iosX64(),
+        iosArm64(),
+        iosSimulatorArm64()
+    ).forEach { iosTarget ->
+        iosTarget.binaries.framework {
+            baseName = "VaachakCore"
+            isStatic = true
+        }
+    }
+
+    // Sort dependencies by platform
+    sourceSets {
+        commonMain.dependencies {
+            // Room KMP
+            implementation(libs.androidx.room.runtime)
+            implementation(libs.androidx.sqlite.bundled)
+
+            // Ktor Networking (Shared)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.serialization.json)
+            implementation(libs.ktor.client.logging)
+
+            // Readium (Shared)
+            implementation(libs.readium.shared)
+            implementation(libs.readium.streamer)
+            implementation(libs.readium.opds)
+
+            // Utilities
+            implementation(libs.kotlinx.serialization.json)
+        }
+
+        androidMain.dependencies {
+            // Android-specific dependencies
+            implementation(libs.androidx.core.ktx)
+            implementation(libs.androidx.documentfile)
+            implementation(libs.androidx.datastore.preferences)
+
+            // Android implementations for shared concepts
+            implementation(libs.androidx.room.ktx)
+            implementation(libs.hilt.android)
+
+            // Legacy / Android-only networking & AI
+            implementation(libs.retrofit)
+            implementation(libs.retrofit.gson)
+            implementation(libs.okhttp)
+            implementation(libs.google.generativeai)
+            implementation(libs.apache.commons)
+        }
+    }
+}
+
+// 2. ANDROID CONFIGURATION BLOCK
 android {
     namespace = "org.vaachak.reader.core"
-
-    // Syncs perfectly with Leisure via TOML
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
         minSdk = libs.versions.android.minSdk.get().toInt()
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
     }
@@ -32,59 +93,32 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        }
-    }
 }
 
+// 3. COMPILER PLUGINS (KSP) & DESUGARING
 dependencies {
-    // Desugaring
     coreLibraryDesugaring(libs.android.desugar)
 
-    // --- Core Dependencies ---
-    // Using 'api' allows modules depending on Core (like Leisure) to see these
-    // without re-declaring them, but 'implementation' is safer for build speeds.
+    // Room Compiler for KMP
+    add("kspCommonMainMetadata", libs.androidx.room.compiler)
+    add("kspAndroid", libs.androidx.room.compiler)
 
-    // Data & Networking
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.gson)
-    implementation(libs.okhttp)
-    implementation(libs.androidx.datastore.preferences)
-    implementation(libs.kotlinx.serialization.json)
-    implementation(libs.androidx.documentfile)
-    // Ktor (Used for some networking ops)
-    implementation(libs.ktor.client.core)
-    implementation(libs.ktor.client.cio)
-    implementation(libs.ktor.client.content.negotiation)
-    implementation(libs.ktor.serialization.json)
-    // Add this line for Logging:
-    implementation(libs.ktor.client.logging)
-    // Database (Room)
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
-
-    // Hilt (Dependency Injection)
-    implementation(libs.hilt.android)
+    // Hilt Compiler
     ksp(libs.hilt.compiler)
-
-    // Readium (Shared Logic only - Navigator UI stays in Leisure for now)
-    implementation(libs.readium.shared)
-    implementation(libs.readium.streamer)
-    implementation(libs.readium.opds)
-
-    // AI
-    implementation(libs.google.generativeai)
 
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+}
 
-    // Add Apache Commons for StarDict parsing
-    implementation(libs.apache.commons)
+// 4. ROOM KMP CONFIGURATION
+room {
+    schemaDirectory("$projectDir/schemas")
+}
+// Fixes KMP Room Alpha bug with Android Test assets
+tasks.withType<Copy>().configureEach {
+    if (name.contains("copyRoomSchemasToAndroidTestAssets")) {
+        enabled = false
+    }
 }

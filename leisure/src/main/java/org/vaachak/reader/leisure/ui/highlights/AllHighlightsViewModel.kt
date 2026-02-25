@@ -70,7 +70,7 @@ class AllHighlightsViewModel @Inject constructor(
             bookDao.getAllBooks(),
             _selectedTag
         ) { highlights, books, tag ->
-            val titleMap = books.associate { it.uriString to it.title }
+            val titleMap = books.associate { it.bookHash to it.title }
 
             val filteredHighlights = if (tag == "All") {
                 highlights
@@ -79,7 +79,7 @@ class AllHighlightsViewModel @Inject constructor(
             }
 
             filteredHighlights.groupBy { entity ->
-                titleMap[entity.publicationId] ?: "Unknown Book"
+                titleMap[entity.bookHashId] ?: "Unknown Book"
             }
         }.stateIn(
             scope = viewModelScope,
@@ -125,7 +125,7 @@ class AllHighlightsViewModel @Inject constructor(
      *
      * @param id The ID of the highlight to delete.
      */
-    fun deleteHighlight(id: Long) {
+    fun deleteHighlight(id: String) {
         viewModelScope.launch {
             highlightDao.deleteHighlightById(id)
         }

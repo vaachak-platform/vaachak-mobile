@@ -1,121 +1,138 @@
 package org.vaachak.reader.leisure.ui.settings
 
-
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import org.vaachak.reader.core.domain.model.AiConfig
-import org.vaachak.reader.core.domain.model.SettingsSection
-import org.vaachak.reader.core.domain.model.UserProfile
-import org.vaachak.reader.core.domain.model.OpdsEntity
+import kotlinx.coroutines.withContext
 import org.vaachak.reader.core.data.repository.OpdsRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
-import org.vaachak.reader.core.domain.model.ThemeMode
-import javax.inject.Inject
-import org.vaachak.reader.core.domain.model.ReaderPreferences
+import org.vaachak.reader.core.domain.model.*
 import org.vaachak.reader.leisure.utils.EinkHelper
-import dagger.hilt.android.qualifiers.ApplicationContext
-import android.content.Context
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import org.vaachak.reader.core.domain.model.TtsSettings
+import javax.inject.Inject
+
+// --- 1. SINGLE SOURCE OF TRUTH UI STATE ---
+
+
+// --- 2. INTERMEDIATE STATES (Keeps every combine block strictly at <= 5 arguments) ---
+private data class AccountState(val username: String, val device: String, val lastSync: Long, val offline: Boolean)
+private data class AiState(val gemini: String, val cfUrl: String, val token: String, val autoSave: Boolean)
+private data class ThemeState(val theme: ThemeMode, val contrast: Float, val bookshelfPrefs: BookshelfPreferences)
+private data class ViewState(val editSec: SettingsSection, val masked: Boolean, val error: String?)
+private data class ContentState(val tts: TtsSettings, val feeds: List<OpdsEntity>, val syncLoading: Boolean)
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsRepo: SettingsRepository,
     private val syncRepo: SyncRepository,
     private val opdsRepo: OpdsRepository,
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context
 ) : ViewModel() {
 
     // --- Internal Mutable State ---
     private val _activeEditSection = MutableStateFlow(SettingsSection.NONE)
     private val _isAiMasked = MutableStateFlow(true)
     private val _errorMessage = MutableStateFlow<String?>(null)
+    private val _isSyncLoading = MutableStateFlow(false)
 
-    // NEW: Sync Status Feedback
+    // Sync Status Feedback
     private val _syncMessage = MutableStateFlow<String?>(null)
     val syncMessage = _syncMessage.asStateFlow()
 
-    // 1. Add this Flow to observe Global Reader Settings
+    // Global Reader & Dictionary Flows
     val readerPreferences: StateFlow<ReaderPreferences> = settingsRepo.readerPreferences
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReaderPreferences())
 
-    // 2. Add Dictionary Flows
     val useEmbeddedDict = settingsRepo.getUseEmbeddedDictionary()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val dictionaryFolder = settingsRepo.getDictionaryFolder()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
-    // --- THE COMBINER (Single Source of Truth) ---
-    val uiState: StateFlow<SettingsUiState> = combine(
-        settingsRepo.syncUsername,      // 0
-        settingsRepo.deviceName,        // 1
-        settingsRepo.lastSyncTimestamp, // 2
-        settingsRepo.isOfflineModeEnabled, // 3
-        opdsRepo.catalogs,              // 4
-        settingsRepo.geminiKey,         // 5
-        settingsRepo.cfUrl,             // 6
-        settingsRepo.cfToken,           // 7
-        settingsRepo.isAutoSaveRecapsEnabled, // 8
-        _activeEditSection,             // 9
-        _isAiMasked,                    // 10
-        _errorMessage,                  // 11
-        settingsRepo.themeMode,         // 12
+    // --- GROUPED COMBINERS ---
+
+    private val accountFlow = combine(
+        settingsRepo.syncUsername,
+        settingsRepo.deviceName,
+        settingsRepo.lastSyncTimestamp,
+        settingsRepo.isOfflineModeEnabled
+    ) { username, device, lastSync, offline ->
+        AccountState(username, device, lastSync, offline)
+    }
+
+    private val aiFlow = combine(
+        settingsRepo.geminiKey,
+        settingsRepo.cfUrl,
+        settingsRepo.cfToken,
+        settingsRepo.isAutoSaveRecapsEnabled
+    ) { gemini, cfUrl, token, autoSave ->
+        AiState(gemini, cfUrl, token, autoSave)
+    }
+
+    private val themeFlow = combine(
+        settingsRepo.themeMode,
         settingsRepo.einkContrast,
-        settingsRepo.ttsSettings,// 13
-    ) { params ->
-        val username = params[0] as String
-        val device = params[1] as String
-        val lastSync = params[2] as Long
-        val offline = params[3] as Boolean
-        @Suppress("UNCHECKED_CAST")
-        val feeds = params[4] as List<OpdsEntity>
-        val gemini = params[5] as String
-        val cfUrl = params[6] as String
-        val token = params[7] as String
-        val autoSave = params[8] as Boolean
-        val editSec = params[9] as SettingsSection
-        val masked = params[10] as Boolean
-        val error = params[11] as String?
-        val theme = params[12] as ThemeMode
-        val contrast = params[13] as Float
-        val tts = params[14] as TtsSettings
-        val isAuthenticated = username.isNotBlank()
+        settingsRepo.bookshelfPreferences // <-- ADDED THIS
+    ) { theme: ThemeMode, contrast: Float, prefs: BookshelfPreferences ->
+        ThemeState(theme, contrast, prefs)
+    }
+
+    private val viewFlow = combine(
+        _activeEditSection,
+        _isAiMasked,
+        _errorMessage
+    ) { editSec, masked, error ->
+        ViewState(editSec, masked, error)
+    }
+
+    private val contentFlow = combine(
+        settingsRepo.ttsSettings,
+        opdsRepo.catalogs,
+        _isSyncLoading
+    ) { tts, feeds, syncLoading ->
+        ContentState(tts, feeds, syncLoading)
+    }
+
+    // --- THE MASTER UI STATE ---
+
+    val uiState: StateFlow<SettingsUiState> = combine(
+        accountFlow, aiFlow, themeFlow, viewFlow, contentFlow
+    ) { acc, ai, theme, view, content ->
+
+        val isAuthenticated = acc.username.isNotBlank()
 
         SettingsUiState(
             userProfile = UserProfile(
-                username = if (isAuthenticated) username else null,
-                deviceName = device,
-                lastSyncTime = lastSync,
+                username = if (isAuthenticated) acc.username else null,
+                deviceName = acc.device,
+                lastSyncTime = acc.lastSync,
                 isAuthenticated = isAuthenticated
             ),
-            isOfflineMode = offline,
-            catalogs = feeds,
+            isSyncLoading = content.syncLoading,
+            isOfflineMode = acc.offline,
+            catalogs = content.feeds,
             aiConfig = AiConfig(
-                isEnabled = gemini.isNotBlank(),
-                geminiKey = gemini,
-                cloudflareUrl = cfUrl,
-                authToken = token,
-                autoSaveRecaps = autoSave
+                isEnabled = ai.gemini.isNotBlank(),
+                geminiKey = ai.gemini,
+                cloudflareUrl = ai.cfUrl,
+                authToken = ai.token,
+                autoSaveRecaps = ai.autoSave
             ),
-            activeEditSection = editSec,
-            isAiMasked = masked,
-            errorMessage = error,
-            themeMode = theme,
-            einkContrast = contrast,
-            ttsSettings = tts,
+            activeEditSection = view.editSec,
+            isAiMasked = view.masked,
+            errorMessage = view.error,
+            themeMode = theme.theme,
+            einkContrast = theme.contrast,
+            bookshelfPreferences = theme.bookshelfPrefs,
+            ttsSettings = content.tts
         )
-    }.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5000),
-        SettingsUiState()
-    )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SettingsUiState())
 
     // --- ACTIONS ---
 
@@ -132,15 +149,21 @@ class SettingsViewModel @Inject constructor(
         _isAiMasked.value = masked
     }
 
+    fun clearError() {
+        _errorMessage.value = null
+    }
+
     fun saveAiConfig(gemini: String, cfUrl: String, token: String, autoSave: Boolean) {
         viewModelScope.launch {
             try {
-                val currentEink = settingsRepo.isEinkEnabled.first()
+                val currentTheme = settingsRepo.themeMode.first()
+                val isEink = currentTheme == ThemeMode.E_INK
+
                 settingsRepo.saveSettings(
                     gemini = gemini,
                     cfUrl = cfUrl,
                     cfToken = token,
-                    isEnk = currentEink
+                    isEnk = isEink
                 )
                 settingsRepo.setAutoSaveRecaps(autoSave)
                 _activeEditSection.value = SettingsSection.NONE
@@ -163,15 +186,10 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun clearError() { _errorMessage.value = null }
-
-    // --- NEW TTS ACTIONS ---
-
-
+    // --- TTS ACTIONS ---
 
     fun updateTtsSpeed(newSpeed: Float) {
         viewModelScope.launch {
-            // Constrain speed between 0.5x and 2.5x for safety
             val clampedSpeed = newSpeed.coerceIn(0.5f, 2.5f)
             settingsRepo.setTtsDefaultSpeed(clampedSpeed)
         }
@@ -189,11 +207,32 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    // --- NEW SYNC FUNCTIONS ---
+    fun setTtsLanguage(language: String) {
+        viewModelScope.launch {
+            settingsRepo.setTtsLanguage(language)
+        }
+    }
+
+    fun updateTtsPitch(pitch: Float) {
+        viewModelScope.launch {
+            val safePitch = (pitch.coerceIn(0.1f, 2.0f) * 10f).toInt() / 10f
+            settingsRepo.setTtsPitch(safePitch)
+        }
+    }
+
+    fun setSleepTimer(minutes: Int) {
+        viewModelScope.launch {
+            settingsRepo.setTtsSleepTimer(minutes)
+        }
+    }
+
+    // --- SYNC FUNCTIONS ---
 
     fun triggerManualSync() {
         viewModelScope.launch {
             _syncMessage.value = "Syncing..."
+            _isSyncLoading.value = true
+
             val result = syncRepo.sync()
 
             _syncMessage.value = if (result.isSuccess) {
@@ -201,6 +240,9 @@ class SettingsViewModel @Inject constructor(
             } else {
                 "Sync Failed: ${result.exceptionOrNull()?.message}"
             }
+
+            _isSyncLoading.value = false
+
             delay(3000)
             _syncMessage.value = null
         }
@@ -209,6 +251,7 @@ class SettingsViewModel @Inject constructor(
     fun testServerConnection() {
         viewModelScope.launch {
             _syncMessage.value = "Testing Server..."
+            _isSyncLoading.value = true
             try {
                 val useLocal = settingsRepo.useLocalServer.first()
                 val url = if (useLocal) settingsRepo.localServerUrl.first() else settingsRepo.syncCloudUrl.first()
@@ -223,10 +266,13 @@ class SettingsViewModel @Inject constructor(
             } catch (e: Exception) {
                 _syncMessage.value = "Error: ${e.message}"
             }
+            _isSyncLoading.value = false
             delay(3000)
             _syncMessage.value = null
         }
     }
+
+    // --- PREFERENCES & DICTIONARY ---
 
     fun updateReaderPreferences(prefs: ReaderPreferences) {
         viewModelScope.launch {
@@ -240,30 +286,33 @@ class SettingsViewModel @Inject constructor(
 
     fun setDictionaryFolder(uri: String) {
         viewModelScope.launch {
-            // 1. Run validation on IO thread to avoid freezing UI
             val isValid = withContext(Dispatchers.IO) {
                 settingsRepo.validateStarDictFolder(uri)
             }
 
-            // 2. Check Result
             if (isValid) {
                 settingsRepo.setDictionaryFolder(uri)
-                _errorMessage.value = null // Clear any previous errors
+                _errorMessage.value = null
                 _syncMessage.value = "Dictionary folder set successfully."
             } else {
-                // 3. Show Error if invalid
                 _errorMessage.value = "Invalid Folder: No StarDict (.idx) files found."
-                // Optionally clear the setting if it was previously set to something invalid
-                // settingsRepo.setDictionaryFolder("")
             }
         }
     }
 
-    // --- APP GLOBAL THEME ACTIONS (Fixes Sharpness/Dullness) ---
+    // --- APP GLOBAL THEME ACTIONS ---
+
+    fun toggleEinkMode(enabled: Boolean) {
+        viewModelScope.launch {
+            val mode = if (enabled) ThemeMode.E_INK else ThemeMode.LIGHT
+            settingsRepo.setThemeMode(mode)
+        }
+    }
+
     fun setAppTheme(mode: ThemeMode) {
         viewModelScope.launch {
             settingsRepo.setThemeMode(mode)
-            delay(100) // Small delay to let UI redraw first
+            delay(100)
             EinkHelper.requestFullRefresh(context)
         }
     }
@@ -273,45 +322,50 @@ class SettingsViewModel @Inject constructor(
             settingsRepo.setContrast(value)
         }
     }
+
     fun onContrastChangedFinished() {
         viewModelScope.launch {
-            // Wait a tiny bit for the UI to settle on the final color
             delay(200)
-            // Trigger the hardware refresh to clear ghosting
-            // (Assuming you have access to context or EinkHelper here)
-            // If context is not injected, you can pass it from UI or use a Helper that accepts it.
-            // For now, let's assume specific Activity logic or just logging if not fully wired.
+            EinkHelper.requestFullRefresh(context)
         }
     }
 
-    // Helper to trigger refresh if Context is available in ViewModel (recommended way is via UI event)
     fun triggerEinkRefresh(context: Context) {
         EinkHelper.requestFullRefresh(context)
     }
-    // --- TTS LANGUAGE OVERRIDE ---
-    fun setTtsLanguage(language: String) {
-        viewModelScope.launch {
-            // language will be "default", "en", or "hi"
-            settingsRepo.setTtsLanguage(language)
-        }
+
+
+
+
+
+    // --- LIBRARY & COVER STYLE ACTIONS ---
+
+    fun setDitheringMode(mode: DitheringMode) {
+        viewModelScope.launch { settingsRepo.setDitheringMode(mode) }
     }
 
-    // --- TTS PITCH CONTROL ---
-    fun updateTtsPitch(pitch: Float) {
-        viewModelScope.launch {
-            // 1. Clamp the pitch between 0.1f and 2.0f to prevent engine crashes
-            // 2. Round to 1 decimal place to prevent floating point weirdness (e.g. 0.9000001f)
-            val safePitch = (pitch.coerceIn(0.1f, 2.0f) * 10f).toInt() / 10f
-            settingsRepo.setTtsPitch(safePitch)
-        }
+    fun setGroupBySeries(enabled: Boolean) {
+        viewModelScope.launch { settingsRepo.setGroupBySeries(enabled) }
     }
 
+    fun setCoverAspectRatio(ratio: CoverAspectRatio) {
+        viewModelScope.launch { settingsRepo.setCoverAspectRatio(ratio) }
+    }
 
-    // --- SLEEP TIMER ---
-    fun setSleepTimer(minutes: Int) {
+    fun toggleCoverElement(
+        currentPrefs: BookshelfPreferences,
+        format: Boolean? = null,
+        favorite: Boolean? = null,
+        progress: Boolean? = null,
+        sync: Boolean? = null
+    ) {
         viewModelScope.launch {
-            // minutes will be 0 (off), 15, 30, or 60
-            settingsRepo.setTtsSleepTimer(minutes)
+            settingsRepo.setCoverStyleElements(
+                format = format ?: currentPrefs.showFormatBadge,
+                favorite = favorite ?: currentPrefs.showFavoriteIcon,
+                progress = progress ?: currentPrefs.showProgressBadge,
+                sync = sync ?: currentPrefs.showSyncStatus
+            )
         }
     }
 }

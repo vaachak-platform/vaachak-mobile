@@ -24,6 +24,7 @@ package org.vaachak.reader.leisure.ui.settings
 
 import org.vaachak.reader.core.domain.model.OpdsEntity
 import org.vaachak.reader.core.domain.model.AiConfig
+import org.vaachak.reader.core.domain.model.BookshelfPreferences
 import org.vaachak.reader.core.domain.model.SettingsSection
 import org.vaachak.reader.core.domain.model.UserProfile
 import org.vaachak.reader.core.domain.model.ThemeMode
@@ -62,5 +63,7 @@ data class SettingsUiState(
         visualStyle = "underline",
         pitch = 0.5f,
         voice = "default"
-    )
+    ),
+
+    val bookshelfPreferences: BookshelfPreferences = BookshelfPreferences()
 )

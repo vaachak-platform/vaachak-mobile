@@ -90,7 +90,7 @@ fun SessionHistoryScreen(
                 items(recallMap.entries.toList()) { entry ->
                     val bookTitle = entry.key
                     val summary = entry.value
-                    val bookUri = books.find { it.title == bookTitle }?.uriString
+                    val bookUri = books.find { it.title == bookTitle }?.localUri
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()

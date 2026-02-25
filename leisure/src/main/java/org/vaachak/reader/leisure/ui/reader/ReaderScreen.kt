@@ -70,18 +70,18 @@ import org.readium.r2.shared.util.AbsoluteUrl
 import org.vaachak.reader.leisure.ui.reader.components.TtsSettingsBottomSheet
 import kotlin.math.roundToInt
 import org.readium.navigator.media.tts.android.AndroidTtsEngine.Voice
-
+import androidx.activity.compose.LocalActivity
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalReadiumApi::class)
 @Composable
 fun ReaderScreen(
-    bookId: Long,
+    bookHash: String,
     initialUri: String?,
     initialLocatorJson: String?,
     onBack: () -> Unit,
     onTtsStatusChange: (Boolean) -> Unit,
     viewModel: ReaderViewModel = hiltViewModel()
 ) {
-    val activity = LocalContext.current as AppCompatActivity
+    val activity = LocalActivity.current as AppCompatActivity
     val view = LocalView.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -117,7 +117,7 @@ fun ReaderScreen(
     val showTtsBar by viewModel.showTtsBar.collectAsState()
     val ttsSettings by viewModel.ttsSettings.collectAsState()
 
-    var showDeleteDialogId by remember { mutableStateOf<Long?>(null) }
+    var showDeleteDialogId by remember { mutableStateOf<String?>(null) }
 
     val isBottomSheetVisible by viewModel.isBottomSheetVisible.collectAsState()
     val aiResponse by viewModel.aiResponse.collectAsState()
@@ -251,7 +251,9 @@ fun ReaderScreen(
         object : DecorableNavigator.Listener {
             override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
                 if (event.group == "user_highlights") {
-                    event.decoration.id.toLongOrNull()?.let { showDeleteDialogId = it; return true }
+                    // Assign the UUID string directly!
+                    showDeleteDialogId = event.decoration.id
+                    return true
                 }
                 return false
             }

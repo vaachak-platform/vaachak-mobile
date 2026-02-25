@@ -32,12 +32,12 @@ sealed class Screen(val route: String) {
 
     // UPDATED: Dynamic Route for Reader with optional Locator
     data object Reader : Screen("reader/{bookId}?locator={locator}") {
-        fun createRoute(bookId: Long, locator: String? = null): String {
+        fun createRoute(bookHash: String, locator: String? = null): String {
             return if (locator != null) {
                 // Ensure locator is encoded if it contains special characters
-                "reader/$bookId?locator=$locator"
+                "reader/$bookHash?locator=$locator"
             } else {
-                "reader/$bookId"
+                "reader/$bookHash"
             }
         }
     }
@@ -50,4 +50,6 @@ sealed class Screen(val route: String) {
     data object Dictionary : Screen("settings/dictionary")
 
     data object TTS : Screen("settings/tts")
+
+    data object Bookshelf : Screen("settings/bookshelf")
 }

@@ -187,7 +187,7 @@ fun AllHighlightsScreen(
                             CompactHighlightItem(
                                 highlight = highlight,
                                 isEink = isEink,
-                                onClick = { onHighlightClick(highlight.publicationId, highlight.locatorJson) },
+                                onClick = { onHighlightClick(highlight.bookHashId, highlight.locatorJson) },
                                 onDelete = { viewModel.deleteHighlight(highlight.id) }
                             )
                             if (!isEink) HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha=0.2f))

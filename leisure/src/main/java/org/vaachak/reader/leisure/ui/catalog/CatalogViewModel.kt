@@ -26,7 +26,6 @@ import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import org.vaachak.reader.core.data.local.OpdsDao
 import org.vaachak.reader.core.domain.model.OpdsEntity
 import org.vaachak.reader.core.data.repository.GutendexRepository
 import org.vaachak.reader.core.data.repository.LibraryRepository

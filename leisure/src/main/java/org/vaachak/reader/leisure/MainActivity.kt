@@ -25,7 +25,6 @@ package org.vaachak.reader.leisure
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.compose.setContent
@@ -36,11 +35,20 @@ import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Photo
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,7 +59,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import dagger.hilt.android.AndroidEntryPoint
@@ -61,9 +68,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
+import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.core.domain.model.ThemeMode
 import org.vaachak.reader.leisure.navigation.Screen
 import org.vaachak.reader.leisure.ui.bookshelf.BookshelfScreen
+import org.vaachak.reader.leisure.ui.bookshelf.BookshelfUiState
 import org.vaachak.reader.leisure.ui.bookshelf.BookshelfViewModel
 import org.vaachak.reader.leisure.ui.catalog.CatalogBrowserScreen
 import org.vaachak.reader.leisure.ui.catalog.CatalogManagerScreen
@@ -73,53 +82,48 @@ import org.vaachak.reader.leisure.ui.reader.ReaderScreen
 import org.vaachak.reader.leisure.ui.reader.components.VaachakNavigationFooter
 import org.vaachak.reader.leisure.ui.settings.AiConfigScreen
 import org.vaachak.reader.leisure.ui.settings.AppAppearanceScreen
+import org.vaachak.reader.leisure.ui.settings.LibrarySettingsScreen
 import org.vaachak.reader.leisure.ui.settings.DefaultAppearanceScreen
 import org.vaachak.reader.leisure.ui.settings.DictionarySettingsScreen
+
 import org.vaachak.reader.leisure.ui.settings.SettingsScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsViewModel
 import org.vaachak.reader.leisure.ui.settings.SyncSettingsScreen
 import org.vaachak.reader.leisure.ui.settings.TtsSettingsScreen
 import org.vaachak.reader.leisure.ui.theme.VaachakTheme
+import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
-import java.net.URLEncoder
 import java.util.UUID
 import java.util.zip.ZipFile
-
+import androidx.compose.runtime.saveable.rememberSaveable
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
 
-    // We keep Activity-scoped ViewModels to handle "Import Book" intents
-    // that might happen before UI loads.
     private val settingsViewModel: SettingsViewModel by viewModels()
     private val bookshelfViewModel: BookshelfViewModel by viewModels()
-
-    // NEW: Track TTS state to handle volume keys
     private var isTtsActive = false
+
+    // HELPER: Extracts a flat list of all books from the KMP UI State
+    private val BookshelfUiState.allBooksFlat: List<BookEntity>
+        get() = listOfNotNull(heroBook) + groupedLibrary.values.flatten()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Handle "Open With" intents on cold start
         if (savedInstanceState == null && intent?.action == Intent.ACTION_VIEW) {
             processExternalIntent(intent)
         }
 
         setContent {
             val navController = rememberNavController()
-            val navBackStackEntry by navController.currentBackStackEntryAsState()
-            val currentRoute = navBackStackEntry?.destination?.route
 
-            // 1. COLLECT THE FULL STATE
             val uiState by settingsViewModel.uiState.collectAsState()
-
-            // 2. READ PROPERTIES FROM STATE
             val currentTheme = uiState.themeMode
             val einkContrast = uiState.einkContrast
             val isEink = currentTheme == ThemeMode.E_INK
 
-            // Fix for E-Ink ghosting on touch
             CompositionLocalProvider(
                 LocalIndication provides if (isEink) NoIndication else LocalIndication.current
             ) {
@@ -127,24 +131,14 @@ class MainActivity : AppCompatActivity() {
                     Scaffold(
                         containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.background,
                         bottomBar = {
-                            // Only show Footer on top-level tabs if needed
-                            // (Note: We removed Highlights link from Bookshelf bottom bar per request,
-                            // effectively removing the bottom bar from Bookshelf.
-                            // However, if you want a global nav bar for other screens, keep logic here.
-                            // Currently, only Library root might show it, but BookshelfScreen handles its own layout now.)
-                            val showFooter = false // DISABLED: Bookshelf now handles its own nav
-
+                            val showFooter = false // Bookshelf handles its own nav
                             if (showFooter) {
                                 VaachakNavigationFooter(
                                     onBookshelfClick = {
-                                        navController.navigate(Screen.Library.route) {
-                                            popUpTo(Screen.Library.route) { inclusive = true }
-                                        }
+                                        navController.navigate(Screen.Library.route) { popUpTo(Screen.Library.route) { inclusive = true } }
                                     },
                                     onHighlightsClick = {
-                                        navController.navigate(Screen.Highlights.route) {
-                                            launchSingleTop = true
-                                        }
+                                        navController.navigate(Screen.Highlights.route) { launchSingleTop = true }
                                     },
                                     onAboutClick = {
                                         navController.navigate(Screen.Settings.route)
@@ -155,74 +149,57 @@ class MainActivity : AppCompatActivity() {
                         }
                     ) { padding ->
                         Surface(
-                            modifier = Modifier
-                                .padding(padding)
-                                .fillMaxSize(),
+                            modifier = Modifier.padding(padding).fillMaxSize(),
                             color = if (isEink) Color.White else MaterialTheme.colorScheme.background
                         ) {
-                            // --- NAVIGATION GRAPH ---
                             NavHost(
                                 navController = navController,
                                 startDestination = Screen.Library.route
                             ) {
-                                // 1. BOOKSHELF (Home)
+                                // 1. APP Shelf
                                 composable(Screen.Library.route) {
-                                    // BookshelfScreen likely collects state internally, so passing VM is fine
-                                    BookshelfScreen(
-                                        viewModel = bookshelfViewModel,
+                                    MainAppScreen(
+                                        navController = navController,
+                                        bookshelfViewModel = bookshelfViewModel,
                                         onBookClick = { uri ->
-                                            // Encode URI to be safe in route
-                                            val encodedUri = URLEncoder.encode(uri, "UTF-8")
-                                            // Note: Route logic expects ID or URI? Screen.Reader usually takes ID.
-                                            // Let's resolve ID from URI for safety if your route is "reader/{bookId}"
-                                            val book = bookshelfViewModel.allBooks.value.find { it.uriString == uri }
+                                            val currentState = bookshelfViewModel.uiState.value
+                                            val book = currentState.allBooksFlat.find { it.localUri == uri }
                                             if (book != null) {
-                                                navController.navigate(Screen.Reader.createRoute(book.id))
+                                                navController.navigate(Screen.Reader.createRoute(book.bookHash, book.lastCfiLocation))
                                             } else {
                                                 Toast.makeText(this@MainActivity, "Loading book...", Toast.LENGTH_SHORT).show()
                                             }
                                         },
-                                        onBookmarkClick = { bookId, locatorJson ->
-                                            // Handle deep link to bookmark
-                                            // Assuming Screen.Reader route can handle optional arguments or we pass it via savedStateHandle
-                                            // For now, simple navigation to book:
-                                            // You might need to update Screen.Reader to accept ?locator={locator}
-                                            navController.navigate(Screen.Reader.createRoute(bookId.toLongOrNull() ?: 0L, locatorJson))
-                                        },
-                                        onRecallClick = { /* Navigate to History/Recall feature */ },
-                                        onSettingsClick = { navController.navigate(Screen.Settings.route) },
                                         onCatalogClick = { navController.navigate(Screen.CatalogBrowser.route) },
-                                        onHighlightsClick = { navController.navigate(Screen.Highlights.route) } // NEW: Added
+                                        onHighlightsClick = { navController.navigate(Screen.Highlights.route) }
                                     )
                                 }
 
-                                // 2. READER (With ID Argument and Optional Locator)
+                                // 2. READER
                                 composable(
                                     route = Screen.Reader.route,
                                     arguments = listOf(
-                                        navArgument("bookId") { type = NavType.LongType },
+                                        navArgument("bookId") { type = NavType.StringType },
                                         navArgument("locator") { type = NavType.StringType; nullable = true }
                                     )
                                 ) { backStackEntry ->
-                                    val bookId = backStackEntry.arguments?.getLong("bookId") ?: 0L
+                                    val bookHash = backStackEntry.arguments?.getString("bookId") ?: ""
                                     val locatorJson = backStackEntry.arguments?.getString("locator")
 
-                                    // Collect state here instead of reading .value
-                                    val allBooks by bookshelfViewModel.allBooks.collectAsState()
-                                    val book = allBooks.find { it.id == bookId }
+                                    val bookshelfState by bookshelfViewModel.uiState.collectAsState()
+                                    val book = bookshelfState.allBooksFlat.find { it.bookHash == bookHash }
 
                                     if (book != null) {
                                         ReaderScreen(
-                                            bookId = bookId,
-                                            initialUri = book.uriString,
+                                            bookHash = bookHash,
+                                            initialUri = book.localUri,
                                             initialLocatorJson = locatorJson,
                                             onBack = {
-                                                // Reset TTS state on exit just in case
                                                 isTtsActive = false
                                                 navController.popBackStack()
                                             },
                                             onTtsStatusChange = { active ->
-                                                isTtsActive = active // Update Activity state
+                                                isTtsActive = active
                                             }
                                         )
                                     } else {
@@ -231,7 +208,7 @@ class MainActivity : AppCompatActivity() {
                                         }
                                         LaunchedEffect(Unit) {
                                             delay(1000)
-                                            if (bookshelfViewModel.allBooks.value.none { it.id == bookId }) {
+                                            if (bookshelfViewModel.uiState.value.allBooksFlat.none { it.bookHash == bookHash }) {
                                                 navController.popBackStack()
                                             }
                                         }
@@ -243,7 +220,7 @@ class MainActivity : AppCompatActivity() {
                                     AllHighlightsScreen(
                                         onBack = { navController.popBackStack() },
                                         onHighlightClick = { bookId, locator ->
-                                            navController.navigate(Screen.Reader.createRoute(bookId.toLong(), locator))
+                                            navController.navigate(Screen.Reader.createRoute(bookId, locator))
                                         }
                                     )
                                 }
@@ -253,11 +230,11 @@ class MainActivity : AppCompatActivity() {
                                     CatalogBrowserScreen(
                                         onBack = { navController.popBackStack() },
                                         onReadBook = { uri ->
-                                            // Find book ID from URI to navigate
-                                            val book = bookshelfViewModel.allBooks.value.find { it.uriString == uri }
+                                            val currentState = bookshelfViewModel.uiState.value
+                                            val book = currentState.allBooksFlat.find { it.localUri == uri }
                                             if (book != null) {
                                                 navController.popBackStack(Screen.Library.route, false)
-                                                navController.navigate(Screen.Reader.createRoute(book.id))
+                                                navController.navigate(Screen.Reader.createRoute(book.bookHash))
                                             }
                                         },
                                         onGoToBookshelf = {
@@ -266,60 +243,21 @@ class MainActivity : AppCompatActivity() {
                                     )
                                 }
 
-                                // 5. SETTINGS HUB
+                                // 5 - 12 SETTINGS & SPOKES
                                 composable(Screen.Settings.route) {
-                                    SettingsScreen(navController = navController)
-                                }
-
-                                // 6. LOGIN SPOKE
-                                composable(Screen.Login.route) {
-                                    LoginScreen(navController = navController)
-                                }
-
-                                // 7. CATALOG MANAGER SPOKE
-                                composable(Screen.CatalogManage.route) {
-                                    CatalogManagerScreen(
-                                        onBack = { navController.popBackStack() }
+                                    SettingsScreen(
+                                        navController = navController
                                     )
                                 }
-
-                                // 8. AI CONFIG SCREEN
-                                composable(Screen.AiConfig.route) {
-                                    AiConfigScreen(onBack = { navController.popBackStack() })
-                                }
-
-                                // 9. SYNC SETTINGS SCREEN
-                                composable(Screen.SyncSettings.route) {
-                                    SyncSettingsScreen(navController = navController)
-                                }
-
-                                // 10. APPEARANCE SETTINGS (NEW)
-                                composable(Screen.Appearance.route) {
-                                    DefaultAppearanceScreen(
-                                        onBack = { navController.popBackStack() }
-                                    )
-                                }
-
-                                //  TTS (NEW)
-                                composable(Screen.TTS.route) {
-                                    TtsSettingsScreen(
-                                        onBack = { navController.popBackStack() }
-                                    )
-                                }
-
-                                // 11. APP APPEARANCE (NEW)
-                                composable(Screen.AppAppearance.route) {
-                                    AppAppearanceScreen(
-                                        onBack = { navController.popBackStack() }
-                                    )
-                                }
-
-                                // 12. DICTIONARY
-                                composable(Screen.Dictionary.route) {
-                                    DictionarySettingsScreen(
-                                        onBack = { navController.popBackStack() }
-                                    )
-                                }
+                                composable(Screen.Login.route) { LoginScreen(navController = navController) }
+                                composable(Screen.CatalogManage.route) { CatalogManagerScreen(onBack = { navController.popBackStack() }) }
+                                composable(Screen.AiConfig.route) { AiConfigScreen(onBack = { navController.popBackStack() }) }
+                                composable(Screen.SyncSettings.route) { SyncSettingsScreen(navController = navController) }
+                                composable(Screen.Appearance.route) { DefaultAppearanceScreen(onBack = { navController.popBackStack() }) }
+                                composable(Screen.TTS.route) { TtsSettingsScreen(onBack = { navController.popBackStack() }) }
+                                composable(Screen.AppAppearance.route) { AppAppearanceScreen(onBack = { navController.popBackStack() }) }
+                                composable(Screen.Dictionary.route) { DictionarySettingsScreen(onBack = { navController.popBackStack() }) }
+                                composable(Screen.Bookshelf.route) { LibrarySettingsScreen(navController = navController) }
                             }
                         }
                     }
@@ -334,7 +272,6 @@ class MainActivity : AppCompatActivity() {
         processExternalIntent(intent)
     }
 
-    // --- HELPER: IMPORT LOGIC (Preserved) ---
     private fun processExternalIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_VIEW && intent.data != null) {
             val contentUri = intent.data!!
@@ -343,38 +280,33 @@ class MainActivity : AppCompatActivity() {
                 try {
                     Toast.makeText(this@MainActivity, "Importing book...", Toast.LENGTH_SHORT).show()
 
-                    val localFile = withContext(Dispatchers.IO) {
-                        copyToExternalStorage(contentUri)
-                    }
+                    val localFile = withContext(Dispatchers.IO) { copyToExternalStorage(contentUri) }
 
                     if (localFile != null && localFile.exists() && localFile.length() > 0) {
                         val tempTitle = withContext(Dispatchers.IO) { getEpubTitle(localFile) } ?: ""
 
                         waitForDatabaseToLoad()
 
-                        val allKnownBooks = bookshelfViewModel.allBooks.value
+                        val allKnownBooks = bookshelfViewModel.uiState.value.allBooksFlat
                         val existingBook = allKnownBooks.find { book ->
                             book.title.trim().equals(tempTitle.trim(), ignoreCase = true)
                         }
 
                         if (existingBook != null) {
-                            Log.d("VaachakMain", "Duplicate found: '${existingBook.title}'")
+                            Timber.d("Duplicate found: '${existingBook.title}'")
                             withContext(Dispatchers.IO) { localFile.delete() }
-                            Toast.makeText(this@MainActivity, "Book already exists", Toast.LENGTH_SHORT)
-                                .show()
+                            Toast.makeText(this@MainActivity, "Book already exists", Toast.LENGTH_SHORT).show()
                         } else {
-                            Log.d("VaachakMain", "Importing New Book")
+                            Timber.d("Importing New Book")
                             val localUri = Uri.fromFile(localFile)
                             bookshelfViewModel.importBook(localUri)
-                            Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT)
-                                .show()
+                            Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT).show()
                         }
                     } else {
-                        Toast.makeText(this@MainActivity, "Failed to load file", Toast.LENGTH_SHORT)
-                            .show()
+                        Toast.makeText(this@MainActivity, "Failed to load file", Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Timber.e(e, "Error opening book")
                     Toast.makeText(this@MainActivity, "Error opening book", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -383,7 +315,7 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun waitForDatabaseToLoad() {
         withTimeoutOrNull(2000) {
-            while (bookshelfViewModel.allBooks.value.isEmpty()) {
+            while (bookshelfViewModel.uiState.value.allBooksFlat.isEmpty()) {
                 delay(100)
             }
         }
@@ -403,7 +335,7 @@ class MainActivity : AppCompatActivity() {
             }
             destFile
         } catch (e: Exception) {
-            e.printStackTrace()
+            Timber.e(e, "Error copying to external storage")
             null
         }
     }
@@ -412,16 +344,12 @@ class MainActivity : AppCompatActivity() {
         return try {
             ZipFile(epubFile).use { zip ->
                 val containerEntry = zip.getEntry("META-INF/container.xml") ?: return null
-                val containerXml =
-                    zip.getInputStream(containerEntry).bufferedReader().use { it.readText() }
+                val containerXml = zip.getInputStream(containerEntry).bufferedReader().use { it.readText() }
                 val opfPathMatch = Regex("full-path=\"([^\"]+)\"").find(containerXml)
                 val opfPath = opfPathMatch?.groupValues?.get(1) ?: return null
                 val opfEntry = zip.getEntry(opfPath) ?: return null
                 val opfXml = zip.getInputStream(opfEntry).bufferedReader().use { it.readText() }
-                val titleMatch = Regex(
-                    "<dc:title[^>]*>(.*?)</dc:title>",
-                    RegexOption.DOT_MATCHES_ALL
-                ).find(opfXml)
+                val titleMatch = Regex("<dc:title[^>]*>(.*?)</dc:title>", RegexOption.DOT_MATCHES_ALL).find(opfXml)
                 titleMatch?.groupValues?.get(1)
             }
         } catch (e: Exception) {
@@ -429,38 +357,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- HARDWARE BUTTONS (Volume Page Turn) ---
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         val isVolumeDown = keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
         val isVolumeUp = keyCode == KeyEvent.KEYCODE_VOLUME_UP
         val isPageDown = keyCode == KeyEvent.KEYCODE_PAGE_DOWN
         val isPageUp = keyCode == KeyEvent.KEYCODE_PAGE_UP
 
-        // Check if the key is relevant to us
         if (isVolumeDown || isVolumeUp || isPageDown || isPageUp) {
-
-            // CRITICAL FIX: If TTS is active and the user presses a Volume key,
-            // let the system handle it (adjust volume).
             if (isTtsActive && (isVolumeDown || isVolumeUp)) {
                 return super.onKeyDown(keyCode, event)
             }
 
-            // Otherwise, hijack the key for Page Turning
             val fragment = supportFragmentManager.findFragmentByTag("EPUB_READER_FRAGMENT") as? EpubNavigatorFragment
 
             fragment?.let { navigator ->
-                // Volume Down / Page Down -> Next Page
                 if (isVolumeDown || isPageDown) {
                     navigator.goForward(animated = false)
-                }
-                // Volume Up / Page Up -> Previous Page
-                else {
+                } else {
                     navigator.goBackward(animated = false)
                 }
-                return true // We consumed the event (prevent system default)
+                return true
             }
         }
-
         return super.onKeyDown(keyCode, event)
     }
 
@@ -468,8 +386,64 @@ class MainActivity : AppCompatActivity() {
         override fun create(interactionSource: InteractionSource): DelegatableNode {
             return object : Modifier.Node(), DelegatableNode {}
         }
-
         override fun hashCode(): Int = -1
         override fun equals(other: Any?): Boolean = other === this
+    }
+}
+@Composable
+fun MainAppScreen(
+    navController: androidx.navigation.NavController,
+    bookshelfViewModel: BookshelfViewModel,
+    onBookClick: (String) -> Unit,
+    onCatalogClick: () -> Unit,
+    onHighlightsClick: () -> Unit
+) {
+    val tabs = listOf("Books", "Comics", "Audio", "Settings")
+    var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
+
+    androidx.activity.compose.BackHandler(enabled = selectedTabIndex != 0) {
+        selectedTabIndex = 0
+    }
+
+    Scaffold(
+        topBar = {
+            PrimaryTabRow(
+                selectedTabIndex = selectedTabIndex,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ) {
+                tabs.forEachIndexed { index, title ->
+                    val icon = when (index) {
+                        0 -> Icons.Default.Book
+                        1 -> Icons.Outlined.Photo
+                        2 -> Icons.Default.Audiotrack
+                        3 -> Icons.Default.Settings
+                        else -> Icons.Default.Book
+                    }
+                    Tab(
+                        selected = selectedTabIndex == index,
+                        onClick = { selectedTabIndex = index },
+                        text = { Text(title) },
+                        icon = { Icon(icon, contentDescription = title) }
+                    )
+                }
+            }
+        }
+    ) { paddingValues ->
+        Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            when (selectedTabIndex) {
+                0 -> BookshelfScreen(
+                    viewModel = bookshelfViewModel,
+                    onBookClick = onBookClick,
+                   onCatalogClick = onCatalogClick,
+                    onHighlightsClick = onHighlightsClick
+                )
+                1 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("ComicShelf (Coming Soon)") }
+                2 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("AudioShelf (Coming Soon)") }
+                3 -> SettingsScreen(
+                    navController = navController // This tells the back arrow to switch back to the Books tab!
+                )
+            }
+        }
     }
 }

@@ -74,7 +74,7 @@ class SessionHistoryViewModel @Inject constructor(
             _isLoading.value = true
             val books = bookDao.getAllBooks().first()
                 .filter { it.progress > 0.0 && it.progress < 0.99 }
-                .sortedByDescending { it.id }
+                .sortedByDescending { it.bookHash }
                 .take(5)
 
             _recentBooks.value = books
@@ -83,7 +83,7 @@ class SessionHistoryViewModel @Inject constructor(
 
                     launch {
                         try {
-                            val highlights = highlightDao.getHighlightsForBook(book.uriString)
+                            val highlights = highlightDao.getHighlightsForBook(book.bookHash)
                                 .first()
                                 .take(10)
                                 .joinToString("\n") { it.text }
@@ -111,7 +111,7 @@ class SessionHistoryViewModel @Inject constructor(
     private fun saveRecapAsHighlight(book: BookEntity, summary: String) {
         viewModelScope.launch {
             val recapHighlight = HighlightEntity(
-                publicationId = book.uriString,
+                bookHashId  = book.bookHash,
                 locatorJson = book.lastLocationJson ?: "",
                 text = summary,
                 color = -0x333334, // Gray for E-ink
