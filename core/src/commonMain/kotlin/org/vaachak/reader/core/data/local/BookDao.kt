@@ -28,6 +28,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 import org.vaachak.reader.core.domain.model.BookEntity
+import org.vaachak.reader.core.utils.getCurrentTimeMillis
 
 @Dao
 interface BookDao {
@@ -73,7 +74,7 @@ interface BookDao {
     suspend fun getBookByUri(localUri: String): BookEntity?
 
     @Query("UPDATE books SET lastRead = :timestamp, updatedAt = :timestamp, isDirty = 1 WHERE localUri = :localUri")
-    suspend fun updateLastRead(localUri: String, timestamp: Long = System.currentTimeMillis())
+    suspend fun updateLastRead(localUri: String, timestamp: Long = getCurrentTimeMillis())
 
     @Query("SELECT EXISTS(SELECT 1 FROM books WHERE title = :title LIMIT 1)")
     suspend fun isBookExists(title: String): Boolean

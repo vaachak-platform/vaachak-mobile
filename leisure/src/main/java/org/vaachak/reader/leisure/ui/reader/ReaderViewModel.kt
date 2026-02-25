@@ -3,7 +3,6 @@ package org.vaachak.reader.leisure.ui.reader
 import android.app.Application
 import android.graphics.Color
 import android.net.Uri
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,6 +60,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import org.readium.navigator.media.tts.android.AndroidTtsEngine
 import org.vaachak.reader.core.domain.model.TtsSettings
+
+
 @OptIn(ExperimentalCoroutinesApi::class, ExperimentalReadiumApi::class, FlowPreview::class)
 @HiltViewModel
 class ReaderViewModel @Inject constructor(
@@ -113,6 +114,7 @@ class ReaderViewModel @Inject constructor(
 
 
     // --- 3. READER STATE ---
+    private var isFirstLocator = true
     private val _publication = MutableStateFlow<Publication?>(null)
     val publication: StateFlow<Publication?> = _publication.asStateFlow()
     private val _currentLocator = MutableStateFlow<Locator?>(null)
@@ -173,6 +175,7 @@ class ReaderViewModel @Inject constructor(
     val snackbarMessage = _snackbarMessage.asStateFlow()
 
     private val _currentBookHash = MutableStateFlow<String?>(null)
+    private val _currentLocalUri = MutableStateFlow<String?>(null)
     private var currentSelectedText = ""
     private var pendingJumpLocator: String? = null
     private var pendingHighlightLocator: Locator? = null
@@ -288,7 +291,10 @@ class ReaderViewModel @Inject constructor(
             _bookAiEnabled.value = !isGlobalOffline
         }
 
-       _currentBookHash.value = uri.toString()
+        val uriString = uri.toString()
+        _currentLocalUri.value = uriString
+        // 1. LOCK PROGRESS SAVING!
+        isFirstLocator = true
 
         viewModelScope.launch {
             syncRepository.sync()
@@ -543,6 +549,13 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun updateProgress(l: Locator) {
+        if (isFirstLocator) {
+            isFirstLocator = false
+            val targetProg = _initialLocator.value?.locations?.totalProgression ?: 0.0
+            val emittedProg = l.locations.totalProgression ?: 0.0
+            if (emittedProg < 0.01 && targetProg > 0.01) return
+        }
+
         _currentLocator.value = l
         val prog = l.locations.totalProgression ?: 0.0
         val pos = l.locations.position ?: 0
@@ -550,29 +563,34 @@ class ReaderViewModel @Inject constructor(
         if (prog > 0.99) pct = 100
         _currentPageInfo.value = if (pos > 0) "Page $pos ($pct%)" else "$pct% completed"
 
-        val uri =_currentBookHash.value ?: return
+        val uri = _currentLocalUri.value ?: return
         val json = l.toJSON().toString()
+
         viewModelScope.launch {
-            val currentBook = bookDao.getBookByUri(uri)
-            val now = System.currentTimeMillis()
-            if (currentBook == null || now > currentBook.lastRead) {
-                bookDao.updateBookProgressByUri(uri, prog, json, now)
-            } else {
-                Log.d("SyncDebug", "Ignored progress update to avoid overwriting newer cloud data.")
-            }
+            bookDao.updateBookProgressByUri(uri, prog, json, System.currentTimeMillis())
         }
     }
 
     fun closeBook() {
+        val finalUri = _currentLocalUri.value
+        val finalLocator = _currentLocator.value
         viewModelScope.launch {
+            if (finalUri != null && finalLocator != null) {
+                val json = finalLocator.toJSON().toString()
+                val prog = finalLocator.locations.totalProgression ?: 0.0
+                bookDao.updateBookProgressByUri(finalUri, prog, json, System.currentTimeMillis())
+            }
             closeTts()
             readiumManager.closePublication()
             _publication.value = null
             _currentLocator.value = null
+            _initialLocator.value = null
             _bookSearchQuery.value = ""
             _searchResults.value = emptyList()
             _showHighlights.value = false
             _showBookmarks.value = false
+            _currentLocalUri.value = null
+            _currentBookHash.value = null
         }
     }
 
@@ -581,8 +599,8 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun saveHighlightWithTag(tag: String) {
-        val l = pendingHighlightLocator ?: return;
-        val u =_currentBookHash.value ?: return;
+        val l = pendingHighlightLocator ?: return
+        val u =_currentBookHash.value ?: return
         val e = isEinkEnabled.value
         viewModelScope.launch {
             highlightDao.insertHighlight(
@@ -698,20 +716,21 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun onReaderPause(locationJson: String) {
-        val uri =_currentBookHash.value ?: return
+        val uri = _currentLocalUri.value ?: return
         if (locationJson.isBlank() && _currentLocator.value == null) return
         viewModelScope.launch {
+            // 1. Ensure we have a valid JSON string before proceeding
+            val finalJson = if (locationJson.isNotBlank()) locationJson else _currentLocator.value?.toJSON()?.toString() ?: return@launch
+
+            // 2. Safely calculate progress from the valid JSON
             val prog = try {
-                if (locationJson.isNotBlank()) {
-                    val jsonObj = JSONObject(locationJson)
-                    jsonObj.optJSONObject("locations")?.optDouble("totalProgression") ?: 0.0
-                } else {
-                    _currentLocator.value?.locations?.totalProgression ?: 0.0
-                }
+                JSONObject(finalJson).optJSONObject("locations")?.optDouble("totalProgression") ?: 0.0
             } catch (e: Exception) {
                 0.0
             }
-            bookDao.updateBookProgressByUri(uri, prog, locationJson, System.currentTimeMillis())
+
+            // 3. Save the final string, not the blank one!
+            bookDao.updateBookProgressByUri(uri, prog, finalJson, System.currentTimeMillis())
             yield()
             withContext(Dispatchers.IO + NonCancellable) { syncRepository.sync() }
         }

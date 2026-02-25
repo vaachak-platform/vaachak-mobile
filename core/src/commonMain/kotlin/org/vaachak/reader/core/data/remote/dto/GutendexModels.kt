@@ -22,27 +22,28 @@
 
 package org.vaachak.reader.core.data.remote.dto
 
-import com.google.gson.annotations.SerializedName
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 // Response from https://gutendex.com/books
 data class GutendexResponse(
-    @SerializedName("count") val count: Int,
-    @SerializedName("next") val next: String?,
-    @SerializedName("previous") val previous: String?,
-    @SerializedName("results") val results: List<GutendexBook>
+    @SerialName("count") val count: Int,
+    @SerialName("next") val next: String?,
+    @SerialName("previous") val previous: String?,
+    @SerialName("results") val results: List<GutendexBook>
 )
 
 data class GutendexBook(
-    @SerializedName("id") val id: Int,
-    @SerializedName("title") val title: String,
-    @SerializedName("authors") val authors: List<GutendexPerson>,
-    @SerializedName("formats") val formats: Map<String, String>,
-    @SerializedName("download_count") val downloadCount: Int
+    @SerialName("id") val id: Int,
+    @SerialName("title") val title: String,
+    @SerialName("authors") val authors: List<GutendexPerson>,
+    @SerialName("formats") val formats: Map<String, String>,
+    @SerialName("download_count") val downloadCount: Int
 )
 
 data class GutendexPerson(
-    @SerializedName("name") val name: String,
-    @SerializedName("birth_year") val birthYear: Int?,
-    @SerializedName("death_year") val deathYear: Int?
+    @SerialName("name") val name: String,
+    @SerialName("birth_year") val birthYear: Int?,
+    @SerialName("death_year") val deathYear: Int?
 )
 

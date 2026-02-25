@@ -1,3 +1,4 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.library)
@@ -10,8 +11,8 @@ plugins {
 // 1. KOTLIN MULTIPLATFORM BLOCK
 kotlin {
     androidTarget {
-        compilations.all {
-            kotlinOptions.jvmTarget = "17"
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
         }
     }
 
@@ -102,10 +103,13 @@ dependencies {
     // Room Compiler for KMP
     add("kspCommonMainMetadata", libs.androidx.room.compiler)
     add("kspAndroid", libs.androidx.room.compiler)
+    add("kspIosX64", libs.androidx.room.compiler)
+    add("kspIosArm64", libs.androidx.room.compiler)
+    add("kspIosSimulatorArm64", libs.androidx.room.compiler)
 
     // Hilt Compiler
-    ksp(libs.hilt.compiler)
-
+    // Hilt Compiler
+    add("kspAndroid", libs.hilt.compiler)
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
@@ -115,10 +119,4 @@ dependencies {
 // 4. ROOM KMP CONFIGURATION
 room {
     schemaDirectory("$projectDir/schemas")
-}
-// Fixes KMP Room Alpha bug with Android Test assets
-tasks.withType<Copy>().configureEach {
-    if (name.contains("copyRoomSchemasToAndroidTestAssets")) {
-        enabled = false
-    }
 }

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.*
@@ -38,10 +39,9 @@ import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.core.domain.model.CoverAspectRatio
 import org.vaachak.reader.core.domain.model.DitheringMode
 import org.vaachak.reader.leisure.ui.utils.EinkDitherTransformation
-
 import java.io.File
 
-// --- NEW: UNIFIED GRID ITEM TYPE ---
+// --- UNIFIED GRID ITEM TYPE ---
 sealed class LibraryItem {
     data class Book(val entity: BookEntity) : LibraryItem()
     data class Stack(val name: String, val books: List<BookEntity>) : LibraryItem()
@@ -57,6 +57,9 @@ fun BookshelfScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // STATE: Holds the book currently selected for deletion
+    var bookToDelete by remember { mutableStateOf<BookEntity?>(null) }
 
     // TAB STATE: 0 = Reading (Clock), 1 = Bookshelf (Folder)
     var selectedTab by remember { mutableIntStateOf(1) }
@@ -79,13 +82,11 @@ fun BookshelfScreen(
     val containerColor = if (state.isEink) Color.White else MaterialTheme.colorScheme.background
     val contentColor = if (state.isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
-    // 1. Data Prep for Tab 1 (Reading)
     val readingItems = state.groupedLibrary.values.flatten()
-        .filter { it.progress > 0f }
+        .filter { it.progress > 0f && it.progress < .99f } // <--- ADD THIS CHECK
         .sortedByDescending { it.progress }
         .map { LibraryItem.Book(it) }
 
-    // 2. Data Prep for Tab 2 (Bookshelf Mixed Folders/Books)
     val shelfItems = remember(state.groupedLibrary, state.bookshelfPrefs.groupBySeries) {
         if (state.bookshelfPrefs.groupBySeries) {
             state.groupedLibrary.map { (author, books) ->
@@ -104,7 +105,6 @@ fun BookshelfScreen(
             Column(modifier = Modifier.background(containerColor)) {
                 Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
 
-                    // LEFT: Tab Switchers
                     IconButton(onClick = { selectedTab = 0; viewModel.closeStack() }) {
                         Icon(if (selectedTab == 0) Icons.Filled.Schedule else Icons.Outlined.Schedule, "Reading", tint = contentColor)
                     }
@@ -113,7 +113,6 @@ fun BookshelfScreen(
                     }
                     Spacer(Modifier.weight(1f))
 
-                    // RIGHT: Contextual Actions
                     if (selectedTab == 0) {
                         IconButton(onClick = { viewModel.getGlobalRecap() }) {
                             if (state.loadingRecapUri == "GLOBAL") CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -169,7 +168,6 @@ fun BookshelfScreen(
             val itemsPerPage = columns * rows
 
             if (selectedTab == 0) {
-                // --- TAB 1: READING SECTION ---
                 PaginatedGrid(
                     items = readingItems,
                     itemsPerPage = itemsPerPage,
@@ -178,17 +176,14 @@ fun BookshelfScreen(
                     contentColor = contentColor,
                     viewModel = viewModel,
                     onBookClick = onBookClick,
+                    onDeleteBook = { bookToDelete = it }, // PASS ACTION
                     bottomBarTextLeft = "Recent Reading: ${readingItems.size}"
                 )
             } else {
-                // --- TAB 2: BOOKSHELF SECTION ---
                 Column(modifier = Modifier.fillMaxSize()) {
-
-                    // IF A FOLDER IS OPEN (Drill-down)
                     if (state.selectedStackName != null) {
                         val stackBooks = state.groupedLibrary[state.selectedStackName]?.map { LibraryItem.Book(it) } ?: emptyList()
 
-                        // Folder Header
                         Row(
                             modifier = Modifier.fillMaxWidth().clickable { viewModel.closeStack() }.padding(horizontal = 16.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -210,11 +205,10 @@ fun BookshelfScreen(
                             contentColor = contentColor,
                             viewModel = viewModel,
                             onBookClick = onBookClick,
+                            onDeleteBook = { bookToDelete = it }, // PASS ACTION
                             bottomBarTextLeft = "Books in series: ${stackBooks.size}"
                         )
-                    }
-                    // ELSE MAIN LIBRARY
-                    else {
+                    } else {
                         LazyRow(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(state.availableFilters) { filter ->
                                 val isSelected = state.activeFilter == filter
@@ -235,6 +229,7 @@ fun BookshelfScreen(
                             contentColor = contentColor,
                             viewModel = viewModel,
                             onBookClick = onBookClick,
+                            onDeleteBook = { bookToDelete = it }, // PASS ACTION
                             bottomBarTextLeft = "Total Library: ${shelfItems.size}"
                         )
                     }
@@ -242,8 +237,17 @@ fun BookshelfScreen(
             }
         }
 
-        // --- DIALOGS & BOTTOM SHEETS (Unchanged) ---
-        // (Keep the recapState and bookmarksSheetUri dialogs exactly as they were in the previous file)
+        // --- DELETE DIALOG TRIGGER ---
+        bookToDelete?.let { book ->
+            DeleteBookDialog(
+                bookTitle = book.title,
+                onConfirm = {
+                    book.localUri?.let { viewModel.deleteBookByUri(it) }
+                    bookToDelete = null
+                },
+                onDismiss = { bookToDelete = null }
+            )
+        }
     }
 }
 
@@ -257,6 +261,7 @@ fun PaginatedGrid(
     contentColor: Color,
     viewModel: BookshelfViewModel,
     onBookClick: (String) -> Unit,
+    onDeleteBook: (BookEntity) -> Unit, // ADDED CALLBACK
     bottomBarTextLeft: String
 ) {
     if (items.isEmpty()) {
@@ -278,7 +283,12 @@ fun PaginatedGrid(
                         for (item in rowItems) {
                             Box(modifier = Modifier.weight(1f)) {
                                 when (item) {
-                                    is LibraryItem.Book -> NeoReaderCoverCard(book = item.entity, state = state, onClick = { onBookClick(item.entity.localUri ?: "") })
+                                    is LibraryItem.Book -> NeoReaderCoverCard(
+                                        book = item.entity,
+                                        state = state,
+                                        onClick = { onBookClick(item.entity.localUri ?: "") },
+                                        onDelete = { onDeleteBook(item.entity) } // PASS ACTION
+                                    )
                                     is LibraryItem.Stack -> StackGridItem(stack = item, state = state, onClick = { viewModel.openStack(item.name) })
                                 }
                             }
@@ -300,9 +310,14 @@ fun PaginatedGrid(
     }
 }
 
-// --- BOOK CARD ---
+// --- BOOK CARD WITH NEW DELETE ICON ---
 @Composable
-fun NeoReaderCoverCard(book: BookEntity, state: BookshelfUiState, onClick: () -> Unit) {
+fun NeoReaderCoverCard(
+    book: BookEntity,
+    state: BookshelfUiState,
+    onClick: () -> Unit,
+    onDelete: () -> Unit // ADDED CALLBACK
+) {
     val prefs = state.bookshelfPrefs
     val isEink = state.isEink
     val shouldDither = prefs.ditheringMode == DitheringMode.ALWAYS_ON || (prefs.ditheringMode == DitheringMode.AUTO && isEink)
@@ -322,7 +337,7 @@ fun NeoReaderCoverCard(book: BookEntity, state: BookshelfUiState, onClick: () ->
                 } else { Box(Modifier.fillMaxSize().background(Color.LightGray.copy(0.5f)), contentAlignment = Alignment.Center) { Text(book.title.take(1).uppercase(), style = MaterialTheme.typography.headlineMedium) } }
 
                 if (prefs.showProgressBadge && book.progress > 0f) {
-                    Box(modifier = Modifier.align(Alignment.TopStart).background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(bottomEnd = 8.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) { Text("${(book.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = Color.Black, fontWeight = FontWeight.Bold) }
+                    Box(modifier = Modifier.align(Alignment.TopStart).background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(bottomEnd = 8.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) { Text("${if (book.progress > 0.99) 100 else (book.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = Color.Black, fontWeight = FontWeight.Bold) }
                 }
                 if (prefs.showFavoriteIcon && hasBookmarks) {
                     Icon(Icons.Default.Star, contentDescription = "Bookmark", tint = Color.White, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(20.dp))
@@ -336,11 +351,42 @@ fun NeoReaderCoverCard(book: BookEntity, state: BookshelfUiState, onClick: () ->
             }
         }
         Spacer(Modifier.height(4.dp))
-        Text(book.title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if(isEink) Color.Black else MaterialTheme.colorScheme.onBackground)
+
+        // NEW: Row to place Title and Delete Icon side-by-side
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Text(
+                text = book.title,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                color = if(isEink) Color.Black else MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f) // Text takes up remaining space
+            )
+            // NEW: High-Contrast Delete Button
+            Box(
+                modifier = Modifier
+                    .padding(start = 4.dp)
+                    .size(24.dp)
+                    .background(
+                        color = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground,
+                        shape = RoundedCornerShape(4.dp)
+                    )
+                    .clickable { onDelete() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Delete, // Changed to Filled
+                    contentDescription = "Delete ${book.title}",
+                    tint = if (isEink) Color.White else MaterialTheme.colorScheme.background, // Inverted tint
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
     }
 }
 
-// --- NEW: STACK / FOLDER CARD ---
+// --- STACK / FOLDER CARD ---
 @Composable
 fun StackGridItem(stack: LibraryItem.Stack, state: BookshelfUiState, onClick: () -> Unit) {
     val isEink = state.isEink
@@ -351,10 +397,8 @@ fun StackGridItem(stack: LibraryItem.Stack, state: BookshelfUiState, onClick: ()
 
     Column(modifier = Modifier.clickable { onClick() }) {
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            // Visual Stack Effect (Background Card)
             Card(modifier = Modifier.fillMaxSize().padding(top = 8.dp, start = 8.dp, end = 8.dp), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.4f)), colors = CardDefaults.cardColors(containerColor = if (isEink) Color.LightGray else Color.Gray.copy(alpha = 0.3f))) {}
 
-            // Front Book Cover
             if (firstBook != null) {
                 Card(modifier = Modifier.fillMaxSize().padding(bottom = 8.dp, end = 12.dp), shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, Color.Gray.copy(alpha = 0.5f))) {
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -367,7 +411,6 @@ fun StackGridItem(stack: LibraryItem.Stack, state: BookshelfUiState, onClick: ()
                 }
             }
 
-            // [0/Total] Badge exactly like NeoReader
             Box(modifier = Modifier.align(Alignment.BottomStart).padding(bottom = 12.dp).background(Color.White.copy(alpha = 0.95f), RoundedCornerShape(topEnd = 8.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) {
                 Text("${unreadCount}/${stack.books.size}", style = MaterialTheme.typography.labelSmall, color = Color.Black, fontWeight = FontWeight.Bold)
             }
@@ -375,4 +418,36 @@ fun StackGridItem(stack: LibraryItem.Stack, state: BookshelfUiState, onClick: ()
         Spacer(Modifier.height(4.dp))
         Text(stack.name, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if(isEink) Color.Black else MaterialTheme.colorScheme.onBackground)
     }
+}
+
+// --- DELETE DIALOG ---
+@Composable
+fun DeleteBookDialog(
+    bookTitle: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Remove Book?")
+        },
+        text = {
+            Text(
+                "Are you sure you want to remove '$bookTitle' from your library?\n\n" +
+                        "WARNING: This will permanently delete your reading progress, custom tags, and highlights. " +
+                        "The original file on your device will not be deleted."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

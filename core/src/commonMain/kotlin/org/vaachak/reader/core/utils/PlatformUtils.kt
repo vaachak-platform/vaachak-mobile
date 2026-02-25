@@ -22,5 +22,7 @@
 
 package org.vaachak.reader.core.utils
 
+
 expect fun generateUuid(): String
 expect fun getCurrentTimeMillis(): Long
+

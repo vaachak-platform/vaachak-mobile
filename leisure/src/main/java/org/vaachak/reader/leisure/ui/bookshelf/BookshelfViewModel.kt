@@ -106,7 +106,7 @@ class BookshelfViewModel @Inject constructor(
             languageFilteredBooks.firstOrNull { it.progress > 0.0 && it.progress < 0.99 }
         } else null
 
-        var libraryList = if (heroBook != null) languageFilteredBooks.filter { it.bookHash != heroBook.bookHash } else languageFilteredBooks
+        var libraryList =  languageFilteredBooks
 
         libraryList = when (filters.sort) {
             SortOrder.TITLE -> libraryList.sortedBy { it.title }
