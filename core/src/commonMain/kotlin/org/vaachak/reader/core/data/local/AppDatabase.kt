@@ -29,6 +29,7 @@ import androidx.room.RoomDatabaseConstructor // Ensure this is imported!
 import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.core.domain.model.HighlightEntity
 import org.vaachak.reader.core.domain.model.OpdsEntity
+import org.vaachak.reader.core.domain.model.ProfileEntity
 import org.vaachak.reader.core.domain.model.SyncVaultEntity
 
 @Database(
@@ -36,7 +37,8 @@ import org.vaachak.reader.core.domain.model.SyncVaultEntity
         BookEntity::class,
         HighlightEntity::class,
         OpdsEntity::class,
-        SyncVaultEntity::class
+        SyncVaultEntity::class,
+        ProfileEntity::class
     ],
     version = 2,
     exportSchema = false
@@ -47,6 +49,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun highlightDao(): HighlightDao
     abstract fun opdsDao(): OpdsDao
     abstract fun syncVaultDao(): SyncVaultDao
+
+    abstract fun profileDao(): ProfileDao
 
     companion object {
         const val DATABASE_NAME = "vaachak_db.db"

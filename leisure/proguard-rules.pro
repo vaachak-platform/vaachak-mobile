@@ -21,3 +21,5 @@
 #-renamesourcefileattribute SourceFile
 -keepattributes *Annotation*, EnclosingMethod
 -keepclassmembers class kotlinx.serialization.json.** { *; }
+# Fix for Dagger/Hilt @LazyClassKey collision in R8
+-keepnames class * extends androidx.lifecycle.ViewModel

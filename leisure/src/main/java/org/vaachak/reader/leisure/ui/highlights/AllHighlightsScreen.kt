@@ -215,15 +215,22 @@ fun CompactHighlightItem(
             verticalAlignment = Alignment.Top
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                if (highlight.tag != "General") {
+
+                // --- THE FIX ---
+                // Extract to a local, non-nullable variable immediately
+                val safeTag = highlight.tag ?: ""
+
+                // Now we safely check that it actually has text AND isn't "General"
+                if (safeTag.isNotEmpty() && safeTag != "General") {
                     Text(
-                        text = "#${highlight.tag.uppercase()}",
+                        text = "#${safeTag.uppercase()}",
                         style = MaterialTheme.typography.labelSmall,
                         fontSize = 9.sp, // Smaller tag text
                         color = if (isEink) Color.Black else MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
                     )
                 }
+
                 Text(
                     text = highlight.text,
                     style = MaterialTheme.typography.bodyMedium,

@@ -40,7 +40,12 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            // Tell it to use the config we just made above
             signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -140,7 +145,8 @@ dependencies {
 
     implementation(libs.timber)
 
-
+    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.13")
+    implementation("androidx.core:core-splashscreen:1.0.1")
 }
 
 tasks.dokkaHtml {

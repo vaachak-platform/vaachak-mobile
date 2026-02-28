@@ -21,10 +21,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    navController: NavController, // NEW: Takes a custom back action
+    navController: NavController,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+
+    // NEW: Collect Vault State
+    val activeVaultId by viewModel.activeVaultId.collectAsState()
+    val isMultiUserMode by viewModel.isMultiUserMode.collectAsState()
+
     val scrollState = rememberScrollState()
 
     val settingsTabs = listOf("Global", "Book", "Content", "Intelligence")
@@ -33,7 +38,6 @@ fun SettingsScreen(
     Scaffold(
     ){ paddingValues ->
         Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            // SETTINGS SUB-TABS
             PrimaryTabRow(selectedTabIndex = selectedTab) {
                 settingsTabs.forEachIndexed { index, title ->
                     Tab(
@@ -52,7 +56,7 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 when (selectedTab) {
-                    0 -> GlobalSettingsTab(state, viewModel, navController)
+                    0 -> GlobalSettingsTab(state, activeVaultId, isMultiUserMode, viewModel, navController)
                     1 -> BookSettingsTab(navController)
                     2 -> ContentSettingsTab(navController)
                     3 -> IntelligenceSettingsTab(state, navController)
@@ -63,15 +67,41 @@ fun SettingsScreen(
 }
 
 @Composable
-fun GlobalSettingsTab(state: SettingsUiState, viewModel: SettingsViewModel, navController: NavController) {
-    SettingsGroup(title = "Account & Sync") {
+fun GlobalSettingsTab(
+    state: SettingsUiState,
+    activeVaultId: String,
+    isMultiUserMode: Boolean,
+    viewModel: SettingsViewModel,
+    navController: NavController
+) {
+    var showVaultDialog by remember { mutableStateOf(false) }
+
+    SettingsGroup(title = "Account & Profiles") {
+
+        // MODIFIED: Point to the new Reader Profiles hub
+        SettingsTile(
+            icon = Icons.Default.Person, title = "Reader Profiles", subtitle = "Manage local profiles and credentials",
+            onClick = { navController.navigate("reader_profiles") }
+        )
+
+        // NEW: Multi-User Toggle
+        SettingsTile(
+            icon = Icons.Default.Group, title = "Local Multi-User Mode", subtitle = "Isolate libraries for different offline readers",
+            onClick = { viewModel.setMultiUserMode(!isMultiUserMode) },
+            trailing = { Switch(checked = isMultiUserMode, onCheckedChange = { viewModel.setMultiUserMode(it) }) }
+        )
+
+        // NEW: Profile Switcher (Only visible if multi-user is on)
+        if (isMultiUserMode) {
+            SettingsTile(
+                icon = Icons.Default.SwitchAccount, title = "Active Profile", subtitle = activeVaultId.replaceFirstChar { it.uppercase() },
+                onClick = { showVaultDialog = true }
+            )
+        }
+
         SettingsTile(
             icon = Icons.Default.Sync, title = "Sync Configuration", subtitle = "Manage end-to-end encrypted vaults",
             onClick = { navController.navigate(Screen.SyncSettings.route) }
-        )
-        SettingsTile(
-            icon = Icons.Default.Person, title = "Account", subtitle = "Manage profile and devices",
-            onClick = { navController.navigate("login") }
         )
     }
 
@@ -87,6 +117,50 @@ fun GlobalSettingsTab(state: SettingsUiState, viewModel: SettingsViewModel, navC
             onClick = { navController.navigate("settings/app_appearance") }
         )
     }
+
+    // NEW: Safe Profile Switcher Dialog
+    if (showVaultDialog) {
+        if (state.userProfile?.isAuthenticated == true) {
+            // Block switching to protect the cloud sync
+            AlertDialog(
+                onDismissRequest = { showVaultDialog = false },
+                title = { Text("Cloud Account Active") },
+                text = { Text("To switch local profiles safely, please log out of your current cloud account first to prevent mixing sync data.") },
+                confirmButton = { TextButton(onClick = { showVaultDialog = false }) { Text("OK") } }
+            )
+        } else {
+            // Safe to switch
+            var newVaultName by remember { mutableStateOf("") }
+            AlertDialog(
+                onDismissRequest = { showVaultDialog = false },
+                title = { Text("Switch Local Profile") },
+                text = {
+                    Column {
+                        Text("Enter the name of the offline profile you want to switch to or create.")
+                        Spacer(Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = newVaultName,
+                            onValueChange = { newVaultName = it },
+                            label = { Text("Profile Name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (newVaultName.isNotBlank()) {
+                            viewModel.switchVault(newVaultName)
+                        }
+                        showVaultDialog = false
+                    }) { Text("Switch") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showVaultDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
+    }
 }
 
 @Composable
@@ -94,7 +168,7 @@ fun BookSettingsTab(navController: NavController) {
     SettingsGroup(title = "Library & Visuals") {
         SettingsTile(
             icon = Icons.Default.LibraryBooks, title = "Library Settings (Visuals)", subtitle = "E-ink optimization, Cover Styles, Smart Stacks",
-            onClick = { navController.navigate(Screen.Bookshelf.route) } // Points to the LibrarySettingsScreen we just built!
+            onClick = { navController.navigate(Screen.Bookshelf.route) }
         )
     }
 
@@ -144,7 +218,6 @@ fun IntelligenceSettingsTab(state: SettingsUiState, navController: NavController
     }
 }
 
-// --- DUMMY HELPERS TO PREVENT COMPILER ERRORS (Replace with your actual UI components if they differ) ---
 @Composable fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 8.dp))

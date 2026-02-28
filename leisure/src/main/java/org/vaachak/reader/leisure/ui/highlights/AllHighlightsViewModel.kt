@@ -29,45 +29,42 @@ import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
 import org.vaachak.reader.core.domain.model.HighlightEntity
 import org.vaachak.reader.core.data.repository.SettingsRepository
+import org.vaachak.reader.core.data.repository.VaultRepository // <-- IMPORT VAULT
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * ViewModel for the All Highlights screen.
- * Manages the display and filtering of highlights across all books.
- */
 @HiltViewModel
 class AllHighlightsViewModel @Inject constructor(
     private val highlightDao: HighlightDao,
     private val bookDao: BookDao,
-    private val settingsRepo: SettingsRepository // Inject Settings
+    private val settingsRepo: SettingsRepository,
+    private val vaultRepository: VaultRepository // <-- INJECT VAULT
 ) : ViewModel() {
 
     private val _selectedTag = MutableStateFlow("All")
-    /**
-     * The currently selected tag for filtering highlights.
-     */
     val selectedTag: StateFlow<String> = _selectedTag.asStateFlow()
 
-    // 1. Expose E-ink State for UI adaptation
-    /**
-     * State flow indicating whether E-ink mode is enabled.
-     * Used to adapt the UI for E-ink screens.
-     */
     val isEinkEnabled: StateFlow<Boolean> = settingsRepo.isEinkEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    // 2. Group Highlights by Book Title
-    /**
-     * A map of highlights grouped by book title.
-     * The map key is the book title, and the value is a list of highlights for that book.
-     * Filtered by the currently selected tag.
-     */
+    // --- MULTI-TENANT DATA FLOWS ---
+    // Listen to the active vault and pull the correct data for that user
+
+    private val activeHighlightsFlow = vaultRepository.activeVaultId
+        .flatMapLatest { profileId -> highlightDao.getAllHighlights(profileId) }
+
+    private val activeBooksFlow = vaultRepository.activeVaultId
+        .flatMapLatest { profileId -> bookDao.getAllBooks(profileId) }
+
+    private val activeTagsFlow = vaultRepository.activeVaultId
+        .flatMapLatest { profileId -> highlightDao.getAllUniqueTags(profileId) }
+
+    // --- 2. Group Highlights by Book Title ---
     val groupedHighlights: StateFlow<Map<String, List<HighlightEntity>>> =
         combine(
-            highlightDao.getAllHighlights(),
-            bookDao.getAllBooks(),
+            activeHighlightsFlow,
+            activeBooksFlow,
             _selectedTag
         ) { highlights, books, tag ->
             val titleMap = books.associate { it.bookHash to it.title }
@@ -88,43 +85,25 @@ class AllHighlightsViewModel @Inject constructor(
         )
 
     // 3. Chip Data
-    /**
-     * Data class representing a tag and the count of highlights associated with it.
-     *
-     * @property name The name of the tag.
-     * @property count The number of highlights with this tag.
-     */
     data class TagWithCount(val name: String, val count: Int)
 
-    /**
-     * A list of available tags with their usage counts.
-     * Includes an "All" tag representing all highlights.
-     */
     val availableTags: StateFlow<List<TagWithCount>> = combine(
-        highlightDao.getAllHighlights(),
-        highlightDao.getAllUniqueTags()
+        activeHighlightsFlow,
+        activeTagsFlow
     ) { highlights, uniqueTags ->
         val allChip = TagWithCount("All", highlights.size)
-        val specificChips = uniqueTags.map { tag ->
+        // Filter out null tags to prevent crashes
+        val specificChips = uniqueTags.filterNotNull().map { tag ->
             TagWithCount(tag, highlights.count { it.tag == tag })
         }
         listOf(allChip) + specificChips
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(TagWithCount("All", 0)))
 
-    /**
-     * Updates the filter tag for highlights.
-     *
-     * @param tag The new tag to filter by.
-     */
+
     fun updateFilter(tag: String) {
         _selectedTag.value = tag
     }
 
-    /**
-     * Deletes a highlight by its ID.
-     *
-     * @param id The ID of the highlight to delete.
-     */
     fun deleteHighlight(id: String) {
         viewModelScope.launch {
             highlightDao.deleteHighlightById(id)

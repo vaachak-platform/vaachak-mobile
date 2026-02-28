@@ -32,22 +32,39 @@ import org.vaachak.reader.core.utils.getCurrentTimeMillis
 
 @Dao
 interface BookDao {
-    @Query("SELECT * FROM books ORDER BY lastRead DESC")
-    fun getAllBooks(): Flow<List<BookEntity>>
+    // --- MULTI-TENANT READS ---
+    @Query("SELECT * FROM books WHERE profileId = :profileId ORDER BY lastRead DESC")
+    fun getAllBooks(profileId: String): Flow<List<BookEntity>>
 
-    @Query("SELECT * FROM books ORDER BY lastRead DESC")
-    fun getAllBooksSortedByRecent(): Flow<List<BookEntity>>
+    @Query("SELECT * FROM books WHERE profileId = :profileId ORDER BY lastRead DESC")
+    fun getAllBooksSortedByRecent(profileId: String): Flow<List<BookEntity>>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM books WHERE title = :title AND profileId = :profileId LIMIT 1)")
+    suspend fun isBookExists(title: String, profileId: String): Boolean
+
+    @Query("SELECT * FROM books WHERE localUri = :localUri AND profileId = :profileId LIMIT 1")
+    suspend fun getBookByUri(localUri: String, profileId: String): BookEntity?
+
+    @Query("SELECT * FROM books WHERE bookHash = :bookHash AND profileId = :profileId LIMIT 1")
+    suspend fun getBookByHash(bookHash: String, profileId: String): BookEntity?
+
+    @Query("SELECT bookHash FROM books WHERE profileId = :profileId")
+    suspend fun getAllBookHashes(profileId: String): List<String>
+
+    @Query("SELECT * FROM books WHERE profileId = :profileId AND lastRead > :timestamp")
+    suspend fun getBooksModifiedSince(profileId: String, timestamp: Long): List<BookEntity>
+
+    // --- WRITES & DELETES ---
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertBook(book: BookEntity)
 
-    // Using bookHash as the true universal ID
-    @Query("DELETE FROM books WHERE bookHash = :bookHash")
-    suspend fun deleteBook(bookHash: String)
+    @Query("DELETE FROM books WHERE bookHash = :bookHash AND profileId = :profileId")
+    suspend fun deleteBook(bookHash: String, profileId: String)
 
-    @Query("DELETE FROM books WHERE localUri = :localUri")
-    suspend fun deleteBookByUri(localUri: String)
+    @Query("DELETE FROM books WHERE localUri = :localUri AND profileId = :profileId")
+    suspend fun deleteBookByUri(localUri: String, profileId: String)
 
+    // --- PROGRESS UPDATES ---
     @Query("""
         UPDATE books 
         SET progress = :progress, 
@@ -55,9 +72,9 @@ interface BookDao {
             lastRead = :timestamp,
             updatedAt = :timestamp,
             isDirty = 1
-        WHERE localUri = :localUri
+        WHERE localUri = :localUri AND profileId = :profileId
     """)
-    suspend fun updateBookProgressByUri(localUri: String, progress: Double, cfiLocation: String, timestamp: Long)
+    suspend fun updateBookProgressByUri(localUri: String, profileId: String, progress: Double, cfiLocation: String, timestamp: Long)
 
     @Query("""
         UPDATE books 
@@ -66,29 +83,14 @@ interface BookDao {
             lastRead = :timestamp,
             updatedAt = :timestamp,
             isDirty = 1
-        WHERE bookHash = :bookHash
+        WHERE bookHash = :bookHash AND profileId = :profileId
     """)
-    suspend fun updateProgressFromCloud(bookHash: String, progress: Double, cfiLocation: String, timestamp: Long)
+    suspend fun updateProgressFromCloud(bookHash: String, profileId: String, progress: Double, cfiLocation: String, timestamp: Long)
 
-    @Query("SELECT * FROM books WHERE localUri = :localUri LIMIT 1")
-    suspend fun getBookByUri(localUri: String): BookEntity?
+    @Query("UPDATE books SET lastRead = :timestamp, updatedAt = :timestamp, isDirty = 1 WHERE localUri = :localUri AND profileId = :profileId")
+    suspend fun updateLastRead(localUri: String, profileId: String, timestamp: Long = getCurrentTimeMillis())
 
-    @Query("UPDATE books SET lastRead = :timestamp, updatedAt = :timestamp, isDirty = 1 WHERE localUri = :localUri")
-    suspend fun updateLastRead(localUri: String, timestamp: Long = getCurrentTimeMillis())
-
-    @Query("SELECT EXISTS(SELECT 1 FROM books WHERE title = :title LIMIT 1)")
-    suspend fun isBookExists(title: String): Boolean
-
-    @Query("SELECT * FROM books WHERE lastRead > :timestamp")
-    suspend fun getBooksModifiedSince(timestamp: Long): List<BookEntity>
-
-    @Query("SELECT * FROM books WHERE bookHash = :bookHash LIMIT 1")
-    suspend fun getBookByHash(bookHash: String): BookEntity?
-
-    @Query("SELECT bookHash FROM books")
-    suspend fun getAllBookHashes(): List<String>
-
-    // Vault Sync Update
+    // --- VAULT SYNC ---
     @Query("""
         UPDATE books 
         SET lastCfiLocation = :cfi, 
@@ -96,8 +98,7 @@ interface BookDao {
             lastRead = :timestamp,
             updatedAt = :timestamp,
             isDirty = 0
-        WHERE bookHash = :bookHash AND updatedAt < :timestamp
+        WHERE bookHash = :bookHash AND profileId = :profileId AND updatedAt < :timestamp
     """)
-    suspend fun updateBookMetadataFromSync(bookHash: String, cfi: String, progress: Double, timestamp: Long)
+    suspend fun updateBookMetadataFromSync(bookHash: String, profileId: String, cfi: String, progress: Double, timestamp: Long)
 }
-

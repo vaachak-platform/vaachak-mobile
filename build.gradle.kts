@@ -14,9 +14,30 @@ plugins {
 
     alias(libs.plugins.jetbrains.dokka) apply false
     alias(libs.plugins.kotlin.multiplatform) apply false
+    id("io.gitlab.arturbosch.detekt") version "1.23.8"
 }
-
+detekt {
+    // Builds will fail if it finds too many performance issues
+    buildUponDefaultConfig = true
+    allRules = false // We only want to turn on specific rule sets like 'Performance'
+}
 // Optional: Clean task configuration
 tasks.register("clean", Delete::class) {
     delete(rootProject.layout.buildDirectory)
+    group= "clean"
+    description="Clean build directory"
+}
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    kotlinOptions {
+        freeCompilerArgs += listOf(
+            "-P",
+            "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=" +
+                    project.buildDir.absolutePath + "/compose_metrics"
+        )
+        freeCompilerArgs += listOf(
+            "-P",
+            "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=" +
+                    project.buildDir.absolutePath + "/compose_metrics"
+        )
+    }
 }

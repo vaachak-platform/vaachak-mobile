@@ -13,14 +13,11 @@ import kotlinx.coroutines.withContext
 import org.vaachak.reader.core.data.repository.OpdsRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
+import org.vaachak.reader.core.data.repository.VaultRepository
 import org.vaachak.reader.core.domain.model.*
 import org.vaachak.reader.leisure.utils.EinkHelper
 import javax.inject.Inject
 
-// --- 1. SINGLE SOURCE OF TRUTH UI STATE ---
-
-
-// --- 2. INTERMEDIATE STATES (Keeps every combine block strictly at <= 5 arguments) ---
 private data class AccountState(val username: String, val device: String, val lastSync: Long, val offline: Boolean)
 private data class AiState(val gemini: String, val cfUrl: String, val token: String, val autoSave: Boolean)
 private data class ThemeState(val theme: ThemeMode, val contrast: Float, val bookshelfPrefs: BookshelfPreferences)
@@ -32,20 +29,42 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepo: SettingsRepository,
     private val syncRepo: SyncRepository,
     private val opdsRepo: OpdsRepository,
+    private val vaultRepository: VaultRepository,
     @param:ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    // --- Internal Mutable State ---
+    val hasCompletedOnboarding: StateFlow<Boolean> = vaultRepository.hasCompletedOnboarding
+
+    val isOfflineMode: StateFlow<Boolean> = vaultRepository.isOfflineMode
+
+    fun completeOnboarding(isMultiUser: Boolean, isOffline: Boolean) {
+        viewModelScope.launch {
+            vaultRepository.completeOnboarding(isMultiUser, isOffline)
+        }
+    }
+
+    val activeVaultId: StateFlow<String> = vaultRepository.activeVaultId
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), VaultRepository.DEFAULT_VAULT_ID)
+
+    val isMultiUserMode: StateFlow<Boolean> = vaultRepository.isMultiUserMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // --- NEW FAST-PATH FOR MAIN ACTIVITY ---
+    val appThemeMode: StateFlow<ThemeMode> = settingsRepo.themeMode
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.LIGHT)
+
+    val einkContrastVal: StateFlow<Float> = settingsRepo.einkContrast
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 1f)
+    // ---------------------------------------
+
     private val _activeEditSection = MutableStateFlow(SettingsSection.NONE)
     private val _isAiMasked = MutableStateFlow(true)
     private val _errorMessage = MutableStateFlow<String?>(null)
     private val _isSyncLoading = MutableStateFlow(false)
 
-    // Sync Status Feedback
     private val _syncMessage = MutableStateFlow<String?>(null)
     val syncMessage = _syncMessage.asStateFlow()
 
-    // Global Reader & Dictionary Flows
     val readerPreferences: StateFlow<ReaderPreferences> = settingsRepo.readerPreferences
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReaderPreferences())
 
@@ -55,317 +74,52 @@ class SettingsViewModel @Inject constructor(
     val dictionaryFolder = settingsRepo.getDictionaryFolder()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
-    // --- GROUPED COMBINERS ---
-
-    private val accountFlow = combine(
-        settingsRepo.syncUsername,
-        settingsRepo.deviceName,
-        settingsRepo.lastSyncTimestamp,
-        settingsRepo.isOfflineModeEnabled
-    ) { username, device, lastSync, offline ->
-        AccountState(username, device, lastSync, offline)
-    }
-
-    private val aiFlow = combine(
-        settingsRepo.geminiKey,
-        settingsRepo.cfUrl,
-        settingsRepo.cfToken,
-        settingsRepo.isAutoSaveRecapsEnabled
-    ) { gemini, cfUrl, token, autoSave ->
-        AiState(gemini, cfUrl, token, autoSave)
-    }
-
-    private val themeFlow = combine(
-        settingsRepo.themeMode,
-        settingsRepo.einkContrast,
-        settingsRepo.bookshelfPreferences // <-- ADDED THIS
-    ) { theme: ThemeMode, contrast: Float, prefs: BookshelfPreferences ->
-        ThemeState(theme, contrast, prefs)
-    }
-
-    private val viewFlow = combine(
-        _activeEditSection,
-        _isAiMasked,
-        _errorMessage
-    ) { editSec, masked, error ->
-        ViewState(editSec, masked, error)
-    }
-
-    private val contentFlow = combine(
-        settingsRepo.ttsSettings,
-        opdsRepo.catalogs,
-        _isSyncLoading
-    ) { tts, feeds, syncLoading ->
-        ContentState(tts, feeds, syncLoading)
-    }
-
-    // --- THE MASTER UI STATE ---
+    // PERFORMANCE FIX: Added distinctUntilChanged to all combiners
+    private val accountFlow = combine(settingsRepo.syncUsername, settingsRepo.deviceName, settingsRepo.lastSyncTimestamp, settingsRepo.isOfflineModeEnabled) { username, device, lastSync, offline -> AccountState(username, device, lastSync, offline) }.distinctUntilChanged()
+    private val aiFlow = combine(settingsRepo.geminiKey, settingsRepo.cfUrl, settingsRepo.cfToken, settingsRepo.isAutoSaveRecapsEnabled) { gemini, cfUrl, token, autoSave -> AiState(gemini, cfUrl, token, autoSave) }.distinctUntilChanged()
+    private val themeFlow = combine(settingsRepo.themeMode, settingsRepo.einkContrast, settingsRepo.bookshelfPreferences) { theme: ThemeMode, contrast: Float, prefs: BookshelfPreferences -> ThemeState(theme, contrast, prefs) }.distinctUntilChanged()
+    private val viewFlow = combine(_activeEditSection, _isAiMasked, _errorMessage) { editSec, masked, error -> ViewState(editSec, masked, error) }.distinctUntilChanged()
+    private val contentFlow = combine(settingsRepo.ttsSettings, opdsRepo.catalogs, _isSyncLoading) { tts, feeds, syncLoading -> ContentState(tts, feeds, syncLoading) }.distinctUntilChanged()
 
     val uiState: StateFlow<SettingsUiState> = combine(
         accountFlow, aiFlow, themeFlow, viewFlow, contentFlow
     ) { acc, ai, theme, view, content ->
-
         val isAuthenticated = acc.username.isNotBlank()
-
         SettingsUiState(
-            userProfile = UserProfile(
-                username = if (isAuthenticated) acc.username else null,
-                deviceName = acc.device,
-                lastSyncTime = acc.lastSync,
-                isAuthenticated = isAuthenticated
-            ),
-            isSyncLoading = content.syncLoading,
-            isOfflineMode = acc.offline,
-            catalogs = content.feeds,
-            aiConfig = AiConfig(
-                isEnabled = ai.gemini.isNotBlank(),
-                geminiKey = ai.gemini,
-                cloudflareUrl = ai.cfUrl,
-                authToken = ai.token,
-                autoSaveRecaps = ai.autoSave
-            ),
-            activeEditSection = view.editSec,
-            isAiMasked = view.masked,
-            errorMessage = view.error,
-            themeMode = theme.theme,
-            einkContrast = theme.contrast,
-            bookshelfPreferences = theme.bookshelfPrefs,
-            ttsSettings = content.tts
+            userProfile = UserProfile(username = if (isAuthenticated) acc.username else null, deviceName = acc.device, lastSyncTime = acc.lastSync, isAuthenticated = isAuthenticated),
+            isSyncLoading = content.syncLoading, isOfflineMode = acc.offline, catalogs = content.feeds,
+            aiConfig = AiConfig(isEnabled = ai.gemini.isNotBlank(), geminiKey = ai.gemini, cloudflareUrl = ai.cfUrl, authToken = ai.token, autoSaveRecaps = ai.autoSave),
+            activeEditSection = view.editSec, isAiMasked = view.masked, errorMessage = view.error,
+            themeMode = theme.theme, einkContrast = theme.contrast, bookshelfPreferences = theme.bookshelfPrefs, ttsSettings = content.tts
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SettingsUiState())
 
-    // --- ACTIONS ---
-
-    fun toggleEditSection(section: SettingsSection) {
-        if (_activeEditSection.value == section) {
-            _activeEditSection.value = SettingsSection.NONE
-            _isAiMasked.value = true
-        } else {
-            _activeEditSection.value = section
-        }
-    }
-
-    fun setAiMasked(masked: Boolean) {
-        _isAiMasked.value = masked
-    }
-
-    fun clearError() {
-        _errorMessage.value = null
-    }
-
-    fun saveAiConfig(gemini: String, cfUrl: String, token: String, autoSave: Boolean) {
-        viewModelScope.launch {
-            try {
-                val currentTheme = settingsRepo.themeMode.first()
-                val isEink = currentTheme == ThemeMode.E_INK
-
-                settingsRepo.saveSettings(
-                    gemini = gemini,
-                    cfUrl = cfUrl,
-                    cfToken = token,
-                    isEnk = isEink
-                )
-                settingsRepo.setAutoSaveRecaps(autoSave)
-                _activeEditSection.value = SettingsSection.NONE
-                _errorMessage.value = null
-            } catch (e: Exception) {
-                _errorMessage.value = "Failed to save settings: ${e.message}"
-            }
-        }
-    }
-
-    fun toggleOfflineMode(enabled: Boolean) {
-        viewModelScope.launch { settingsRepo.setOfflineMode(enabled) }
-    }
-
-    fun logout() {
-        viewModelScope.launch {
-            settingsRepo.updateSyncProfile("", "", "")
-            settingsRepo.setLastSyncTimestamp(0L)
-            _activeEditSection.value = SettingsSection.NONE
-        }
-    }
-
-    // --- TTS ACTIONS ---
-
-    fun updateTtsSpeed(newSpeed: Float) {
-        viewModelScope.launch {
-            val clampedSpeed = newSpeed.coerceIn(0.5f, 2.5f)
-            settingsRepo.setTtsDefaultSpeed(clampedSpeed)
-        }
-    }
-
-    fun setTtsAutoPageTurn(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsRepo.setTtsAutoPageTurn(enabled)
-        }
-    }
-
-    fun setTtsVisualStyle(style: String) {
-        viewModelScope.launch {
-            settingsRepo.setTtsVisualStyle(style)
-        }
-    }
-
-    fun setTtsLanguage(language: String) {
-        viewModelScope.launch {
-            settingsRepo.setTtsLanguage(language)
-        }
-    }
-
-    fun updateTtsPitch(pitch: Float) {
-        viewModelScope.launch {
-            val safePitch = (pitch.coerceIn(0.1f, 2.0f) * 10f).toInt() / 10f
-            settingsRepo.setTtsPitch(safePitch)
-        }
-    }
-
-    fun setSleepTimer(minutes: Int) {
-        viewModelScope.launch {
-            settingsRepo.setTtsSleepTimer(minutes)
-        }
-    }
-
-    // --- SYNC FUNCTIONS ---
-
-    fun triggerManualSync() {
-        viewModelScope.launch {
-            _syncMessage.value = "Syncing..."
-            _isSyncLoading.value = true
-
-            val result = syncRepo.sync()
-
-            _syncMessage.value = if (result.isSuccess) {
-                "Sync Complete!"
-            } else {
-                "Sync Failed: ${result.exceptionOrNull()?.message}"
-            }
-
-            _isSyncLoading.value = false
-
-            delay(3000)
-            _syncMessage.value = null
-        }
-    }
-
-    fun testServerConnection() {
-        viewModelScope.launch {
-            _syncMessage.value = "Testing Server..."
-            _isSyncLoading.value = true
-            try {
-                val useLocal = settingsRepo.useLocalServer.first()
-                val url = if (useLocal) settingsRepo.localServerUrl.first() else settingsRepo.syncCloudUrl.first()
-
-                val result = syncRepo.testConnection(url)
-
-                _syncMessage.value = if (result.isSuccess) {
-                    "Connected Successfully!"
-                } else {
-                    "Connection Failed: ${result.exceptionOrNull()?.message}"
-                }
-            } catch (e: Exception) {
-                _syncMessage.value = "Error: ${e.message}"
-            }
-            _isSyncLoading.value = false
-            delay(3000)
-            _syncMessage.value = null
-        }
-    }
-
-    // --- PREFERENCES & DICTIONARY ---
-
-    fun updateReaderPreferences(prefs: ReaderPreferences) {
-        viewModelScope.launch {
-            settingsRepo.saveReaderPreferences(prefs)
-        }
-    }
-
-    fun setUseEmbeddedDictionary(enabled: Boolean) {
-        viewModelScope.launch { settingsRepo.setUseEmbeddedDictionary(enabled) }
-    }
-
-    fun setDictionaryFolder(uri: String) {
-        viewModelScope.launch {
-            val isValid = withContext(Dispatchers.IO) {
-                settingsRepo.validateStarDictFolder(uri)
-            }
-
-            if (isValid) {
-                settingsRepo.setDictionaryFolder(uri)
-                _errorMessage.value = null
-                _syncMessage.value = "Dictionary folder set successfully."
-            } else {
-                _errorMessage.value = "Invalid Folder: No StarDict (.idx) files found."
-            }
-        }
-    }
-
-    // --- APP GLOBAL THEME ACTIONS ---
-
-    fun toggleEinkMode(enabled: Boolean) {
-        viewModelScope.launch {
-            val mode = if (enabled) ThemeMode.E_INK else ThemeMode.LIGHT
-            settingsRepo.setThemeMode(mode)
-        }
-    }
-
-    fun setAppTheme(mode: ThemeMode) {
-        viewModelScope.launch {
-            settingsRepo.setThemeMode(mode)
-            delay(100)
-            EinkHelper.requestFullRefresh(context)
-        }
-    }
-
-    fun setEinkContrast(value: Float) {
-        viewModelScope.launch {
-            settingsRepo.setContrast(value)
-        }
-    }
-
-    fun onContrastChangedFinished() {
-        viewModelScope.launch {
-            delay(200)
-            EinkHelper.requestFullRefresh(context)
-        }
-    }
-
-    fun triggerEinkRefresh(context: Context) {
-        EinkHelper.requestFullRefresh(context)
-    }
-
-
-
-
-
-    // --- LIBRARY & COVER STYLE ACTIONS ---
-
-    fun setDitheringMode(mode: DitheringMode) {
-        viewModelScope.launch { settingsRepo.setDitheringMode(mode) }
-    }
-
-    fun setGroupBySeries(enabled: Boolean) {
-        viewModelScope.launch { settingsRepo.setGroupBySeries(enabled) }
-    }
-
-    fun setCoverAspectRatio(ratio: CoverAspectRatio) {
-        viewModelScope.launch { settingsRepo.setCoverAspectRatio(ratio) }
-    }
-
-    fun toggleCoverElement(
-        currentPrefs: BookshelfPreferences,
-        format: Boolean? = null,
-        favorite: Boolean? = null,
-        progress: Boolean? = null,
-        sync: Boolean? = null
-    ) {
-        viewModelScope.launch {
-            settingsRepo.setCoverStyleElements(
-                format = format ?: currentPrefs.showFormatBadge,
-                favorite = favorite ?: currentPrefs.showFavoriteIcon,
-                progress = progress ?: currentPrefs.showProgressBadge,
-                sync = sync ?: currentPrefs.showSyncStatus
-            )
-        }
-    }
+    fun setMultiUserMode(enabled: Boolean) { viewModelScope.launch { vaultRepository.setMultiUserMode(enabled) } }
+    fun switchVault(vaultId: String) { viewModelScope.launch { val cleanId = vaultId.trim().lowercase().replace(Regex("[^a-z0-9]"), "_"); if (cleanId.isNotBlank()) vaultRepository.setActiveVault(cleanId) } }
+    fun toggleEditSection(section: SettingsSection) { if (_activeEditSection.value == section) { _activeEditSection.value = SettingsSection.NONE; _isAiMasked.value = true } else { _activeEditSection.value = section } }
+    fun setAiMasked(masked: Boolean) { _isAiMasked.value = masked }
+    fun clearError() { _errorMessage.value = null }
+    fun saveAiConfig(gemini: String, cfUrl: String, token: String, autoSave: Boolean) { viewModelScope.launch { try { val currentTheme = settingsRepo.themeMode.first(); val isEink = currentTheme == ThemeMode.E_INK; settingsRepo.saveSettings(gemini = gemini, cfUrl = cfUrl, cfToken = token, isEnk = isEink); settingsRepo.setAutoSaveRecaps(autoSave); _activeEditSection.value = SettingsSection.NONE; _errorMessage.value = null } catch (e: Exception) { _errorMessage.value = "Failed to save settings: ${e.message}" } } }
+    fun toggleOfflineMode(enabled: Boolean) { viewModelScope.launch { settingsRepo.setOfflineMode(enabled) } }
+    fun logout() { viewModelScope.launch { settingsRepo.updateSyncProfile("", "", ""); settingsRepo.setLastSyncTimestamp(0L); _activeEditSection.value = SettingsSection.NONE; vaultRepository.setActiveVault(VaultRepository.DEFAULT_VAULT_ID) } }
+    fun updateTtsSpeed(newSpeed: Float) = viewModelScope.launch { settingsRepo.setTtsDefaultSpeed(newSpeed.coerceIn(0.5f, 2.5f)) }
+    fun setTtsAutoPageTurn(enabled: Boolean) = viewModelScope.launch { settingsRepo.setTtsAutoPageTurn(enabled) }
+    fun setTtsVisualStyle(style: String) = viewModelScope.launch { settingsRepo.setTtsVisualStyle(style) }
+    fun setTtsLanguage(language: String) = viewModelScope.launch { settingsRepo.setTtsLanguage(language) }
+    fun updateTtsPitch(pitch: Float) = viewModelScope.launch { settingsRepo.setTtsPitch((pitch.coerceIn(0.1f, 2.0f) * 10f).toInt() / 10f) }
+    fun setSleepTimer(minutes: Int) = viewModelScope.launch { settingsRepo.setTtsSleepTimer(minutes) }
+    fun triggerManualSync() { viewModelScope.launch { _syncMessage.value = "Syncing..."; _isSyncLoading.value = true; val result = syncRepo.sync(); _syncMessage.value = if (result.isSuccess) "Sync Complete!" else "Sync Failed: ${result.exceptionOrNull()?.message}"; _isSyncLoading.value = false; delay(3000); _syncMessage.value = null } }
+    fun testServerConnection() { viewModelScope.launch { _syncMessage.value = "Testing Server..."; _isSyncLoading.value = true; try { val useLocal = settingsRepo.useLocalServer.first(); val url = if (useLocal) settingsRepo.localServerUrl.first() else settingsRepo.syncCloudUrl.first(); val result = syncRepo.testConnection(url); _syncMessage.value = if (result.isSuccess) "Connected Successfully!" else "Connection Failed: ${result.exceptionOrNull()?.message}" } catch (e: Exception) { _syncMessage.value = "Error: ${e.message}" }; _isSyncLoading.value = false; delay(3000); _syncMessage.value = null } }
+    fun updateReaderPreferences(prefs: ReaderPreferences) = viewModelScope.launch { settingsRepo.saveReaderPreferences(prefs) }
+    fun setUseEmbeddedDictionary(enabled: Boolean) = viewModelScope.launch { settingsRepo.setUseEmbeddedDictionary(enabled) }
+    fun setDictionaryFolder(uri: String) { viewModelScope.launch { val isValid = withContext(Dispatchers.IO) { settingsRepo.validateStarDictFolder(uri) }; if (isValid) { settingsRepo.setDictionaryFolder(uri); _errorMessage.value = null; _syncMessage.value = "Dictionary folder set successfully." } else { _errorMessage.value = "Invalid Folder: No StarDict (.idx) files found." } } }
+    fun toggleEinkMode(enabled: Boolean) = viewModelScope.launch { settingsRepo.setThemeMode(if (enabled) ThemeMode.E_INK else ThemeMode.LIGHT) }
+    fun setAppTheme(mode: ThemeMode) = viewModelScope.launch { settingsRepo.setThemeMode(mode); delay(100); EinkHelper.requestFullRefresh(context) }
+    fun setEinkContrast(value: Float) = viewModelScope.launch { settingsRepo.setContrast(value) }
+    fun onContrastChangedFinished() = viewModelScope.launch { delay(200); EinkHelper.requestFullRefresh(context) }
+    fun triggerEinkRefresh(context: Context) { EinkHelper.requestFullRefresh(context) }
+    fun setDitheringMode(mode: DitheringMode) = viewModelScope.launch { settingsRepo.setDitheringMode(mode) }
+    fun setGroupBySeries(enabled: Boolean) = viewModelScope.launch { settingsRepo.setGroupBySeries(enabled) }
+    fun setCoverAspectRatio(ratio: CoverAspectRatio) = viewModelScope.launch { settingsRepo.setCoverAspectRatio(ratio) }
+    fun toggleCoverElement(currentPrefs: BookshelfPreferences, format: Boolean? = null, favorite: Boolean? = null, progress: Boolean? = null, sync: Boolean? = null) { viewModelScope.launch { settingsRepo.setCoverStyleElements(format = format ?: currentPrefs.showFormatBadge, favorite = favorite ?: currentPrefs.showFavoriteIcon, progress = progress ?: currentPrefs.showProgressBadge, sync = sync ?: currentPrefs.showSyncStatus) } }
 }

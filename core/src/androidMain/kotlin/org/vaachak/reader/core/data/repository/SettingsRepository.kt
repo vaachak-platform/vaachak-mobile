@@ -1,23 +1,23 @@
 /*
- *  Copyright (c) 2026 Piyush Daiya
- *  *
- *  * Permission is hereby granted, free of charge, to any person obtaining a copy
- *  * of this software and associated documentation files (the "Software"), to deal
- *  * in the Software without restriction, including without limitation the rights
- *  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  * copies of the Software, and to permit persons to whom the Software is
- *  * furnished to do so, subject to the following conditions:
- *  *
- *  * The above copyright notice and this permission notice shall be included in all
- *  * copies or substantial portions of the Software.
- *  *
- *  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  * SOFTWARE.
+ * Copyright (c) 2026 Piyush Daiya
+ * *
+ * * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * * of this software and associated documentation files (the "Software"), to deal
+ * * in the Software without restriction, including without limitation the rights
+ * * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * * copies of the Software, and to permit persons to whom the Software is
+ * * furnished to do so, subject to the following conditions:
+ * *
+ * * The above copyright notice and this permission notice shall be included in all
+ * * copies or substantial portions of the Software.
+ * *
+ * * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * * SOFTWARE.
  */
 
 package org.vaachak.reader.core.data.repository
@@ -27,31 +27,27 @@ import android.net.Uri
 import android.os.Build
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.documentfile.provider.DocumentFile
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
-import org.vaachak.reader.core.domain.model.ThemeMode
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.vaachak.reader.core.domain.model.*
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
-//UI rewrite
-import kotlinx.coroutines.flow.combine
-import org.vaachak.reader.core.domain.model.ReaderPreferences
-
-//TTS
-import org.vaachak.reader.core.domain.model.TtsSettings
-
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import org.vaachak.reader.core.domain.model.*
-
+@OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
 class SettingsRepository @Inject constructor(
-    private val dataStore: DataStore<Preferences>,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val vaultRepository: VaultRepository
 ) {
 
     companion object {
@@ -69,7 +65,6 @@ class SettingsRepository @Inject constructor(
         val OFFLINE_MODE_KEY = booleanPreferencesKey("offline_mode")
 
         // --- TTS SETTINGS ---
-
         val TTS_DEFAULT_SPEED = floatPreferencesKey("tts_default_speed")
         val TTS_AUTO_PAGE_TURN = booleanPreferencesKey("tts_auto_page_turn")
         val TTS_VISUAL_STYLE = stringPreferencesKey("tts_visual_style")
@@ -77,7 +72,6 @@ class SettingsRepository @Inject constructor(
         val TTS_PITCH = floatPreferencesKey("tts_pitch")
         val TTS_BACKGROUND_PLAYBACK = booleanPreferencesKey("tts_background_playback")
         val TTS_SLEEP_TIMER = intPreferencesKey("tts_sleep_timer")
-
         val TTS_VOICE = stringPreferencesKey("tts_voice")
 
         // --- SYNC SETTINGS ---
@@ -106,23 +100,48 @@ class SettingsRepository @Inject constructor(
         val READER_MARGIN_BOTTOM = doublePreferencesKey("reader_margin_bottom")
     }
 
-    // --- APP FLOWS ---
-    val geminiKey: Flow<String> = dataStore.data.map { it[GEMINI_KEY] ?: "" }
-    val cfUrl: Flow<String> = dataStore.data.map { it[CF_URL] ?: "" }
-    val cfToken: Flow<String> = dataStore.data.map { it[CF_TOKEN] ?: "" }
-    val isEinkEnabled: Flow<Boolean> = dataStore.data.map { it[IS_EINK_ENABLED] ?: false }
-    val isAutoSaveRecapsEnabled: Flow<Boolean> = dataStore.data.map { it[AUTO_SAVE_RECAPS_KEY] ?: true }
-    val einkContrast: Flow<Float> = dataStore.data.map { it[CONTRAST_KEY] ?: 0.5f }
-    val isOfflineModeEnabled: Flow<Boolean> = dataStore.data.map { it[OFFLINE_MODE_KEY] ?: false }
+    // --- 1. THE THREAD-SAFE VAULT CACHE ---
+    private val activeVaults = mutableMapOf<String, DataStore<Preferences>>()
+    private val vaultMutex = Mutex()
 
-    val themeMode: Flow<ThemeMode> = dataStore.data.map { prefs ->
+    private suspend fun getVaultDataStore(vaultId: String): DataStore<Preferences> {
+        vaultMutex.withLock {
+            return activeVaults.getOrPut(vaultId) {
+                PreferenceDataStoreFactory.create(
+                    produceFile = { context.preferencesDataStoreFile("vault_$vaultId") }
+                )
+            }
+        }
+    }
+
+    // Helper function for the edit/save methods
+    private suspend fun editCurrentVault(transform: suspend (MutablePreferences) -> Unit) {
+        val currentVaultId = vaultRepository.activeVaultId.first()
+        val dataStore = getVaultDataStore(currentVaultId)
+        dataStore.edit { transform(it) }
+    }
+
+    // --- 2. THE MASTER DYNAMIC FLOW ---
+    // This flow automatically swaps to the correct file when the active vault changes
+    private val vaultPreferencesFlow: Flow<Preferences> = vaultRepository.activeVaultId
+        .flatMapLatest { vaultId -> getVaultDataStore(vaultId).data }
+
+    // --- APP FLOWS ---
+    val geminiKey: Flow<String> = vaultPreferencesFlow.map { it[GEMINI_KEY] ?: "" }
+    val cfUrl: Flow<String> = vaultPreferencesFlow.map { it[CF_URL] ?: "" }
+    val cfToken: Flow<String> = vaultPreferencesFlow.map { it[CF_TOKEN] ?: "" }
+    val isEinkEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[IS_EINK_ENABLED] ?: false }
+    val isAutoSaveRecapsEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[AUTO_SAVE_RECAPS_KEY] ?: true }
+    val einkContrast: Flow<Float> = vaultPreferencesFlow.map { it[CONTRAST_KEY] ?: 0.5f }
+    val isOfflineModeEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[OFFLINE_MODE_KEY] ?: true }
+
+    val themeMode: Flow<ThemeMode> = vaultPreferencesFlow.map { prefs ->
         val name = prefs[THEME_KEY] ?: ThemeMode.E_INK.name
         try { ThemeMode.valueOf(name) } catch (_: Exception) { ThemeMode.E_INK }
     }
 
     // --- TTS FLOWS ---
-    // Combined TTS Config for easier UI consumption mapped directly from DataStore
-    val ttsSettings: Flow<TtsSettings> = dataStore.data.map { preferences ->
+    val ttsSettings: Flow<TtsSettings> = vaultPreferencesFlow.map { preferences ->
         TtsSettings(
             defaultSpeed = preferences[TTS_DEFAULT_SPEED] ?: 1.0f,
             pitch = preferences[TTS_PITCH] ?: 1.0f,
@@ -136,17 +155,16 @@ class SettingsRepository @Inject constructor(
     }
 
     // --- SYNC FLOWS ---
-    val syncCloudUrl: Flow<String> = dataStore.data.map { it[SYNC_CLOUD_URL] ?: "" }
-    val useLocalServer: Flow<Boolean> = dataStore.data.map { it[USE_LOCAL_SERVER] ?: false }
-    val localServerUrl: Flow<String> = dataStore.data.map { it[LOCAL_SERVER_URL] ?: "" }
-    val deviceId: Flow<String> = dataStore.data.map { it[SYNC_DEVICE_ID] ?: "" }
-    val lastSyncTimestamp: Flow<Long> = dataStore.data.map { it[LAST_SYNC_TIMESTAMP] ?: 0L }
-    val syncUsername: Flow<String> = dataStore.data.map { it[SYNC_USERNAME] ?: "" }
-    val syncPassword: Flow<String> = dataStore.data.map { it[SYNC_PASSWORD] ?: "" }
-    val deviceName: Flow<String> = dataStore.data.map { preferences ->
+    val syncCloudUrl: Flow<String> = vaultPreferencesFlow.map { it[SYNC_CLOUD_URL] ?: "" }
+    val useLocalServer: Flow<Boolean> = vaultPreferencesFlow.map { it[USE_LOCAL_SERVER] ?: false }
+    val localServerUrl: Flow<String> = vaultPreferencesFlow.map { it[LOCAL_SERVER_URL] ?: "" }
+    val deviceId: Flow<String> = vaultPreferencesFlow.map { it[SYNC_DEVICE_ID] ?: "" }
+    val lastSyncTimestamp: Flow<Long> = vaultPreferencesFlow.map { it[LAST_SYNC_TIMESTAMP] ?: 0L }
+    val syncUsername: Flow<String> = vaultPreferencesFlow.map { it[SYNC_USERNAME] ?: "" }
+    val syncPassword: Flow<String> = vaultPreferencesFlow.map { it[SYNC_PASSWORD] ?: "" }
+    val deviceName: Flow<String> = vaultPreferencesFlow.map { preferences ->
         val savedName = preferences[DEVICE_NAME]
 
-        // Check for NULL or EMPTY. If either, use the hardware model.
         if (savedName.isNullOrBlank()) {
             val manufacturer = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
             val model = Build.MODEL
@@ -157,16 +175,16 @@ class SettingsRepository @Inject constructor(
     }
 
     // --- READER PREF FLOWS ---
-    val readerLineHeight: Flow<Double?> = dataStore.data.map { it[READER_LINE_HEIGHT] }
-    val readerTextAlign: Flow<String?> = dataStore.data.map { it[READER_TEXT_ALIGN] }
-    val readerParaSpacing: Flow<Double?> = dataStore.data.map { it[READER_PARAGRAPH_SPACING] }
-    val readerMarginSide: Flow<Double?> = dataStore.data.map { it[READER_MARGIN_SIDE] }
-    val readerLetterSpacing: Flow<Double?> = dataStore.data.map { it[READER_LETTER_SPACING] }
+    val readerLineHeight: Flow<Double?> = vaultPreferencesFlow.map { it[READER_LINE_HEIGHT] }
+    val readerTextAlign: Flow<String?> = vaultPreferencesFlow.map { it[READER_TEXT_ALIGN] }
+    val readerParaSpacing: Flow<Double?> = vaultPreferencesFlow.map { it[READER_PARAGRAPH_SPACING] }
+    val readerMarginSide: Flow<Double?> = vaultPreferencesFlow.map { it[READER_MARGIN_SIDE] }
+    val readerLetterSpacing: Flow<Double?> = vaultPreferencesFlow.map { it[READER_LETTER_SPACING] }
 
-    val readerFontFamily: Flow<String?> = dataStore.data.map { it[READER_FONT_FAMILY] }
-    val readerFontSize: Flow<Double> = dataStore.data.map { it[READER_FONT_SIZE] ?: 1.0 }
-    val readerTheme: Flow<String> = dataStore.data.map { it[READER_THEME] ?: "light" }
-    val readerPublisherStyles: Flow<Boolean> = dataStore.data.map { it[READER_PUBLISHER_STYLES] ?: true }
+    val readerFontFamily: Flow<String?> = vaultPreferencesFlow.map { it[READER_FONT_FAMILY] }
+    val readerFontSize: Flow<Double> = vaultPreferencesFlow.map { it[READER_FONT_SIZE] ?: 1.0 }
+    val readerTheme: Flow<String> = vaultPreferencesFlow.map { it[READER_THEME] ?: "light" }
+    val readerPublisherStyles: Flow<Boolean> = vaultPreferencesFlow.map { it[READER_PUBLISHER_STYLES] ?: true }
 
     val readerPreferences: Flow<ReaderPreferences> = combine(
         readerFontFamily, readerFontSize, readerTextAlign, readerTheme, readerPublisherStyles,
@@ -186,22 +204,20 @@ class SettingsRepository @Inject constructor(
     }
 
     // Dictionary Flows
-    fun getUseEmbeddedDictionary(): Flow<Boolean> = dataStore.data.map { it[USE_EMBEDDED_DICT] ?: false }
-    fun getDictionaryFolder(): Flow<String> = dataStore.data.map { it[DICTIONARY_FOLDER_KEY] ?: "" }
+    fun getUseEmbeddedDictionary(): Flow<Boolean> = vaultPreferencesFlow.map { it[USE_EMBEDDED_DICT] ?: false }
+    fun getDictionaryFolder(): Flow<String> = vaultPreferencesFlow.map { it[DICTIONARY_FOLDER_KEY] ?: "" }
 
     // --- TTS ACTIONS ---
-    suspend fun setTtsDefaultSpeed(speed: Float) { dataStore.edit { it[TTS_DEFAULT_SPEED] = speed } }
-    suspend fun setTtsAutoPageTurn(enabled: Boolean) { dataStore.edit { it[TTS_AUTO_PAGE_TURN] = enabled } }
-    suspend fun setTtsVisualStyle(style: String) { dataStore.edit { it[TTS_VISUAL_STYLE] = style } }
-    suspend fun setTtsLanguage(language: String) { dataStore.edit { it[TTS_LANGUAGE] = language } }
-    suspend fun setTtsPitch(pitch: Float) { dataStore.edit { it[TTS_PITCH] = pitch } }
-
-    suspend fun setTtsSleepTimer(minutes: Int) { dataStore.edit { it[TTS_SLEEP_TIMER] = minutes } }
+    suspend fun setTtsDefaultSpeed(speed: Float) { editCurrentVault { it[TTS_DEFAULT_SPEED] = speed } }
+    suspend fun setTtsAutoPageTurn(enabled: Boolean) { editCurrentVault { it[TTS_AUTO_PAGE_TURN] = enabled } }
+    suspend fun setTtsVisualStyle(style: String) { editCurrentVault { it[TTS_VISUAL_STYLE] = style } }
+    suspend fun setTtsLanguage(language: String) { editCurrentVault { it[TTS_LANGUAGE] = language } }
+    suspend fun setTtsPitch(pitch: Float) { editCurrentVault { it[TTS_PITCH] = pitch } }
+    suspend fun setTtsSleepTimer(minutes: Int) { editCurrentVault { it[TTS_SLEEP_TIMER] = minutes } }
 
     // --- SYNC ACTIONS ---
-
     suspend fun updateSyncProfile(user: String, pass: String, name: String) {
-        dataStore.edit { prefs ->
+        editCurrentVault { prefs ->
             prefs[SYNC_USERNAME] = user.trim()
             prefs[SYNC_PASSWORD] = pass
             prefs[DEVICE_NAME] = name.trim()
@@ -214,7 +230,7 @@ class SettingsRepository @Inject constructor(
         useLocal: Boolean,
         deviceName: String? = null
     ) {
-        dataStore.edit { prefs ->
+        editCurrentVault { prefs ->
             prefs[SYNC_CLOUD_URL] = syncCloudUrl.trim().removeSuffix("/")
             prefs[LOCAL_SERVER_URL] = localUrl.trim().removeSuffix("/")
             prefs[USE_LOCAL_SERVER] = useLocal
@@ -225,25 +241,24 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    suspend fun getLastSyncTimestamp(): Long = dataStore.data.first()[LAST_SYNC_TIMESTAMP] ?: 0L
+    suspend fun getLastSyncTimestamp(): Long = vaultPreferencesFlow.first()[LAST_SYNC_TIMESTAMP] ?: 0L
 
     suspend fun setLastSyncTimestamp(ts: Long) {
-        dataStore.edit { it[LAST_SYNC_TIMESTAMP] = ts }
+        editCurrentVault { it[LAST_SYNC_TIMESTAMP] = ts }
     }
 
     suspend fun ensureDeviceId(): String {
-        val existing = dataStore.data.first()[SYNC_DEVICE_ID]
+        val existing = vaultPreferencesFlow.first()[SYNC_DEVICE_ID]
         if (!existing.isNullOrBlank()) return existing
 
         val newId = "android-${UUID.randomUUID().toString().take(8)}"
-        dataStore.edit { it[SYNC_DEVICE_ID] = newId }
+        editCurrentVault { it[SYNC_DEVICE_ID] = newId }
         return newId
     }
 
     // --- APP SETTINGS ACTIONS ---
-
     suspend fun saveSettings(gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean) {
-        dataStore.edit { prefs ->
+        editCurrentVault { prefs ->
             prefs[GEMINI_KEY] = gemini.trim()
             prefs[CF_URL] = cfUrl.trim().removeSuffix("/")
             prefs[CF_TOKEN] = cfToken.trim()
@@ -251,12 +266,12 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    suspend fun setAutoSaveRecaps(enabled: Boolean) { dataStore.edit { it[AUTO_SAVE_RECAPS_KEY] = enabled } }
-    suspend fun setThemeMode(mode: ThemeMode) { dataStore.edit { it[THEME_KEY] = mode.name } }
-    suspend fun setContrast(value: Float) { dataStore.edit { it[CONTRAST_KEY] = value } }
-    suspend fun setUseEmbeddedDictionary(enabled: Boolean) { dataStore.edit { it[USE_EMBEDDED_DICT] = enabled } }
-    suspend fun setDictionaryFolder(uri: String) { dataStore.edit { it[DICTIONARY_FOLDER_KEY] = uri } }
-    suspend fun setOfflineMode(enabled: Boolean) { dataStore.edit { it[OFFLINE_MODE_KEY] = enabled } }
+    suspend fun setAutoSaveRecaps(enabled: Boolean) { editCurrentVault { it[AUTO_SAVE_RECAPS_KEY] = enabled } }
+    suspend fun setThemeMode(mode: ThemeMode) { editCurrentVault { it[THEME_KEY] = mode.name } }
+    suspend fun setContrast(value: Float) { editCurrentVault { it[CONTRAST_KEY] = value } }
+    suspend fun setUseEmbeddedDictionary(enabled: Boolean) { editCurrentVault { it[USE_EMBEDDED_DICT] = enabled } }
+    suspend fun setDictionaryFolder(uri: String) { editCurrentVault { it[DICTIONARY_FOLDER_KEY] = uri } }
+    suspend fun setOfflineMode(enabled: Boolean) { editCurrentVault { it[OFFLINE_MODE_KEY] = enabled } }
 
     suspend fun updateReaderPreferences(
         fontFamily: String? = null, fontSize: Double? = null, textAlign: String? = null,
@@ -264,7 +279,7 @@ class SettingsRepository @Inject constructor(
         lineHeight: Double? = null, paraSpacing: Double? = null, marginSide: Double? = null,
         marginTop: Double? = null, marginBottom: Double? = null
     ) {
-        dataStore.edit { prefs ->
+        editCurrentVault { prefs ->
             fontFamily?.let { prefs[READER_FONT_FAMILY] = it }
             fontSize?.let { prefs[READER_FONT_SIZE] = it }
             textAlign?.let { prefs[READER_TEXT_ALIGN] = it }
@@ -287,11 +302,9 @@ class SettingsRepository @Inject constructor(
         } catch (e: Exception) { false }
     }
 
-
-
     // --- NEW: Unified Save Function ---
     suspend fun saveReaderPreferences(prefs: ReaderPreferences) {
-        dataStore.edit { preferences ->
+        editCurrentVault { preferences ->
             preferences[READER_THEME] = prefs.theme
 
             if (prefs.publisherStyles) {
@@ -330,7 +343,7 @@ class SettingsRepository @Inject constructor(
     }
 
     suspend fun resetLayoutPreferences() {
-        dataStore.edit { preferences ->
+        editCurrentVault { preferences ->
             preferences.remove(READER_LINE_HEIGHT)
             preferences.remove(READER_TEXT_ALIGN)
             preferences.remove(READER_PARAGRAPH_SPACING)
@@ -351,7 +364,7 @@ class SettingsRepository @Inject constructor(
     private val SHOW_PROGRESS_BADGE_KEY = booleanPreferencesKey("show_progress_badge")
     private val SHOW_SYNC_STATUS_KEY = booleanPreferencesKey("show_sync_status")
 
-    val bookshelfPreferences: kotlinx.coroutines.flow.Flow<BookshelfPreferences> = dataStore.data.map { prefs ->
+    val bookshelfPreferences: Flow<BookshelfPreferences> = vaultPreferencesFlow.map { prefs ->
         BookshelfPreferences(
             ditheringMode = DitheringMode.valueOf(prefs[DITHERING_MODE_KEY] ?: DitheringMode.AUTO.name),
             groupBySeries = prefs[GROUP_BY_SERIES_KEY] ?: true,
@@ -364,27 +377,25 @@ class SettingsRepository @Inject constructor(
     }
 
     suspend fun setDitheringMode(mode: DitheringMode) {
-        dataStore.edit { it[DITHERING_MODE_KEY] = mode.name }
+        editCurrentVault { it[DITHERING_MODE_KEY] = mode.name }
     }
 
     suspend fun setGroupBySeries(enabled: Boolean) {
-        dataStore.edit { it[GROUP_BY_SERIES_KEY] = enabled }
+        editCurrentVault { it[GROUP_BY_SERIES_KEY] = enabled }
     }
 
     suspend fun setCoverAspectRatio(ratio: CoverAspectRatio) {
-        dataStore.edit { it[COVER_ASPECT_RATIO_KEY] = ratio.name }
+        editCurrentVault { it[COVER_ASPECT_RATIO_KEY] = ratio.name }
     }
 
     suspend fun setCoverStyleElements(
         format: Boolean, favorite: Boolean, progress: Boolean, sync: Boolean
     ) {
-        dataStore.edit { prefs ->
+        editCurrentVault { prefs ->
             prefs[SHOW_FORMAT_BADGE_KEY] = format
             prefs[SHOW_FAVORITE_ICON_KEY] = favorite
             prefs[SHOW_PROGRESS_BADGE_KEY] = progress
             prefs[SHOW_SYNC_STATUS_KEY] = sync
         }
     }
-} // End of SettingsRepository class
-
-
+}

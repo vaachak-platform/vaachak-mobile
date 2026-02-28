@@ -25,7 +25,8 @@ class SyncRepository @Inject constructor(
     private val syncVaultDao: SyncVaultDao,
     private val cryptoManager: CryptoManager,
     private val syncApi: SyncApi,
-    private val settingsRepo: SettingsRepository
+    private val settingsRepo: SettingsRepository,
+    private val vaultRepository: VaultRepository // <-- 1. INJECT THE VAULT
 ) {
 
     // ==========================================
@@ -48,10 +49,14 @@ class SyncRepository @Inject constructor(
     }
 
     private suspend fun pushLocalChanges() {
-        val dirtyBooks = bookDao.getBooksModifiedSince(0L).filter { it.isDirty }
+        val profileId = vaultRepository.activeVaultId.first() // <-- GET ACTIVE USER
+
+        // Pass profileId to DAO
+        val dirtyBooks = bookDao.getBooksModifiedSince(profileId, 0L).filter { it.isDirty }
 
         for (book in dirtyBooks) {
-            val highlights = highlightDao.getHighlightsForBook(book.bookHash).first()
+            // Pass profileId to DAO
+            val highlights = highlightDao.getHighlightsForBook(book.bookHash, profileId).first()
 
             val payloadObj = SyncDto.CleartextPayload(
                 bookHash = book.bookHash,
@@ -72,7 +77,9 @@ class SyncRepository @Inject constructor(
                 needsPush = true
             )
             syncVaultDao.upsertSyncPayload(vaultEntity)
-            bookDao.updateBookMetadataFromSync(book.bookHash, book.lastCfiLocation ?: "", book.progress, book.updatedAt)
+
+            // Pass profileId to DAO
+            bookDao.updateBookMetadataFromSync(book.bookHash, profileId, book.lastCfiLocation ?: "", book.progress, book.updatedAt)
         }
 
         val pendingUploads = syncVaultDao.getPendingUploads().first()
@@ -91,6 +98,7 @@ class SyncRepository @Inject constructor(
     }
 
     private suspend fun pullRemoteChanges(lastSyncTime: Long) {
+        val profileId = vaultRepository.activeVaultId.first() // <-- GET ACTIVE USER
         val remoteBlobs = syncApi.pullEncryptedVault(lastSyncTime)
 
         for (blob in remoteBlobs) {
@@ -99,13 +107,19 @@ class SyncRepository @Inject constructor(
                 val decryptedJson = cryptoManager.decrypt(payload)
                 val cleartext = Json.decodeFromString<SyncDto.CleartextPayload>(decryptedJson)
 
+                // Pass profileId to DAO
                 bookDao.updateProgressFromCloud(
                     bookHash = cleartext.bookHash,
+                    profileId = profileId,
                     progress = cleartext.progress,
                     cfiLocation = cleartext.lastCfiLocation ?: "",
                     timestamp = cleartext.updatedAt
                 )
-                cleartext.highlights.forEach { highlightDao.insertHighlight(it) }
+
+                // Stamp incoming highlights with the local profileId so they attach correctly
+                cleartext.highlights.forEach {
+                    highlightDao.insertHighlight(it.copy(profileId = profileId))
+                }
             } catch (e: Exception) {
                 // Skip if decryption fails (e.g., wrong AES key)
                 continue
@@ -125,7 +139,6 @@ class SyncRepository @Inject constructor(
             syncApi.setBaseUrl(targetUrl)
 
             // 2. Call the server to verify credentials
-            // (Note: ensure RegisterRequest constructor matches your DTO. If your DTO expects (username, password), change as needed)
             val result = syncApi.login(RegisterRequest(user, pass))
 
             if (result.isSuccess) {
@@ -163,7 +176,7 @@ class SyncRepository @Inject constructor(
             syncApi.setBaseUrl(targetUrl)
 
             // 3. Execute
-            val registerRequest = RegisterRequest(username = user, passwordHash = pass) // Adjusted to match the KMP DTO we created earlier
+            val registerRequest = RegisterRequest(username = user, passwordHash = pass)
             syncApi.register(registerRequest)
         } catch (e: Exception) {
             Result.failure(e)

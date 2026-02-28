@@ -37,10 +37,15 @@ import org.vaachak.reader.core.data.local.AppDatabase
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
 import javax.inject.Singleton
+import javax.inject.Qualifier
 import org.vaachak.reader.core.data.local.OpdsDao
 import org.vaachak.reader.core.data.local.getDatabaseBuilder
 import org.vaachak.reader.core.security.CryptoManager
-
+import org.vaachak.reader.core.data.local.createDataStore
+import org.vaachak.reader.core.data.repository.VaultRepository
+import java.io.File
+import org.vaachak.reader.core.data.local.ProfileDao
+import org.vaachak.reader.core.data.local.SyncVaultDao
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
@@ -60,11 +65,7 @@ object DatabaseModule {
         return database.highlightDao()
     }
 
-    @Provides
-    @Singleton
-    fun provideBookDao(database: AppDatabase): BookDao {
-        return database.bookDao()
-    }
+
 
     // --- THIS IS THE MISSING PART CAUSING YOUR ERROR ---
     @Provides
@@ -73,20 +74,54 @@ object DatabaseModule {
     // --- DATASTORE SETUP ---
     // This creates the single source of truth for "user_settings".
     // It replaces the 'Context.dataStore' extension property to prevents crashes.
-    @Provides
-    @Singleton
-    fun provideDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
-        return PreferenceDataStoreFactory.create(
-            produceFile = { context.preferencesDataStoreFile("user_settings") }
-        )
-    }
+
     @Provides
     @Singleton
     fun provideCryptoManager(): CryptoManager {
         return CryptoManager()
     }
     @Provides
-    fun provideSyncVaultDao(database: AppDatabase): org.vaachak.reader.core.data.local.SyncVaultDao {
+    fun provideSyncVaultDao(database: AppDatabase): SyncVaultDao {
         return database.syncVaultDao()
+    }
+    @Provides
+    fun provideBookDao(database: AppDatabase): BookDao {
+        return database.bookDao()
+    }
+
+    // --- ADD THIS NEW BLOCK ---
+    @Provides
+    fun provideProfileDao(database: AppDatabase): ProfileDao {
+        return database.profileDao()
+    }
+
+}
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class VaultPreferences
+
+@Module
+@InstallIn(SingletonComponent::class)
+object VaultModule {
+
+    @Provides
+    @Singleton
+    @VaultPreferences // --- 2. TAG THE DATASTORE CREATION ---
+    fun provideGlobalDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
+        return createDataStore(
+            producePath = {
+                // Generates standard Android path: /data/data/org.vaachak.../files/datastore/vault_prefs.preferences_pb
+                File(context.filesDir, "datastore/vault_prefs.preferences_pb").absolutePath
+            }
+        )
+    }
+
+    @Provides
+    @Singleton
+    fun provideVaultRepository(
+        @VaultPreferences dataStore: DataStore<Preferences> // --- 3. TELL HILT EXACTLY WHICH ONE TO USE ---
+    ): VaultRepository {
+        return VaultRepository(dataStore)
     }
 }

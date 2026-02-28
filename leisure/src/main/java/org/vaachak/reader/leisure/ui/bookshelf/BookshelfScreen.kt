@@ -53,6 +53,7 @@ fun BookshelfScreen(
     onBookClick: (String) -> Unit,
     onCatalogClick: () -> Unit,
     onHighlightsClick: () -> Unit,
+    isOfflineMode: Boolean = false, // --- NEW: Passed down from MainActivity ---
     viewModel: BookshelfViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -69,7 +70,13 @@ fun BookshelfScreen(
         uri?.let { viewModel.importBook(it) }
     }
 
-    // Intercept Back button for Search OR Folder Drill-down
+    LaunchedEffect(state.snackbarMessage) {
+        state.snackbarMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearSnackbarMessage()
+        }
+    }
+
     BackHandler(enabled = isSearchActive || state.selectedStackName != null) {
         if (isSearchActive) {
             isSearchActive = false
@@ -83,7 +90,7 @@ fun BookshelfScreen(
     val contentColor = if (state.isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
     val readingItems = state.groupedLibrary.values.flatten()
-        .filter { it.progress > 0f && it.progress < .99f } // <--- ADD THIS CHECK
+        .filter { it.progress > 0f && it.progress < .99f }
         .sortedByDescending { it.progress }
         .map { LibraryItem.Book(it) }
 
@@ -130,6 +137,21 @@ fun BookshelfScreen(
                                 colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent)
                             )
                         } else {
+                            // --- NEW: PASSIVE OFFLINE INDICATOR ---
+                            if (isOfflineMode) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .background(contentColor.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(Icons.Default.CloudOff, contentDescription = "Offline Mode", tint = contentColor.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Offline", style = MaterialTheme.typography.labelSmall, color = contentColor.copy(alpha = 0.7f), fontWeight = FontWeight.Medium)
+                                }
+                            }
+
                             IconButton(onClick = { isSearchActive = true }) { Icon(Icons.Default.Search, "Search", tint = contentColor) }
                             IconButton(onClick = { viewModel.refreshLibrary() }) { Icon(Icons.Default.Sync, "Sync", tint = contentColor) }
                             IconButton(onClick = onCatalogClick) { Icon(Icons.Default.Public, "Catalog", tint = contentColor) }
@@ -176,7 +198,7 @@ fun BookshelfScreen(
                     contentColor = contentColor,
                     viewModel = viewModel,
                     onBookClick = onBookClick,
-                    onDeleteBook = { bookToDelete = it }, // PASS ACTION
+                    onDeleteBook = { bookToDelete = it },
                     bottomBarTextLeft = "Recent Reading: ${readingItems.size}"
                 )
             } else {
@@ -205,7 +227,7 @@ fun BookshelfScreen(
                             contentColor = contentColor,
                             viewModel = viewModel,
                             onBookClick = onBookClick,
-                            onDeleteBook = { bookToDelete = it }, // PASS ACTION
+                            onDeleteBook = { bookToDelete = it },
                             bottomBarTextLeft = "Books in series: ${stackBooks.size}"
                         )
                     } else {
@@ -229,7 +251,7 @@ fun BookshelfScreen(
                             contentColor = contentColor,
                             viewModel = viewModel,
                             onBookClick = onBookClick,
-                            onDeleteBook = { bookToDelete = it }, // PASS ACTION
+                            onDeleteBook = { bookToDelete = it },
                             bottomBarTextLeft = "Total Library: ${shelfItems.size}"
                         )
                     }
@@ -237,7 +259,6 @@ fun BookshelfScreen(
             }
         }
 
-        // --- DELETE DIALOG TRIGGER ---
         bookToDelete?.let { book ->
             DeleteBookDialog(
                 bookTitle = book.title,
@@ -261,7 +282,7 @@ fun PaginatedGrid(
     contentColor: Color,
     viewModel: BookshelfViewModel,
     onBookClick: (String) -> Unit,
-    onDeleteBook: (BookEntity) -> Unit, // ADDED CALLBACK
+    onDeleteBook: (BookEntity) -> Unit,
     bottomBarTextLeft: String
 ) {
     if (items.isEmpty()) {
@@ -287,7 +308,7 @@ fun PaginatedGrid(
                                         book = item.entity,
                                         state = state,
                                         onClick = { onBookClick(item.entity.localUri ?: "") },
-                                        onDelete = { onDeleteBook(item.entity) } // PASS ACTION
+                                        onDelete = { onDeleteBook(item.entity) }
                                     )
                                     is LibraryItem.Stack -> StackGridItem(stack = item, state = state, onClick = { viewModel.openStack(item.name) })
                                 }
@@ -310,13 +331,12 @@ fun PaginatedGrid(
     }
 }
 
-// --- BOOK CARD WITH NEW DELETE ICON ---
 @Composable
 fun NeoReaderCoverCard(
     book: BookEntity,
     state: BookshelfUiState,
     onClick: () -> Unit,
-    onDelete: () -> Unit // ADDED CALLBACK
+    onDelete: () -> Unit
 ) {
     val prefs = state.bookshelfPrefs
     val isEink = state.isEink
@@ -352,7 +372,6 @@ fun NeoReaderCoverCard(
         }
         Spacer(Modifier.height(4.dp))
 
-        // NEW: Row to place Title and Delete Icon side-by-side
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Text(
                 text = book.title,
@@ -361,9 +380,8 @@ fun NeoReaderCoverCard(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 color = if(isEink) Color.Black else MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f) // Text takes up remaining space
+                modifier = Modifier.weight(1f)
             )
-            // NEW: High-Contrast Delete Button
             Box(
                 modifier = Modifier
                     .padding(start = 4.dp)
@@ -376,9 +394,9 @@ fun NeoReaderCoverCard(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Filled.Delete, // Changed to Filled
+                    imageVector = Icons.Filled.Delete,
                     contentDescription = "Delete ${book.title}",
-                    tint = if (isEink) Color.White else MaterialTheme.colorScheme.background, // Inverted tint
+                    tint = if (isEink) Color.White else MaterialTheme.colorScheme.background,
                     modifier = Modifier.size(16.dp)
                 )
             }
@@ -386,7 +404,6 @@ fun NeoReaderCoverCard(
     }
 }
 
-// --- STACK / FOLDER CARD ---
 @Composable
 fun StackGridItem(stack: LibraryItem.Stack, state: BookshelfUiState, onClick: () -> Unit) {
     val isEink = state.isEink
@@ -420,7 +437,6 @@ fun StackGridItem(stack: LibraryItem.Stack, state: BookshelfUiState, onClick: ()
     }
 }
 
-// --- DELETE DIALOG ---
 @Composable
 fun DeleteBookDialog(
     bookTitle: String,

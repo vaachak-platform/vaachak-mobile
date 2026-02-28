@@ -23,7 +23,32 @@
 package org.vaachak.reader.leisure
 
 import android.app.Application
+import android.content.pm.ApplicationInfo
+import android.os.Debug
+import android.os.StrictMode
 import dagger.hilt.android.HiltAndroidApp
+import timber.log.Timber
 
 @HiltAndroidApp
-class VaachakApplication : Application()
+class VaachakApplication : Application() {
+
+    override fun onCreate() {
+        super.onCreate()
+        Timber.plant(Timber.DebugTree())
+
+        // Modern, safe way to check for debug mode without BuildConfig
+        val isDebug = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+        if (isDebug) {
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder()
+                    .detectDiskReads()
+                    .detectDiskWrites()
+                    .detectNetwork()
+                    .penaltyLog() // Prints to your IntelliJ Logcat
+                    .penaltyFlashScreen() // Flashes the screen red when you block the main thread!
+                    .build()
+            )
+        }
+    }
+}

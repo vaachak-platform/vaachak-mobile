@@ -37,7 +37,7 @@ hiltNavigationCompose = "1.2.0"
 retrofit = "2.11.0" # Kept at 2.x to prevent breaking changes
 okhttp = "4.12.0" # Kept at 4.x (5.x is Alpha)
 ktor = "2.3.7" # Kept at 2.x to prevent breaking changes
-datastore = "1.2.0" # Safely bumped
+datastore = "1.1.2"
 
 # -- Readium & AI --
 readium = "3.1.2"
@@ -116,7 +116,11 @@ androidx-media3-session = { group = "androidx.media3", name = "media3-session", 
 androidx-media3-common = { group = "androidx.media3", name = "media3-common", version.ref = "media3" }
 
 # -- Utilities --
-androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+# The Android-specific one (for your leisure module)
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
+
+# The pure Kotlin KMP one (for your core/commonMain module)
+androidx-datastore-preferences-core = { module = "androidx.datastore:datastore-preferences-core", version.ref = "datastore" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serializationJson" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }

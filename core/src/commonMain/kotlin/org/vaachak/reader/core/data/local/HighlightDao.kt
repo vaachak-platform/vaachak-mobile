@@ -36,20 +36,23 @@ interface HighlightDao {
     suspend fun insertHighlight(highlight: HighlightEntity)
 
     // publicationId is now bookHashId
-    @Query("SELECT * FROM highlights WHERE bookHashId = :bookHashId")
-    fun getHighlightsForBook(bookHashId: String): Flow<List<HighlightEntity>>
+    @Query("SELECT * FROM highlights WHERE bookHashId = :bookHash AND profileId = :profileId ORDER BY created DESC")
+    fun getHighlightsForBook(bookHash: String, profileId: String): Flow<List<HighlightEntity>>
 
     // id is now a UUID String, not a Long
     @Query("DELETE FROM highlights WHERE id = :id")
     suspend fun deleteHighlightById(id: String)
 
-    @Query("SELECT * FROM highlights ORDER BY created DESC")
-    fun getAllHighlights(): Flow<List<HighlightEntity>>
+    // Update this:
+    @Query("SELECT * FROM highlights WHERE profileId = :profileId ORDER BY created DESC")
+    fun getAllHighlights(profileId: String): Flow<List<HighlightEntity>>
 
-    @Query("SELECT DISTINCT tag FROM highlights ORDER BY tag ASC")
-    fun getAllUniqueTags(): Flow<List<String>>
+    // Update this:
+    @Query("SELECT DISTINCT tag FROM highlights WHERE tag IS NOT NULL AND tag != '' AND profileId = :profileId")
+    fun getAllUniqueTags(profileId: String): Flow<List<String>>
 
-    @Query("SELECT DISTINCT bookHashId FROM highlights")
-    fun getBooksWithBookmarks(): Flow<List<String>>
+    // Requires profileId to know which books to mark with the favorite/bookmark star
+    @Query("SELECT DISTINCT bookHashId FROM highlights WHERE tag = 'BOOKMARK' AND profileId = :profileId")
+    fun getBooksWithBookmarks(profileId: String): Flow<List<String>>
 }
 

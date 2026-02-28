@@ -49,6 +49,9 @@ kotlin {
 
             // Utilities
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.androidx.datastore.preferences.core)
+            implementation("com.squareup.okio:okio:3.9.0")
+
         }
 
         androidMain.dependencies {

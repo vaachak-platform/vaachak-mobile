@@ -123,21 +123,24 @@ fun HighlightItem(
     val tagBgColor = if (isEink) Color.Black else MaterialTheme.colorScheme.secondaryContainer
     val tagTextColor = if (isEink) Color.White else MaterialTheme.colorScheme.onSecondaryContainer
 
+    // THE FIX: Lock the cross-module property into a local, immutable variable
+    val safeTag = highlight.tag
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick(highlight) }
             .padding(16.dp)
     ) {
-        // 1. Tag Label (if exists)
-        if (highlight.tag.isNotEmpty()) {
+        // 1. Tag Label (if exists) - Now using the local safeTag
+        if (!safeTag.isNullOrEmpty()) {
             Surface(
                 color = tagBgColor,
                 shape = RoundedCornerShape(4.dp),
                 modifier = Modifier.padding(bottom = 8.dp)
             ) {
                 Text(
-                    text = highlight.tag.uppercase(),
+                    text = safeTag.uppercase(), // Compiler is happy now!
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                     color = tagTextColor,
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -145,14 +148,12 @@ fun HighlightItem(
             }
         }
 
-        // 2. Highlighted Text (Simulating visual highlight with left border or bg)
+        // 2. Highlighted Text
         Row(modifier = Modifier.fillMaxWidth()) {
-            // Visual accent line
             Box(
                 modifier = Modifier
                     .width(4.dp)
-                    .height(40.dp) // Fixed min height or dynamic? Dynamic is hard in simple Row.
-                    // Just a small accent
+                    .height(40.dp)
                     .background(Color(highlight.color).copy(alpha = if(isEink) 0.5f else 1f))
             )
             Spacer(modifier = Modifier.width(12.dp))
@@ -161,7 +162,6 @@ fun HighlightItem(
                 text = highlight.text,
                 style = MaterialTheme.typography.bodyMedium,
                 color = textColor,
-                //maxLines = 4,
                 overflow = TextOverflow.Ellipsis
             )
         }
