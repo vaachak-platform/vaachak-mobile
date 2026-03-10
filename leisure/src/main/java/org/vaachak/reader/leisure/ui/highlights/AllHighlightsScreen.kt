@@ -31,20 +31,47 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MenuBook
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,6 +79,10 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import org.vaachak.reader.core.domain.model.HighlightEntity
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
+import org.vaachak.reader.leisure.ui.testability.tids
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
@@ -70,27 +101,33 @@ fun AllHighlightsScreen(
     val containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.background
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
-    Scaffold(
-        topBar = {
-            VaachakHeader(
-                title = "Highlights (${groupedHighlights.values.sumOf { it.size }})",
-                onBack = onBack,
-                isEink = isEink
-            )
-        },
-        containerColor = containerColor
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-        ) {
+    TidScreen(Tid.Screen.highlights) {
+        Scaffold(
+            topBar = {
+                VaachakHeader(
+                    title = "Highlights (${groupedHighlights.values.sumOf { it.size }})",
+                    onBack = onBack,
+                    isEink = isEink,
+                    backButtonModifier = Modifier.tid(Tid.Highlights.BACK)
+                )
+            },
+            containerColor = containerColor
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+            ) {
             // --- 1. COMPACT FILTER BAR ---
             Surface(
                 color = if (isEink) Color.White else MaterialTheme.colorScheme.surface,
                 modifier = Modifier
+                    .tid(Tid.Highlights.FILTER_BAR)
                     .fillMaxWidth()
                     .clickable { isFilterExpanded = !isFilterExpanded }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Filter Highlights: Currently showing $selectedTag. Tap to change."
+                    }
             ) {
                 Column {
                     Row(
@@ -101,7 +138,7 @@ fun AllHighlightsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.FilterList, null, modifier = Modifier.size(14.dp), tint = contentColor)
+                            Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(14.dp), tint = contentColor)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Filter: $selectedTag",
@@ -112,9 +149,11 @@ fun AllHighlightsScreen(
                         }
                         Icon(
                             imageVector = if (isFilterExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Toggle",
+                            contentDescription = if (isFilterExpanded) "Collapse Filter" else "Expand Filter",
                             tint = contentColor,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier
+                                .tid(Tid.Highlights.FILTER_TOGGLE)
+                                .size(16.dp)
                         )
                     }
 
@@ -128,7 +167,15 @@ fun AllHighlightsScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            tags.forEach { tagData ->
+                            tags.forEachIndexed { index, tagData ->
+                                val chipModifier = if (index == 0) {
+                                    Modifier.tids(
+                                        Tid.Highlights.filterChip(tagData.name),
+                                        Tid.Highlights.FILTER_CHIP_FIRST
+                                    )
+                                } else {
+                                    Modifier.tid(Tid.Highlights.filterChip(tagData.name))
+                                }
                                 FilterChip(
                                     selected = selectedTag == tagData.name,
                                     onClick = {
@@ -136,7 +183,7 @@ fun AllHighlightsScreen(
                                         isFilterExpanded = false
                                     },
                                     label = { Text("${tagData.name} (${tagData.count})", fontSize = 11.sp) },
-                                    modifier = Modifier.height(28.dp), // Slimmer chips
+                                    modifier = chipModifier.height(28.dp), // Slimmer chips
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = if (isEink) Color.Black else MaterialTheme.colorScheme.primary,
                                         selectedLabelColor = if (isEink) Color.White else MaterialTheme.colorScheme.onPrimary,
@@ -159,6 +206,7 @@ fun AllHighlightsScreen(
                 }
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    var firstHighlightAssigned = false
                     groupedHighlights.forEach { (bookTitle, highlights) ->
                         stickyHeader {
                             Surface(
@@ -170,7 +218,7 @@ fun AllHighlightsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
-                                    Icon(Icons.Default.MenuBook, null, modifier = Modifier.size(14.dp), tint = contentColor)
+                                    Icon(Icons.Default.MenuBook, contentDescription = null, modifier = Modifier.size(14.dp), tint = contentColor)
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = bookTitle,
@@ -183,10 +231,15 @@ fun AllHighlightsScreen(
                                 }
                             }
                         }
-                        items(highlights, key = { it.id }) { highlight ->
+                        itemsIndexed(highlights, key = { _, highlight -> highlight.id }) { index, highlight ->
+                            val isFirstVisibleItem = !firstHighlightAssigned
+                            if (isFirstVisibleItem) {
+                                firstHighlightAssigned = true
+                            }
                             CompactHighlightItem(
                                 highlight = highlight,
                                 isEink = isEink,
+                                isFirstItem = isFirstVisibleItem,
                                 onClick = { onHighlightClick(highlight.bookHashId, highlight.locatorJson) },
                                 onDelete = { viewModel.deleteHighlight(highlight.id) }
                             )
@@ -194,6 +247,7 @@ fun AllHighlightsScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -203,12 +257,23 @@ fun AllHighlightsScreen(
 fun CompactHighlightItem(
     highlight: HighlightEntity,
     isEink: Boolean,
+    isFirstItem: Boolean,
     onClick: () -> Unit,
     onDelete: () -> Unit
 ) {
     val modifier = if (isEink) Modifier.fillMaxWidth().border(0.5.dp, Color.Black) else Modifier.fillMaxWidth()
 
-    Surface(onClick = onClick, color = Color.Transparent, modifier = modifier) {
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        modifier = if (isFirstItem) {
+            modifier.tids(Tid.Highlights.item(highlight.id), Tid.Highlights.FIRST)
+        } else {
+            modifier.tid(Tid.Highlights.item(highlight.id))
+        }.semantics(mergeDescendants = true) {
+            contentDescription = "Highlight: ${highlight.text}, Tag: ${highlight.tag ?: "None"}"
+        }
+    ) {
         Row(
             // OPTIMIZATION: Tighter padding (12dp) allows more content
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -241,10 +306,17 @@ fun CompactHighlightItem(
                     color = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
                 )
             }
-            IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+            IconButton(
+                onClick = onDelete,
+                modifier = if (isFirstItem) {
+                    Modifier.tids(Tid.Highlights.delete(highlight.id), Tid.Highlights.DELETE_FIRST)
+                } else {
+                    Modifier.tid(Tid.Highlights.delete(highlight.id))
+                }.size(24.dp)
+            ) {
                 Icon(
                     imageVector = Icons.Default.Delete,
-                    contentDescription = "Delete",
+                    contentDescription = "Delete Highlight",
                     modifier = Modifier.size(16.dp), // Smaller Icon
                     tint = if (isEink) Color.Black else MaterialTheme.colorScheme.error.copy(alpha=0.6f)
                 )

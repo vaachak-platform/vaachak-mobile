@@ -29,15 +29,36 @@ import android.util.Base64
 import android.widget.TextView
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape // <--- FIXED: Added missing import
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.PersonSearch
-import androidx.compose.material3.*
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -45,11 +66,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.text.HtmlCompat
-import android.util.Log
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.tid
+import timber.log.Timber
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiBottomSheet(
@@ -73,7 +99,8 @@ fun AiBottomSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = containerColor,
         contentColor = contentColor,
-        shape = if (isEink) MaterialTheme.shapes.extraSmall else BottomSheetDefaults.ExpandedShape
+        shape = if (isEink) MaterialTheme.shapes.extraSmall else BottomSheetDefaults.ExpandedShape,
+        modifier = Modifier.tid(Tid.Screen.aiBottomSheet)
     ) {
         Column(
             modifier = Modifier
@@ -123,9 +150,27 @@ private fun AiActionRow(
         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        AiActionButton("Explain", Icons.Default.AutoAwesome, onExplain, isEink, Modifier.weight(1f))
-        AiActionButton("Who?", Icons.Default.PersonSearch, onWhoIsThis, isEink, Modifier.weight(1f))
-        AiActionButton("Visualize", Icons.Default.Brush, onVisualize, isEink, Modifier.weight(1f))
+        AiActionButton(
+            text = "Explain",
+            icon = Icons.Default.AutoAwesome,
+            onClick = onExplain,
+            isEink = isEink,
+            modifier = Modifier.weight(1f).tid(Tid.AiBottomSheet.actionExplain)
+        )
+        AiActionButton(
+            text = "Who?",
+            icon = Icons.Default.PersonSearch,
+            onClick = onWhoIsThis,
+            isEink = isEink,
+            modifier = Modifier.weight(1f).tid(Tid.AiBottomSheet.actionWho)
+        )
+        AiActionButton(
+            text = "Visualize",
+            icon = Icons.Default.Brush,
+            onClick = onVisualize,
+            isEink = isEink,
+            modifier = Modifier.weight(1f).tid(Tid.AiBottomSheet.actionVisualize)
+        )
     }
 }
 
@@ -204,7 +249,7 @@ private fun AiImageResult(responseText: String, isEink: Boolean) {
                 val imageBytes = Base64.decode(responseText, Base64.DEFAULT)
                 BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
             } catch (e: Exception) {
-                Log.e("AiBottomSheet", "Bitmap decode failed: ${e.message}")
+                Timber.e(e, "Bitmap decode failed: ${e.message}")
                 null
             }
         }
@@ -279,7 +324,9 @@ fun AiActionButton(
 
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.semantics(mergeDescendants = true) {
+            contentDescription = "$text Action"
+        },
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, borderColor),
         colors = ButtonDefaults.outlinedButtonColors(

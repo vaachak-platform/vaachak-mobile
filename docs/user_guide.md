@@ -4,20 +4,25 @@ Welcome to **Vaachak**, your distraction-free, AI-powered E-Ink reader. This gui
 
 ---
 
+---
+
 ## 🚀 1. Getting Started
 
-### Initial Setup (API Keys)
-Vaachak follows a **"Bring Your Own Key" (BYOK)** privacy model. Your keys are stored securely on your device.
+### 🤖 Intelligence Setup (Bring Your Own Key)
+Vaachak follows a strict privacy model. Your AI keys are stored securely on your device and are never sent to our servers.
+1. Open the app and tap the **Settings (Gear Icon)** in the top bar.
+2. Navigate to **Intelligence Settings**.
+3. **Gemini API Key:** Enter your key to unlock Summaries, Recaps, and Text Explanations. *(Get one free at [Google AI Studio](https://aistudio.google.com/)).*
+4. Tap **Save**. The "AI Status" indicator will turn green.
 
-1.  Open the app and tap the **Settings (Gear Icon)** in the top-right corner of the Bookshelf.
-2.  **Gemini API Key:** Required for Summaries, Recaps, and Text Explanations.
-    * *Don't have one?* Get it for free at [Google AI Studio](https://aistudio.google.com/).
-3.  **Cloudflare URL & Token:** Required *only* if you want to use the "Visualize" (Image Generation) feature.
-4.  Tap **Save Connection**.
-
-> **Note:** The app will validate your keys immediately. If the "AI Status" shows green, you are ready to go.
-
-![img_1.png](images/img_1.png)
+### ☁️ Vault Sync Setup (Zero-Knowledge)
+Vaachak can securely sync your reading progress across devices. All data is encrypted with a password *before* leaving your device.
+1. Navigate to **Sync Settings**.
+2. **Network Selection:** Ensure "Use Local Server" is turned **OFF** to use the global cloud network.
+3. **Create Identity:** Enter a Username and a strong Password.
+    * *Warning: Your password is used to mathematically generate your encryption keys. If you forget this password, your cloud data cannot be recovered by anyone, including the server administrators.*
+4. Tap **Register** (for first-time setup) or **Login**.
+5. Once authenticated, your device will automatically sync your progress in the background.
 
 ---
 

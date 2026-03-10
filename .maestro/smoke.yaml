@@ -1,0 +1,18 @@
+appId: org.vaachak.reader.leisure
+---
+- runFlow:
+    file: "flows/_launch_to_bookshelf.yaml"
+
+- assertVisible:
+    id: "screen_bookshelf"
+
+# If library can be empty, don't hard-assert library_book_first.
+# Instead assert toolbar actions that always exist:
+- assertVisible:
+    id: "library_search"
+- assertVisible:
+    id: "library_catalog"
+- assertVisible:
+    id: "library_highlights"
+- assertVisible:
+    id: "library_sort"

@@ -22,8 +22,8 @@
 
 package org.vaachak.reader.core.domain.model
 
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 
 
 @Serializable

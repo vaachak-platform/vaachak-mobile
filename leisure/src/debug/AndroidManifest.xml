@@ -33,6 +33,7 @@
             android:name="org.vaachak.reader.leisure.VaachakApplication"
             android:allowBackup="false"
             android:fullBackupContent="false"
+            android:usesCleartextTraffic="true"
             tools:replace="android:allowBackup,android:fullBackupContent">
     </application>
 

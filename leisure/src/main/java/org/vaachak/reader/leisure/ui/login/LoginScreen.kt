@@ -24,18 +24,45 @@ package org.vaachak.reader.leisure.ui.login
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -44,6 +71,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
 
 @Composable
 fun LoginScreen(
@@ -66,26 +96,28 @@ fun LoginScreen(
     var isRegisterMode by remember { mutableStateOf(false) }
     var isPasswordVisible by remember { mutableStateOf(false) }
 
-    Scaffold(
-        topBar = {
-            VaachakHeader(
-                title = if (isRegisterMode) "Create Account" else "Sign In",
-                onBack = { navController.popBackStack() }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()) // FIX: Prevents layout squishing
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+    TidScreen(Tid.Screen.login) {
+        Scaffold(
+            topBar = {
+                VaachakHeader(
+                    title = if (isRegisterMode) "Create Account" else "Sign In",
+                    onBack = { navController.popBackStack() },
+                    backButtonModifier = Modifier.tid(Tid.Login.back)
+                )
+            }
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
             // --- TABS ---
             TabRow(selectedTabIndex = if (isRegisterMode) 1 else 0) {
-                Tab(selected = !isRegisterMode, onClick = { isRegisterMode = false }, text = { Text("Sign In") })
-                Tab(selected = isRegisterMode, onClick = { isRegisterMode = true }, text = { Text("Register") })
+                Tab(selected = !isRegisterMode, onClick = { isRegisterMode = false }, modifier = Modifier.tid(Tid.Login.tabSignIn), text = { Text("Sign In") })
+                Tab(selected = isRegisterMode, onClick = { isRegisterMode = true }, modifier = Modifier.tid(Tid.Login.tabRegister), text = { Text("Register") })
             }
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -96,7 +128,9 @@ fun LoginScreen(
                 onValueChange = { viewModel.username.value = it },
                 label = { Text("Username") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tid(Tid.Login.username)
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -109,11 +143,19 @@ fun LoginScreen(
                 visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                 trailingIcon = {
-                    IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-                        Icon(if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, "Toggle")
+                    IconButton(
+                        onClick = { isPasswordVisible = !isPasswordVisible },
+                        modifier = Modifier.tid(Tid.Login.togglePassword)
+                    ) {
+                        Icon(
+                            imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (isPasswordVisible) "Hide Password" else "Show Password"
+                        )
                     }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tid(Tid.Login.password)
             )
 
             // --- SERVER CONFIG ---
@@ -123,6 +165,10 @@ fun LoginScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { viewModel.useCustomServer.value = !useCustomServer }
+                    .tid(Tid.Login.useCustomServer)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Use Custom Server / Self-Hosted, ${if (useCustomServer) "Checked" else "Unchecked"}"
+                    }
             ) {
                 Checkbox(checked = useCustomServer, onCheckedChange = { viewModel.useCustomServer.value = it })
                 Text("Use Custom Server / Self-Hosted")
@@ -136,7 +182,9 @@ fun LoginScreen(
                         label = { Text("Server URL") },
                         placeholder = { Text("https://your-worker.workers.dev") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .tid(Tid.Login.serverUrl)
                     )
 
                     // Connection Test
@@ -155,7 +203,7 @@ fun LoginScreen(
                         } else {
                             Spacer(Modifier.weight(1f))
                         }
-                        TextButton(onClick = { viewModel.testUrlConnection() }) {
+                        TextButton(onClick = { viewModel.testUrlConnection() }, modifier = Modifier.tid(Tid.Login.testConnection)) {
                             Text("Test Connection")
                         }
                     }
@@ -169,7 +217,9 @@ fun LoginScreen(
                 value = deviceName,
                 onValueChange = { viewModel.deviceName.value = it },
                 label = { Text("Device Name") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .tid(Tid.Login.deviceName),
                 singleLine = true
             )
 
@@ -200,7 +250,7 @@ fun LoginScreen(
                         navController.popBackStack()
                     }
                 },
-                modifier = Modifier.fillMaxWidth().height(50.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp).tid(Tid.Login.submit),
                 enabled = !isLoading
             ) {
                 if (isLoading) {
@@ -209,7 +259,7 @@ fun LoginScreen(
                     Text(if (isRegisterMode) "Create Account" else "Sign In")
                 }
             }
+            }
         }
     }
 }
-

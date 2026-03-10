@@ -22,14 +22,16 @@
 
 package org.vaachak.reader.core.security
 
+data class EncryptedPayload(val ciphertext: String, val iv: String)
+
 expect class CryptoManager() {
     /**
-     * Encrypts a raw JSON string into AES-256-GCM.
+     * Encrypts a raw JSON string into AES-256-GCM using PBKDF2 derived keys.
      */
-    fun encrypt(plainTextJson: String): EncryptedPayload
+    fun encrypt(plainTextJson: String, secretPass: String, usernameSalt: String): EncryptedPayload
 
     /**
-     * Decrypts the payload back into the raw JSON string.
+     * Decrypts the payload back into the raw JSON string using PBKDF2 derived keys.
      */
-    fun decrypt(payload: EncryptedPayload): String
+    fun decrypt(payload: EncryptedPayload, secretPass: String, usernameSalt: String): String
 }

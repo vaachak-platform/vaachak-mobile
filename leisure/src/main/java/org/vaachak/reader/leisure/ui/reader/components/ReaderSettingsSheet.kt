@@ -2,18 +2,50 @@ package org.vaachak.reader.leisure.ui.reader.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatAlignLeft
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FormatAlignJustify
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -28,6 +60,8 @@ import org.vaachak.reader.leisure.ui.settings.FontFamilyGrid
 import org.vaachak.reader.leisure.ui.settings.LabelledSlider
 import org.vaachak.reader.leisure.ui.settings.SettingsSectionTitle
 import org.vaachak.reader.leisure.ui.settings.ThemeOption
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.tid
 
 // Explicit Aliases
 typealias ReadiumFontFamily = org.readium.r2.navigator.preferences.FontFamily
@@ -78,6 +112,7 @@ fun ReaderSettingsSheet(
     // Fix: Explicit background and elevation to prevent scrolling artifacts (blurring)
     Surface(
         modifier = Modifier
+            .tid(Tid.Screen.readerSettings)
             .fillMaxSize()
             .background(containerColor),
         color = containerColor,
@@ -90,10 +125,10 @@ fun ReaderSettingsSheet(
             TopAppBar(
                 title = { Text("Reader Settings", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.tid(Tid.Reader.SETTINGS_CLOSE)) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
+                            contentDescription = "Close Settings",
                             tint = contentColor
                         )
                     }
@@ -119,7 +154,7 @@ fun ReaderSettingsSheet(
                     primaryColor = primaryColor,
                     isEink = isEink,
                     onCheckedChange = { viewModel.toggleBookAi(it) },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).tid(Tid.ReaderSettings.toggleAi)
                 )
 
                 CompactSettingsToggle(
@@ -129,7 +164,7 @@ fun ReaderSettingsSheet(
                     primaryColor = primaryColor,
                     isEink = isEink,
                     onCheckedChange = { update(prefs.copy(publisherStyles = it)) },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).tid(Tid.ReaderSettings.togglePublisherStyles)
                 )
             }
 
@@ -149,7 +184,10 @@ fun ReaderSettingsSheet(
                         text = { Text("Display", fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal) },
                         enabled = areSettingsEnabled,
                         selectedContentColor = primaryColor,
-                        unselectedContentColor = contentColor.copy(alpha = 0.6f)
+                        unselectedContentColor = contentColor.copy(alpha = 0.6f),
+                        modifier = Modifier.semantics(mergeDescendants = true) {
+                            contentDescription = "Display Settings Tab, ${if (selectedTab == 0) "Selected" else "Not Selected"}"
+                        }
                     )
                     Tab(
                         selected = selectedTab == 1,
@@ -157,7 +195,10 @@ fun ReaderSettingsSheet(
                         text = { Text("Layout", fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal) },
                         enabled = areSettingsEnabled,
                         selectedContentColor = primaryColor,
-                        unselectedContentColor = contentColor.copy(alpha = 0.6f)
+                        unselectedContentColor = contentColor.copy(alpha = 0.6f),
+                        modifier = Modifier.semantics(mergeDescendants = true) {
+                            contentDescription = "Layout Settings Tab, ${if (selectedTab == 1) "Selected" else "Not Selected"}"
+                        }
                     )
                 }
             }
@@ -189,13 +230,34 @@ fun ReaderSettingsSheet(
                         SettingsSectionTitle("Page Color")
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             val currentTheme = prefs.theme ?: Theme.LIGHT
-                            ThemeOption("Light", Color.White, Color.Black, currentTheme == Theme.LIGHT, areSettingsEnabled) {
+                            ThemeOption(
+                                name = "Light",
+                                bg = Color.White,
+                                fg = Color.Black,
+                                selected = currentTheme == Theme.LIGHT,
+                                enabled = areSettingsEnabled,
+                                modifier = Modifier.tid(Tid.ReaderSettings.themeLight)
+                            ) {
                                 update(prefs.copy(theme = Theme.LIGHT))
                             }
-                            ThemeOption("Dark", Color(0xFF121212), Color.White, currentTheme == Theme.DARK, areSettingsEnabled) {
+                            ThemeOption(
+                                name = "Dark",
+                                bg = Color(0xFF121212),
+                                fg = Color.White,
+                                selected = currentTheme == Theme.DARK,
+                                enabled = areSettingsEnabled,
+                                modifier = Modifier.tid(Tid.ReaderSettings.themeDark)
+                            ) {
                                 update(prefs.copy(theme = Theme.DARK))
                             }
-                            ThemeOption("Sepia", Color(0xFFF5E6D3), Color(0xFF5F4B32), currentTheme == Theme.SEPIA, areSettingsEnabled) {
+                            ThemeOption(
+                                name = "Sepia",
+                                bg = Color(0xFFF5E6D3),
+                                fg = Color(0xFF5F4B32),
+                                selected = currentTheme == Theme.SEPIA,
+                                enabled = areSettingsEnabled,
+                                modifier = Modifier.tid(Tid.ReaderSettings.themeSepia)
+                            ) {
                                 update(prefs.copy(theme = Theme.SEPIA))
                             }
                         }
@@ -205,7 +267,6 @@ fun ReaderSettingsSheet(
                         SettingsSectionTitle("Font Family")
                         FontFamilyGrid(
                             currentFamily = prefs.fontFamily,
-
                             enabled = areSettingsEnabled
                         ) { family ->
                             update(prefs.copy(fontFamily = family))
@@ -220,7 +281,8 @@ fun ReaderSettingsSheet(
                             unit = "x",
                             activeColor = primaryColor,
                             enabled = areSettingsEnabled,
-                            defaultVisualValue = 1.0f
+                            defaultVisualValue = 1.0f,
+                            modifier = Modifier.tid(Tid.ReaderSettings.fontSizeSlider)
                         ) {
                             update(prefs.copy(fontSize = it.toDouble()))
                         }
@@ -265,12 +327,13 @@ fun ReaderSettingsSheet(
                         // LINE HEIGHT
                         LabelledSlider(
                             label = "Line Height",
-                            value = prefs.lineHeight?.toFloat(), // Pass Nullable
-                            defaultVisualValue = 1.2f,           // Visual fallback position
+                            value = prefs.lineHeight?.toFloat(),
+                            defaultVisualValue = 1.2f,
                             range = 1.0f..2.5f,
                             unit = "x",
                             activeColor = primaryColor,
-                            enabled = areSettingsEnabled
+                            enabled = areSettingsEnabled,
+                            modifier = Modifier.tid(Tid.ReaderSettings.lineHeightSlider)
                         ) {
                             update(prefs.copy(lineHeight = it.toDouble()))
                         }
@@ -280,7 +343,7 @@ fun ReaderSettingsSheet(
                         // PARAGRAPH GAP
                         LabelledSlider(
                             label = "Paragraph Gap",
-                            value = prefs.paragraphSpacing?.toFloat(), // Pass Nullable
+                            value = prefs.paragraphSpacing?.toFloat(),
                             defaultVisualValue = 0.5f,
                             range = 0f..2.0f,
                             unit = "em",
@@ -289,10 +352,11 @@ fun ReaderSettingsSheet(
                         ) {
                             update(prefs.copy(paragraphSpacing = it.toDouble()))
                         }
-                        // PARAGRAPH GAP
+
+                        // LETTER SPACING
                         LabelledSlider(
                             label = "Letter Spacing",
-                            value = prefs.letterSpacing?.toFloat(), // Pass Nullable
+                            value = prefs.letterSpacing?.toFloat(),
                             defaultVisualValue = 0.1f,
                             range = 0f..0.5f,
                             unit = "em",
@@ -301,12 +365,13 @@ fun ReaderSettingsSheet(
                         ) {
                             update(prefs.copy(letterSpacing = it.toDouble()))
                         }
+
                         Spacer(Modifier.height(16.dp))
 
-                        // MARGINS
+                        // SIDE MARGINS
                         LabelledSlider(
                             label = "Side Margins",
-                            value = prefs.pageMargins?.toFloat(), // Pass Nullable
+                            value = prefs.pageMargins?.toFloat(),
                             defaultVisualValue = 1.0f,
                             range = 0.5f..3.0f,
                             unit = "x",
@@ -314,6 +379,65 @@ fun ReaderSettingsSheet(
                             enabled = areSettingsEnabled
                         ) {
                             update(prefs.copy(pageMargins = it.toDouble()))
+                        }
+                    }
+
+                    // --- NEW: ADVANCED TYPOGRAPHY ---
+                    item {
+                        SettingsSectionTitle("Advanced Typography")
+
+                        // WORD SPACING
+                        LabelledSlider(
+                            label = "Word Spacing",
+                            value = prefs.wordSpacing?.toFloat(),
+                            defaultVisualValue = 0.0f,
+                            range = 0f..2.0f,
+                            unit = "rem",
+                            activeColor = primaryColor,
+                            enabled = areSettingsEnabled
+                        ) {
+                            update(prefs.copy(wordSpacing = it.toDouble()))
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        // PARAGRAPH INDENT
+                        LabelledSlider(
+                            label = "Paragraph Indent",
+                            value = prefs.paragraphIndent?.toFloat(),
+                            defaultVisualValue = 0.0f,
+                            range = 0f..3.0f,
+                            unit = "em",
+                            activeColor = primaryColor,
+                            enabled = areSettingsEnabled
+                        ) {
+                            update(prefs.copy(paragraphIndent = it.toDouble()))
+                        }
+
+                        Spacer(Modifier.height(16.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CompactSettingsToggle(
+                                title = "Hyphenation",
+                                subtitle = "Split long words",
+                                checked = prefs.hyphens ?: false,
+                                primaryColor = primaryColor,
+                                isEink = isEink,
+                                onCheckedChange = { if (areSettingsEnabled) update(prefs.copy(hyphens = it)) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            CompactSettingsToggle(
+                                title = "Ligatures",
+                                subtitle = "Combine characters",
+                                checked = prefs.ligatures ?: false,
+                                primaryColor = primaryColor,
+                                isEink = isEink,
+                                onCheckedChange = { if (areSettingsEnabled) update(prefs.copy(ligatures = it)) },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
 
@@ -327,7 +451,7 @@ fun ReaderSettingsSheet(
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
                         ) {
-                            Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(8.dp))
                             Text("Reset Layout to Defaults", fontSize = 12.sp)
                         }

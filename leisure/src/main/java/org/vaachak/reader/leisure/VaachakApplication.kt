@@ -24,7 +24,6 @@ package org.vaachak.reader.leisure
 
 import android.app.Application
 import android.content.pm.ApplicationInfo
-import android.os.Debug
 import android.os.StrictMode
 import dagger.hilt.android.HiltAndroidApp
 import timber.log.Timber
@@ -34,12 +33,14 @@ class VaachakApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        Timber.plant(Timber.DebugTree())
 
         // Modern, safe way to check for debug mode without BuildConfig
         val isDebug = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
         if (isDebug) {
+            // MOVED: Now Timber will ONLY log when you are actively debugging
+            Timber.plant(Timber.DebugTree())
+
             StrictMode.setThreadPolicy(
                 StrictMode.ThreadPolicy.Builder()
                     .detectDiskReads()

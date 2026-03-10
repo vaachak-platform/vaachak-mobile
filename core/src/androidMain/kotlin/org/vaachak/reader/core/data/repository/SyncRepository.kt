@@ -1,20 +1,20 @@
 package org.vaachak.reader.core.data.repository
 
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
 import org.vaachak.reader.core.data.local.SyncVaultDao
 import org.vaachak.reader.core.data.remote.SyncApi
+import org.vaachak.reader.core.data.remote.dto.LoginRequest
 import org.vaachak.reader.core.data.remote.dto.RegisterRequest
 import org.vaachak.reader.core.data.remote.dto.SyncDto
 import org.vaachak.reader.core.domain.model.SyncVaultEntity
 import org.vaachak.reader.core.security.CryptoManager
 import org.vaachak.reader.core.security.EncryptedPayload
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,36 +26,75 @@ class SyncRepository @Inject constructor(
     private val cryptoManager: CryptoManager,
     private val syncApi: SyncApi,
     private val settingsRepo: SettingsRepository,
-    private val vaultRepository: VaultRepository // <-- 1. INJECT THE VAULT
+    private val vaultRepository: VaultRepository
 ) {
 
     // ==========================================
     // 1. END-TO-END ENCRYPTED VAULT SYNC LOGIC
     // ==========================================
 
-    suspend fun sync(): Result<Unit> = runCatching {
-        // 1. Ensure the API is pointing to the correct server before syncing
-        val useLocal = settingsRepo.useLocalServer.first()
-        val targetUrl = if (useLocal) settingsRepo.localServerUrl.first() else settingsRepo.syncCloudUrl.first()
-        syncApi.setBaseUrl(targetUrl)
+    suspend fun sync(): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val useLocal = settingsRepo.useLocalServer.first()
+            val rawUrl = if (useLocal) settingsRepo.localServerUrl.first() else settingsRepo.syncCloudUrl.first()
+            val targetUrl = rawUrl.trim().removeSuffix("/")
+            syncApi.setBaseUrl(targetUrl)
 
-        // 2. Push local changes to the Vault and Cloudflare
-        pushLocalChanges()
+            val profileId = vaultRepository.activeVaultId.first()
+            val deviceId = settingsRepo.deviceName.first()
+            val lastSync = settingsRepo.lastSyncTimestamp.first()
 
-        // 3. Fetch the last sync timestamp, pull new data, and update the timestamp
-        val lastSync = settingsRepo.lastSyncTimestamp.first()
-        pullRemoteChanges(lastSync)
-        settingsRepo.setLastSyncTimestamp(System.currentTimeMillis())
+            val username = settingsRepo.syncUsername.first()
+            val password = settingsRepo.syncPassword.first()
+
+            if (username.isBlank() || password.isBlank()) {
+                throw IllegalStateException("Cannot sync: User is not logged in.")
+            }
+
+            // 1. Stage Local Changes (NOW PASSES CREDENTIALS)
+            stageLocalChanges(profileId, username, password)
+
+            // 2. Fetch all dirty records ready for upload
+            val pendingUploads = syncVaultDao.getPendingUploads(profileId).first()
+
+            // 3. Convert Android Entities to Cloudflare DTOs
+            val networkEntries = pendingUploads.map { entity ->
+                SyncDto.VaultEntry(
+                    entryKey = entity.entryKey,
+                    encryptedPayload = "${entity.iv}:${entity.encryptedBlob}",
+                    updatedAt = entity.remoteUpdatedAt,
+                    deleted = entity.isDeleted
+                )
+            }
+
+            // 4. Build the Request
+            val request = SyncDto.SyncRequest(
+                auth = SyncDto.AuthDto(username, password),
+                deviceId = deviceId,
+                lastSyncTimestamp = lastSync,
+                vaultEntries = networkEntries
+            )
+
+            // 5. Execute Network Call
+            val response = syncApi.syncVault(request).getOrThrow()
+
+            // 6. Push successful! Clear local 'needsPush' flags
+            if (pendingUploads.isNotEmpty()) {
+                syncVaultDao.markAsSynced(profileId, pendingUploads.map { it.entryKey })
+            }
+
+            // 7. Process Incoming Data from Cloudflare (NOW PASSES CREDENTIALS)
+            processRemoteChanges(profileId, response.vaultEntries, username, password)
+
+            // 8. Update sync anchor
+            settingsRepo.setLastSyncTimestamp(response.newSyncTimestamp)
+        }
     }
 
-    private suspend fun pushLocalChanges() {
-        val profileId = vaultRepository.activeVaultId.first() // <-- GET ACTIVE USER
-
-        // Pass profileId to DAO
+    private suspend fun stageLocalChanges(profileId: String, syncUser: String, syncPass: String) {
         val dirtyBooks = bookDao.getBooksModifiedSince(profileId, 0L).filter { it.isDirty }
 
         for (book in dirtyBooks) {
-            // Pass profileId to DAO
             val highlights = highlightDao.getHighlightsForBook(book.bookHash, profileId).first()
 
             val payloadObj = SyncDto.CleartextPayload(
@@ -66,63 +105,71 @@ class SyncRepository @Inject constructor(
                 highlights = highlights
             )
 
+            // Encrypt using the new PBKDF2 method
             val jsonString = Json.encodeToString(payloadObj)
-            val encrypted = cryptoManager.encrypt(jsonString)
+            val encrypted = cryptoManager.encrypt(jsonString, syncPass, syncUser)
 
+            // Stage in Queue
             val vaultEntity = SyncVaultEntity(
-                bookHash = book.bookHash,
+                profileId = profileId,
+                entryKey = "book_${book.bookHash}",
                 encryptedBlob = encrypted.ciphertext,
                 iv = encrypted.iv,
                 remoteUpdatedAt = book.updatedAt,
-                needsPush = true
+                needsPush = true,
+                isDeleted = false
             )
             syncVaultDao.upsertSyncPayload(vaultEntity)
 
-            // Pass profileId to DAO
+            // Clear dirty flag on BookDao
             bookDao.updateBookMetadataFromSync(book.bookHash, profileId, book.lastCfiLocation ?: "", book.progress, book.updatedAt)
-        }
-
-        val pendingUploads = syncVaultDao.getPendingUploads().first()
-        if (pendingUploads.isNotEmpty()) {
-            val networkPayload = pendingUploads.map {
-                SyncDto.NetworkPayload(it.bookHash, it.encryptedBlob, it.iv, it.remoteUpdatedAt)
-            }
-            // Execute network call
-            syncApi.pushEncryptedVault(networkPayload)
-
-            // Clear the push flags once successful
-            pendingUploads.forEach {
-                syncVaultDao.upsertSyncPayload(it.copy(needsPush = false))
-            }
         }
     }
 
-    private suspend fun pullRemoteChanges(lastSyncTime: Long) {
-        val profileId = vaultRepository.activeVaultId.first() // <-- GET ACTIVE USER
-        val remoteBlobs = syncApi.pullEncryptedVault(lastSyncTime)
+    private suspend fun processRemoteChanges(
+        profileId: String,
+        remoteEntries: List<SyncDto.VaultEntry>,
+        syncUser: String,
+        syncPass: String
+    ) {
+        for (entry in remoteEntries) {
+            val parts = entry.encryptedPayload.split(":")
+            if (parts.size != 2) continue
 
-        for (blob in remoteBlobs) {
-            val payload = EncryptedPayload(blob.ciphertext, blob.iv)
-            try {
-                val decryptedJson = cryptoManager.decrypt(payload)
-                val cleartext = Json.decodeFromString<SyncDto.CleartextPayload>(decryptedJson)
+            val iv = parts[0]
+            val ciphertext = parts[1]
 
-                // Pass profileId to DAO
-                bookDao.updateProgressFromCloud(
-                    bookHash = cleartext.bookHash,
-                    profileId = profileId,
-                    progress = cleartext.progress,
-                    cfiLocation = cleartext.lastCfiLocation ?: "",
-                    timestamp = cleartext.updatedAt
-                )
+            val vaultEntity = SyncVaultEntity(
+                profileId = profileId,
+                entryKey = entry.entryKey,
+                encryptedBlob = ciphertext,
+                iv = iv,
+                remoteUpdatedAt = entry.updatedAt,
+                needsPush = false,
+                isDeleted = entry.deleted
+            )
+            syncVaultDao.upsertSyncPayload(vaultEntity)
 
-                // Stamp incoming highlights with the local profileId so they attach correctly
-                cleartext.highlights.forEach {
-                    highlightDao.insertHighlight(it.copy(profileId = profileId))
+            if (entry.entryKey.startsWith("book_") && !entry.deleted) {
+                try {
+                    // Decrypt using the new PBKDF2 method
+                    val decryptedJson = cryptoManager.decrypt(EncryptedPayload(ciphertext, iv), syncPass, syncUser)
+                    val cleartext = Json.decodeFromString<SyncDto.CleartextPayload>(decryptedJson)
+
+                    bookDao.updateProgressFromCloud(
+                        bookHash = cleartext.bookHash,
+                        profileId = profileId,
+                        progress = cleartext.progress,
+                        cfiLocation = cleartext.lastCfiLocation ?: "",
+                        timestamp = cleartext.updatedAt
+                    )
+
+                    cleartext.highlights.forEach { highlight ->
+                        highlightDao.insertHighlight(highlight.copy(profileId = profileId))
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "Failed to decrypt payload for ${entry.entryKey}")
                 }
-            } catch (e: Exception) {
-                // Skip if decryption fails (e.g., wrong AES key)
-                continue
             }
         }
     }
@@ -133,70 +180,60 @@ class SyncRepository @Inject constructor(
 
     suspend fun login(user: String, pass: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            // 1. Setup URL
             val useLocal = settingsRepo.useLocalServer.first()
-            val targetUrl = if (useLocal) settingsRepo.localServerUrl.first() else settingsRepo.syncCloudUrl.first()
+            val rawUrl = if (useLocal) settingsRepo.localServerUrl.first() else settingsRepo.syncCloudUrl.first()
+
+            val targetUrl = rawUrl.trim().removeSuffix("/")
+            if (targetUrl.isBlank()) return@withContext Result.failure(Exception("Server URL is blank"))
+
             syncApi.setBaseUrl(targetUrl)
+            val loginRequest = LoginRequest(username = user, passwordHash = pass)
 
-            // 2. Call the server to verify credentials
-            val result = syncApi.login(RegisterRequest(user, pass))
+            syncApi.login(loginRequest).getOrThrow()
 
-            if (result.isSuccess) {
-                // 3. Get existing device name to satisfy the updateSyncProfile signature
-                val currentDeviceName = settingsRepo.deviceName.first()
+            val deviceName = settingsRepo.deviceName.first()
+            settingsRepo.updateSyncProfile(user, pass, if (deviceName.isNullOrBlank()) "My Device" else deviceName)
+            settingsRepo.setLastSyncTimestamp(0L)
 
-                // 4. Use your existing function to save the profile
-                settingsRepo.updateSyncProfile(
-                    user = user,
-                    pass = pass,
-                    name = currentDeviceName
-                )
-
-                // 5. Reset sync anchor so the new device pulls existing cloud progress
-                settingsRepo.setLastSyncTimestamp(0L)
-
-                Log.d("SyncDebug", "Login successful. Profile updated for $user.")
-            }
-            result
+            Result.success(Unit)
         } catch (e: Exception) {
-            Log.e("SyncDebug", "Login error", e)
+            Timber.e(e, "Login failed")
             Result.failure(e)
         }
     }
 
     suspend fun register(user: String, pass: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            // 1. Determine which URL to use based on settings
             val useLocal = settingsRepo.useLocalServer.first()
-            val targetUrl = if (useLocal) settingsRepo.localServerUrl.first() else settingsRepo.syncCloudUrl.first()
+            val rawUrl = if (useLocal) settingsRepo.localServerUrl.first() else settingsRepo.syncCloudUrl.first()
 
-            if (targetUrl.isBlank()) return@withContext Result.failure(Exception("URL is blank"))
+            val targetUrl = rawUrl.trim().removeSuffix("/")
+            if (targetUrl.isBlank()) return@withContext Result.failure(Exception("Server URL is blank"))
 
-            // 2. Point the API to the correct server
             syncApi.setBaseUrl(targetUrl)
-
-            // 3. Execute
             val registerRequest = RegisterRequest(username = user, passwordHash = pass)
-            syncApi.register(registerRequest)
+
+            syncApi.register(registerRequest).getOrThrow()
+
+            Result.success(Unit)
         } catch (e: Exception) {
+            Timber.e(e, "Registration failed")
             Result.failure(e)
         }
     }
 
-    suspend fun testConnection(url: String): Result<Unit> {
-        return withContext(Dispatchers.IO) {
-            try {
-                Log.d("SyncDebug", "1. Repository: setting URL: $url")
-                syncApi.setBaseUrl(url)
+    suspend fun testConnection(url: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val targetUrl = url.trim().removeSuffix("/")
+            if (targetUrl.isBlank()) return@withContext Result.failure(Exception("Server URL is blank"))
 
-                // CRITICAL: You must return the result of the API call
-                val result = syncApi.testConnection()
-                Log.d("SyncDebug", "2. Repository: API result is ${result.isSuccess}")
-                result
-            } catch (e: Exception) {
-                Log.e("SyncDebug", "FATAL: Repository testConnection failed", e)
-                Result.failure(e)
-            }
+            syncApi.setBaseUrl(targetUrl)
+            syncApi.testConnection().getOrThrow()
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Timber.e(e, "Test connection failed")
+            Result.failure(e)
         }
     }
 }

@@ -70,6 +70,8 @@ kotlin {
             implementation(libs.okhttp)
             implementation(libs.google.generativeai)
             implementation(libs.apache.commons)
+            // ADD TIMBER HERE:
+            implementation(libs.timber)
         }
     }
 }

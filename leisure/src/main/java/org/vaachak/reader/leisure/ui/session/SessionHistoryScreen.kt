@@ -22,22 +22,49 @@
 
 package org.vaachak.reader.leisure.ui.session
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.ui.Alignment
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
+import org.vaachak.reader.leisure.ui.testability.tids
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -55,20 +82,21 @@ fun SessionHistoryScreen(
         viewModel.triggerGlobalRecall()
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Session Recall", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
-        }
-    ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize().background(Color.White)) {
+    TidScreen(Tid.Screen.session) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("Session Recall", fontWeight = FontWeight.Bold) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack, modifier = Modifier.tid(Tid.Session.back)) {
+                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            }
+        ) { padding ->
+            Column(modifier = Modifier.padding(padding).fillMaxSize().background(Color.White)) {
             if (isLoading) {
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth(),
@@ -87,14 +115,24 @@ fun SessionHistoryScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp)
             ) {
-                items(recallMap.entries.toList()) { entry ->
+                itemsIndexed(recallMap.entries.toList()) { index, entry ->
                     val bookTitle = entry.key
                     val summary = entry.value
                     val bookUri = books.find { it.title == bookTitle }?.localUri
                     Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
+                        modifier = if (index == 0) {
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .tids(Tid.Session.item(bookTitle), Tid.Session.itemFirst)
+                        } else {
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
+                                .tid(Tid.Session.item(bookTitle))
+                        }.semantics(mergeDescendants = true) {
+                            contentDescription = "Session Summary for $bookTitle: $summary"
+                        },
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFF9F9F9)),
                         border = BorderStroke(0.5.dp, Color.LightGray)
                     ) {
@@ -114,17 +152,21 @@ fun SessionHistoryScreen(
                             if (bookUri != null) {
                                 Button(
                                     onClick = { onLaunchBook(bookUri) },
-                                    modifier = Modifier.padding(top = 12.dp).fillMaxWidth(),
+                                    modifier = if (index == 0) {
+                                        Modifier.padding(top = 12.dp).fillMaxWidth().tid(Tid.Session.resumeFirst)
+                                    } else {
+                                        Modifier.padding(top = 12.dp).fillMaxWidth()
+                                    },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
                                 ) {
-                                    Text("Resume Reading", color = Color.White)
+                                    Text("Resume Reading")
                                 }
                             }
                         }
                     }
                 }
             }
+            }
         }
     }
 }
-

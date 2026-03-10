@@ -1,44 +1,35 @@
-/*
- * Copyright (c) 2026 Piyush Daiya
- * *
- * * Permission is hereby granted, free of charge, to any person obtaining a copy
- * * of this software and associated documentation files (the "Software"), to deal
- * * in the Software without restriction, including without limitation the rights
- * * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * * copies of the Software, and to permit persons to whom the Software is
- * * furnished to do so, subject to the following conditions:
- * *
- * * The above copyright notice and this permission notice shall be included in all
- * * copies or substantial portions of the Software.
- * *
- * * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * * SOFTWARE.
- */
-
 package org.vaachak.reader.core.data.repository
 
 import android.content.Context
 import android.net.Uri
 import android.os.Build
 import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.core.MutablePreferences
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.documentfile.provider.DocumentFile
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import org.vaachak.reader.core.domain.model.*
+import org.vaachak.reader.core.domain.model.BookshelfPreferences
+import org.vaachak.reader.core.domain.model.CoverAspectRatio
+import org.vaachak.reader.core.domain.model.DitheringMode
+import org.vaachak.reader.core.domain.model.ReaderPreferences
+import org.vaachak.reader.core.domain.model.ThemeMode
+import org.vaachak.reader.core.domain.model.TtsSettings
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -75,6 +66,7 @@ class SettingsRepository @Inject constructor(
         val TTS_VOICE = stringPreferencesKey("tts_voice")
 
         // --- SYNC SETTINGS ---
+        val IS_SYNC_ENABLED = booleanPreferencesKey("is_sync_enabled")
         val SYNC_CLOUD_URL = stringPreferencesKey("sync_cloud_url")
         val USE_LOCAL_SERVER = booleanPreferencesKey("use_local_server")
         val LOCAL_SERVER_URL = stringPreferencesKey("local_server_url")
@@ -98,6 +90,20 @@ class SettingsRepository @Inject constructor(
         val READER_MARGIN_SIDE = doublePreferencesKey("reader_margin_side")
         val READER_MARGIN_TOP = doublePreferencesKey("reader_margin_top")
         val READER_MARGIN_BOTTOM = doublePreferencesKey("reader_margin_bottom")
+
+        val READER_WORD_SPACING = doublePreferencesKey("reader_word_spacing")
+        val READER_PARAGRAPH_INDENT = doublePreferencesKey("reader_paragraph_indent")
+        val READER_HYPHENS = booleanPreferencesKey("reader_hyphens")
+        val READER_LIGATURES = booleanPreferencesKey("reader_ligatures")
+
+        // --- LIBRARY & COVER STYLE SETTINGS ---
+        val DITHERING_MODE_KEY = stringPreferencesKey("dithering_mode")
+        val GROUP_BY_SERIES_KEY = booleanPreferencesKey("group_by_series")
+        val COVER_ASPECT_RATIO_KEY = stringPreferencesKey("cover_aspect_ratio")
+        val SHOW_FORMAT_BADGE_KEY = booleanPreferencesKey("show_format_badge")
+        val SHOW_FAVORITE_ICON_KEY = booleanPreferencesKey("show_favorite_icon")
+        val SHOW_PROGRESS_BADGE_KEY = booleanPreferencesKey("show_progress_badge")
+        val SHOW_SYNC_STATUS_KEY = booleanPreferencesKey("show_sync_status")
     }
 
     // --- 1. THE THREAD-SAFE VAULT CACHE ---
@@ -122,11 +128,11 @@ class SettingsRepository @Inject constructor(
     }
 
     // --- 2. THE MASTER DYNAMIC FLOW ---
-    // This flow automatically swaps to the correct file when the active vault changes
     private val vaultPreferencesFlow: Flow<Preferences> = vaultRepository.activeVaultId
         .flatMapLatest { vaultId -> getVaultDataStore(vaultId).data }
 
     // --- APP FLOWS ---
+    val isAiEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[IS_AI_ENABLED] ?: false }
     val geminiKey: Flow<String> = vaultPreferencesFlow.map { it[GEMINI_KEY] ?: "" }
     val cfUrl: Flow<String> = vaultPreferencesFlow.map { it[CF_URL] ?: "" }
     val cfToken: Flow<String> = vaultPreferencesFlow.map { it[CF_TOKEN] ?: "" }
@@ -155,6 +161,7 @@ class SettingsRepository @Inject constructor(
     }
 
     // --- SYNC FLOWS ---
+    val isSyncEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[IS_SYNC_ENABLED] ?: false }
     val syncCloudUrl: Flow<String> = vaultPreferencesFlow.map { it[SYNC_CLOUD_URL] ?: "" }
     val useLocalServer: Flow<Boolean> = vaultPreferencesFlow.map { it[USE_LOCAL_SERVER] ?: false }
     val localServerUrl: Flow<String> = vaultPreferencesFlow.map { it[LOCAL_SERVER_URL] ?: "" }
@@ -164,7 +171,6 @@ class SettingsRepository @Inject constructor(
     val syncPassword: Flow<String> = vaultPreferencesFlow.map { it[SYNC_PASSWORD] ?: "" }
     val deviceName: Flow<String> = vaultPreferencesFlow.map { preferences ->
         val savedName = preferences[DEVICE_NAME]
-
         if (savedName.isNullOrBlank()) {
             val manufacturer = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
             val model = Build.MODEL
@@ -175,31 +181,23 @@ class SettingsRepository @Inject constructor(
     }
 
     // --- READER PREF FLOWS ---
-    val readerLineHeight: Flow<Double?> = vaultPreferencesFlow.map { it[READER_LINE_HEIGHT] }
-    val readerTextAlign: Flow<String?> = vaultPreferencesFlow.map { it[READER_TEXT_ALIGN] }
-    val readerParaSpacing: Flow<Double?> = vaultPreferencesFlow.map { it[READER_PARAGRAPH_SPACING] }
-    val readerMarginSide: Flow<Double?> = vaultPreferencesFlow.map { it[READER_MARGIN_SIDE] }
-    val readerLetterSpacing: Flow<Double?> = vaultPreferencesFlow.map { it[READER_LETTER_SPACING] }
-
-    val readerFontFamily: Flow<String?> = vaultPreferencesFlow.map { it[READER_FONT_FAMILY] }
-    val readerFontSize: Flow<Double> = vaultPreferencesFlow.map { it[READER_FONT_SIZE] ?: 1.0 }
-    val readerTheme: Flow<String> = vaultPreferencesFlow.map { it[READER_THEME] ?: "light" }
-    val readerPublisherStyles: Flow<Boolean> = vaultPreferencesFlow.map { it[READER_PUBLISHER_STYLES] ?: true }
-
-    val readerPreferences: Flow<ReaderPreferences> = combine(
-        readerFontFamily, readerFontSize, readerTextAlign, readerTheme, readerPublisherStyles,
-        readerLineHeight, readerLetterSpacing, readerParaSpacing, readerMarginSide
-    ) { args ->
+    val readerPreferences: Flow<ReaderPreferences> = vaultPreferencesFlow.map { prefs ->
         ReaderPreferences(
-            fontFamily = args[0] as? String,
-            fontSize = args[1] as Double,
-            textAlign = args[2] as? String,
-            theme = args[3] as String,
-            publisherStyles = args[4] as Boolean,
-            lineHeight = args[5] as? Double,
-            letterSpacing = args[6] as? Double,
-            paragraphSpacing = args[7] as? Double,
-            pageMargins = args[8] as? Double
+            theme = prefs[READER_THEME] ?: "light",
+            fontSize = prefs[READER_FONT_SIZE] ?: 1.0,
+            publisherStyles = prefs[READER_PUBLISHER_STYLES] ?: true,
+            fontFamily = prefs[READER_FONT_FAMILY],
+            textAlign = prefs[READER_TEXT_ALIGN],
+            lineHeight = prefs[READER_LINE_HEIGHT],
+            letterSpacing = prefs[READER_LETTER_SPACING],
+            paragraphSpacing = prefs[READER_PARAGRAPH_SPACING],
+            pageMargins = prefs[READER_MARGIN_SIDE],
+            wordSpacing = prefs[READER_WORD_SPACING],
+            paragraphIndent = prefs[READER_PARAGRAPH_INDENT],
+            hyphens = prefs[READER_HYPHENS],
+            ligatures = prefs[READER_LIGATURES],
+            marginTop = prefs[READER_MARGIN_TOP],
+            marginBottom = prefs[READER_MARGIN_BOTTOM]
         )
     }
 
@@ -224,6 +222,11 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    suspend fun setSyncEnabled(enabled: Boolean) { editCurrentVault { it[IS_SYNC_ENABLED] = enabled } }
+    suspend fun setSyncCloudUrl(url: String) { editCurrentVault { it[SYNC_CLOUD_URL] = url } }
+    suspend fun setLocalServerUrl(url: String) { editCurrentVault { it[LOCAL_SERVER_URL] = url } }
+    suspend fun setUseLocalServer(useLocal: Boolean) { editCurrentVault { it[USE_LOCAL_SERVER] = useLocal } }
+
     suspend fun saveSyncSettings(
         syncCloudUrl: String,
         localUrl: String,
@@ -243,9 +246,7 @@ class SettingsRepository @Inject constructor(
 
     suspend fun getLastSyncTimestamp(): Long = vaultPreferencesFlow.first()[LAST_SYNC_TIMESTAMP] ?: 0L
 
-    suspend fun setLastSyncTimestamp(ts: Long) {
-        editCurrentVault { it[LAST_SYNC_TIMESTAMP] = ts }
-    }
+    suspend fun setLastSyncTimestamp(ts: Long) { editCurrentVault { it[LAST_SYNC_TIMESTAMP] = ts } }
 
     suspend fun ensureDeviceId(): String {
         val existing = vaultPreferencesFlow.first()[SYNC_DEVICE_ID]
@@ -257,12 +258,15 @@ class SettingsRepository @Inject constructor(
     }
 
     // --- APP SETTINGS ACTIONS ---
-    suspend fun saveSettings(gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean) {
+    suspend fun setAiEnabled(enabled: Boolean) { editCurrentVault { it[IS_AI_ENABLED] = enabled } }
+
+    suspend fun saveSettings(gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean, isAiEnabled: Boolean? = null) {
         editCurrentVault { prefs ->
             prefs[GEMINI_KEY] = gemini.trim()
-            prefs[CF_URL] = cfUrl.trim().removeSuffix("/")
+            prefs[CF_URL] = cfUrl
             prefs[CF_TOKEN] = cfToken.trim()
             prefs[IS_EINK_ENABLED] = isEnk
+            if (isAiEnabled != null) prefs[IS_AI_ENABLED] = isAiEnabled
         }
     }
 
@@ -273,27 +277,6 @@ class SettingsRepository @Inject constructor(
     suspend fun setDictionaryFolder(uri: String) { editCurrentVault { it[DICTIONARY_FOLDER_KEY] = uri } }
     suspend fun setOfflineMode(enabled: Boolean) { editCurrentVault { it[OFFLINE_MODE_KEY] = enabled } }
 
-    suspend fun updateReaderPreferences(
-        fontFamily: String? = null, fontSize: Double? = null, textAlign: String? = null,
-        theme: String? = null, publisherStyles: Boolean? = null, letterSpacing: Double? = null,
-        lineHeight: Double? = null, paraSpacing: Double? = null, marginSide: Double? = null,
-        marginTop: Double? = null, marginBottom: Double? = null
-    ) {
-        editCurrentVault { prefs ->
-            fontFamily?.let { prefs[READER_FONT_FAMILY] = it }
-            fontSize?.let { prefs[READER_FONT_SIZE] = it }
-            textAlign?.let { prefs[READER_TEXT_ALIGN] = it }
-            theme?.let { prefs[READER_THEME] = it }
-            publisherStyles?.let { prefs[READER_PUBLISHER_STYLES] = it }
-            letterSpacing?.let { prefs[READER_LETTER_SPACING] = it }
-            lineHeight?.let { prefs[READER_LINE_HEIGHT] = it }
-            paraSpacing?.let { prefs[READER_PARAGRAPH_SPACING] = it }
-            marginSide?.let { prefs[READER_MARGIN_SIDE] = it }
-            marginTop?.let { prefs[READER_MARGIN_TOP] = it }
-            marginBottom?.let { prefs[READER_MARGIN_BOTTOM] = it }
-        }
-    }
-
     fun validateStarDictFolder(uriString: String): Boolean {
         return try {
             val uri = Uri.parse(uriString)
@@ -302,73 +285,70 @@ class SettingsRepository @Inject constructor(
         } catch (e: Exception) { false }
     }
 
-    // --- NEW: Unified Save Function ---
     suspend fun saveReaderPreferences(prefs: ReaderPreferences) {
-        editCurrentVault { preferences ->
-            preferences[READER_THEME] = prefs.theme
+        editCurrentVault { p ->
+            p[READER_THEME] = prefs.theme
+            p[READER_FONT_SIZE] = prefs.fontSize
+            p[READER_PUBLISHER_STYLES] = prefs.publisherStyles
 
             if (prefs.publisherStyles) {
-                preferences[READER_PUBLISHER_STYLES] = true
-
-                preferences.remove(READER_FONT_FAMILY)
-                preferences.remove(READER_FONT_SIZE)
-                preferences.remove(READER_TEXT_ALIGN)
-                preferences.remove(READER_LINE_HEIGHT)
-                preferences.remove(READER_LETTER_SPACING)
-                preferences.remove(READER_PARAGRAPH_SPACING)
-                preferences.remove(READER_MARGIN_SIDE)
+                p.remove(READER_FONT_FAMILY)
+                p.remove(READER_TEXT_ALIGN)
+                p.remove(READER_LINE_HEIGHT)
+                p.remove(READER_LETTER_SPACING)
+                p.remove(READER_PARAGRAPH_SPACING)
+                p.remove(READER_MARGIN_SIDE)
+                p.remove(READER_MARGIN_TOP)
+                p.remove(READER_MARGIN_BOTTOM)
+                p.remove(READER_WORD_SPACING)
+                p.remove(READER_PARAGRAPH_INDENT)
+                p.remove(READER_HYPHENS)
+                p.remove(READER_LIGATURES)
             } else {
-                preferences[READER_PUBLISHER_STYLES] = false
-
-                if (prefs.fontFamily != null) {
-                    preferences[READER_FONT_FAMILY] = prefs.fontFamily!!
-                } else {
-                    preferences.remove(READER_FONT_FAMILY)
-                }
-
-                preferences[READER_FONT_SIZE] = prefs.fontSize
-
-                if (prefs.textAlign != null) {
-                    preferences[READER_TEXT_ALIGN] = prefs.textAlign!!
-                } else {
-                    preferences.remove(READER_TEXT_ALIGN)
-                }
-
-                if (prefs.lineHeight != null) preferences[READER_LINE_HEIGHT] = prefs.lineHeight!! else preferences.remove(READER_LINE_HEIGHT)
-                if (prefs.letterSpacing != null) preferences[READER_LETTER_SPACING] = prefs.letterSpacing!! else preferences.remove(READER_LETTER_SPACING)
-                if (prefs.paragraphSpacing != null) preferences[READER_PARAGRAPH_SPACING] = prefs.paragraphSpacing!! else preferences.remove(READER_PARAGRAPH_SPACING)
-                if (prefs.pageMargins != null) preferences[READER_MARGIN_SIDE] = prefs.pageMargins!! else preferences.remove(READER_MARGIN_SIDE)
+                prefs.fontFamily?.let { p[READER_FONT_FAMILY] = it } ?: p.remove(READER_FONT_FAMILY)
+                prefs.textAlign?.let { p[READER_TEXT_ALIGN] = it } ?: p.remove(READER_TEXT_ALIGN)
+                prefs.lineHeight?.let { p[READER_LINE_HEIGHT] = it } ?: p.remove(READER_LINE_HEIGHT)
+                prefs.letterSpacing?.let { p[READER_LETTER_SPACING] = it } ?: p.remove(READER_LETTER_SPACING)
+                prefs.paragraphSpacing?.let { p[READER_PARAGRAPH_SPACING] = it } ?: p.remove(READER_PARAGRAPH_SPACING)
+                prefs.pageMargins?.let { p[READER_MARGIN_SIDE] = it } ?: p.remove(READER_MARGIN_SIDE)
+                prefs.marginTop?.let { p[READER_MARGIN_TOP] = it } ?: p.remove(READER_MARGIN_TOP)
+                prefs.marginBottom?.let { p[READER_MARGIN_BOTTOM] = it } ?: p.remove(READER_MARGIN_BOTTOM)
+                prefs.wordSpacing?.let { p[READER_WORD_SPACING] = it } ?: p.remove(READER_WORD_SPACING)
+                prefs.paragraphIndent?.let { p[READER_PARAGRAPH_INDENT] = it } ?: p.remove(READER_PARAGRAPH_INDENT)
+                prefs.hyphens?.let { p[READER_HYPHENS] = it } ?: p.remove(READER_HYPHENS)
+                prefs.ligatures?.let { p[READER_LIGATURES] = it } ?: p.remove(READER_LIGATURES)
             }
         }
     }
 
     suspend fun resetLayoutPreferences() {
-        editCurrentVault { preferences ->
-            preferences.remove(READER_LINE_HEIGHT)
-            preferences.remove(READER_TEXT_ALIGN)
-            preferences.remove(READER_PARAGRAPH_SPACING)
-            preferences.remove(READER_MARGIN_SIDE)
-            preferences.remove(READER_LETTER_SPACING)
-
-            preferences[READER_PUBLISHER_STYLES] = false
+        editCurrentVault { p ->
+            p[READER_PUBLISHER_STYLES] = false
+            p.remove(READER_LINE_HEIGHT)
+            p.remove(READER_TEXT_ALIGN)
+            p.remove(READER_PARAGRAPH_SPACING)
+            p.remove(READER_MARGIN_SIDE)
+            p.remove(READER_MARGIN_TOP)
+            p.remove(READER_MARGIN_BOTTOM)
+            p.remove(READER_LETTER_SPACING)
+            p.remove(READER_WORD_SPACING)
+            p.remove(READER_PARAGRAPH_INDENT)
+            p.remove(READER_HYPHENS)
+            p.remove(READER_LIGATURES)
         }
     }
 
-    // --- LIBRARY & COVER STYLE SETTINGS ---
-    private val DITHERING_MODE_KEY = stringPreferencesKey("dithering_mode")
-    private val GROUP_BY_SERIES_KEY = booleanPreferencesKey("group_by_series")
-
-    private val COVER_ASPECT_RATIO_KEY = stringPreferencesKey("cover_aspect_ratio")
-    private val SHOW_FORMAT_BADGE_KEY = booleanPreferencesKey("show_format_badge")
-    private val SHOW_FAVORITE_ICON_KEY = booleanPreferencesKey("show_favorite_icon")
-    private val SHOW_PROGRESS_BADGE_KEY = booleanPreferencesKey("show_progress_badge")
-    private val SHOW_SYNC_STATUS_KEY = booleanPreferencesKey("show_sync_status")
-
     val bookshelfPreferences: Flow<BookshelfPreferences> = vaultPreferencesFlow.map { prefs ->
+        val ditheringName = prefs[DITHERING_MODE_KEY] ?: DitheringMode.AUTO.name
+        val ditheringMode = try { DitheringMode.valueOf(ditheringName) } catch (_: Exception) { DitheringMode.AUTO }
+
+        val ratioName = prefs[COVER_ASPECT_RATIO_KEY] ?: CoverAspectRatio.UNIFORM.name
+        val coverAspectRatio = try { CoverAspectRatio.valueOf(ratioName) } catch (_: Exception) { CoverAspectRatio.UNIFORM }
+
         BookshelfPreferences(
-            ditheringMode = DitheringMode.valueOf(prefs[DITHERING_MODE_KEY] ?: DitheringMode.AUTO.name),
+            ditheringMode = ditheringMode,
             groupBySeries = prefs[GROUP_BY_SERIES_KEY] ?: true,
-            coverAspectRatio = CoverAspectRatio.valueOf(prefs[COVER_ASPECT_RATIO_KEY] ?: CoverAspectRatio.UNIFORM.name),
+            coverAspectRatio = coverAspectRatio,
             showFormatBadge = prefs[SHOW_FORMAT_BADGE_KEY] ?: true,
             showFavoriteIcon = prefs[SHOW_FAVORITE_ICON_KEY] ?: true,
             showProgressBadge = prefs[SHOW_PROGRESS_BADGE_KEY] ?: true,
@@ -376,17 +356,9 @@ class SettingsRepository @Inject constructor(
         )
     }
 
-    suspend fun setDitheringMode(mode: DitheringMode) {
-        editCurrentVault { it[DITHERING_MODE_KEY] = mode.name }
-    }
-
-    suspend fun setGroupBySeries(enabled: Boolean) {
-        editCurrentVault { it[GROUP_BY_SERIES_KEY] = enabled }
-    }
-
-    suspend fun setCoverAspectRatio(ratio: CoverAspectRatio) {
-        editCurrentVault { it[COVER_ASPECT_RATIO_KEY] = ratio.name }
-    }
+    suspend fun setDitheringMode(mode: DitheringMode) { editCurrentVault { it[DITHERING_MODE_KEY] = mode.name } }
+    suspend fun setGroupBySeries(enabled: Boolean) { editCurrentVault { it[GROUP_BY_SERIES_KEY] = enabled } }
+    suspend fun setCoverAspectRatio(ratio: CoverAspectRatio) { editCurrentVault { it[COVER_ASPECT_RATIO_KEY] = ratio.name } }
 
     suspend fun setCoverStyleElements(
         format: Boolean, favorite: Boolean, progress: Boolean, sync: Boolean

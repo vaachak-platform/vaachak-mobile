@@ -10,11 +10,30 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.json.JSONObject
+import org.readium.navigator.media.tts.AndroidTtsNavigatorFactory
+import org.readium.navigator.media.tts.TtsNavigator
+import org.readium.navigator.media.tts.android.AndroidTtsEngine
+import org.readium.navigator.media.tts.android.AndroidTtsEngine.Voice
+import org.readium.navigator.media.tts.android.AndroidTtsEngineProvider
+import org.readium.navigator.media.tts.android.AndroidTtsPreferences
+import org.readium.navigator.media.tts.android.AndroidTtsSettings
 import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.Decoration
 import org.readium.r2.navigator.epub.EpubPreferences
@@ -25,32 +44,22 @@ import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.publication.services.positions
 import org.readium.r2.shared.publication.services.search.SearchService
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
 import org.vaachak.reader.core.data.repository.AiRepository
 import org.vaachak.reader.core.data.repository.DictionaryRepository
+import org.vaachak.reader.core.data.repository.ReadiumManager
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
 import org.vaachak.reader.core.data.repository.VaultRepository
 import org.vaachak.reader.core.domain.model.HighlightEntity
-
-import org.readium.navigator.media.tts.TtsNavigator
-import org.readium.navigator.media.tts.android.AndroidTtsEngineProvider
-import org.readium.navigator.media.tts.AndroidTtsNavigatorFactory
-import org.readium.navigator.media.tts.android.AndroidTtsSettings
-import org.readium.navigator.media.tts.android.AndroidTtsPreferences
-import org.readium.navigator.media.tts.android.AndroidTtsEngine.Voice
-
+import org.vaachak.reader.core.domain.model.ReaderPreferences
+import org.vaachak.reader.core.domain.model.TtsSettings
+import java.util.Locale
 import javax.inject.Inject
 import kotlin.math.abs
-import kotlin.math.round
-
-import org.vaachak.reader.core.data.repository.ReadiumManager
-import java.util.Locale
-import org.readium.navigator.media.tts.android.AndroidTtsEngine
-import org.readium.r2.shared.publication.services.positions
-import org.vaachak.reader.core.domain.model.TtsSettings
 
 @OptIn(ExperimentalCoroutinesApi::class, ExperimentalReadiumApi::class, FlowPreview::class)
 @HiltViewModel
@@ -84,21 +93,10 @@ class ReaderViewModel @Inject constructor(
     val isAiEnabled = combine(isOfflineModeEnabled, _bookAiEnabled) { _, local -> local }
         .stateIn(viewModelScope, SharingStarted.Lazily, true)
 
-    // OPTIMIZATION: Added distinctUntilChanged() to prevent Readium from re-rendering the layout
-    // unless a visual parameter actually changes.
-    val epubPreferences: StateFlow<EpubPreferences> = combine(
-        settingsRepo.readerTheme as Flow<Any?>,
-        settingsRepo.readerFontFamily as Flow<Any?>,
-        settingsRepo.readerFontSize as Flow<Any?>,
-        settingsRepo.readerTextAlign as Flow<Any?>,
-        settingsRepo.readerLineHeight as Flow<Any?>,
-        settingsRepo.readerPublisherStyles as Flow<Any?>,
-        settingsRepo.readerLetterSpacing as Flow<Any?>,
-        settingsRepo.readerParaSpacing as Flow<Any?>,
-        settingsRepo.readerMarginSide as Flow<Any?>
-    ) { params ->
-        buildEpubPreferences(params)
-    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, EpubPreferences())
+    val epubPreferences: StateFlow<EpubPreferences> = settingsRepo.readerPreferences
+        .map { prefs -> buildEpubPreferences(prefs) }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, EpubPreferences())
 
     private var currentTotalPositions: Int = 0
     private var isFirstLocator = true
@@ -186,7 +184,6 @@ class ReaderViewModel @Inject constructor(
         list.filter { it.tag == "BOOKMARK" }
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    // OPTIMIZATION: Shift JSON parsing to Dispatchers.Default to prevent page-turn stutter
     val isCurrentPageBookmarked: StateFlow<Boolean> = combine(currentLocator, savedBookmarks) { locator, bookmarks ->
         if (locator == null) return@combine false
         withContext(Dispatchers.Default) {
@@ -202,7 +199,6 @@ class ReaderViewModel @Inject constructor(
         }
     }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Lazily, false)
 
-    // OPTIMIZATION: Shift JSON parsing to Dispatchers.Default for drawing highlights
     val currentBookHighlights: StateFlow<List<Decoration>> = combine(
         allBookItems, isEinkEnabled
     ) { items, isEink ->
@@ -337,42 +333,44 @@ class ReaderViewModel @Inject constructor(
     fun toggleBookAi(enabled: Boolean) { _bookAiEnabled.value = enabled }
 
     fun savePreferences(newPrefs: EpubPreferences) = viewModelScope.launch {
-        settingsRepo.updateReaderPreferences(
-            theme = newPrefs.theme?.toString()?.lowercase(),
+        // Convert Readium EpubPreferences to our domain model, using Elvis operator for null safety
+        val readerPrefs = ReaderPreferences(
+            theme = newPrefs.theme?.name?.lowercase() ?: "light",
+            fontSize = newPrefs.fontSize ?: 1.0,
+            publisherStyles = newPrefs.publisherStyles ?: true,
             fontFamily = newPrefs.fontFamily?.name,
-            fontSize = newPrefs.fontSize,
-            textAlign = newPrefs.textAlign?.toString()?.lowercase(),
-            publisherStyles = newPrefs.publisherStyles,
-            letterSpacing = newPrefs.letterSpacing,
+            textAlign = newPrefs.textAlign?.name?.lowercase(),
             lineHeight = newPrefs.lineHeight,
-            paraSpacing = newPrefs.paragraphSpacing,
-            marginSide = newPrefs.pageMargins
+            letterSpacing = newPrefs.letterSpacing,
+            paragraphSpacing = newPrefs.paragraphSpacing,
+            pageMargins = newPrefs.pageMargins,
+            wordSpacing = newPrefs.wordSpacing,
+            paragraphIndent = newPrefs.paragraphIndent,
+            hyphens = newPrefs.hyphens,
+            ligatures = newPrefs.ligatures
         )
+        settingsRepo.saveReaderPreferences(readerPrefs)
     }
 
-    private fun buildEpubPreferences(params: Array<Any?>): EpubPreferences {
-        val themeStr = (params[0] as? String) ?: "light"
-        val fontStr = params[1] as? String
-        val fontSizeVal = (params[2] as? Double) ?: 1.0
-        val alignStr = (params[3] as? String) ?: "start"
-        val lineht = (params[4] as? Double) ?: 1.2
-        val pubStyles = (params[5] as? Boolean) ?: true
-        val letterSp = (params[6] as? Double)
-        val paraSp = (params[7] as? Double)
-        val marginSide = (params[8] as? Double) ?: 1.0
-
-        val rTheme = when (themeStr) { "dark" -> Theme.DARK; "sepia" -> Theme.SEPIA; else -> Theme.LIGHT }
-        val rFont = fontStr?.let { FontFamily(it) }
-        val rAlign = when (alignStr) { "left" -> TextAlign.LEFT; "justify" -> TextAlign.JUSTIFY; else -> TextAlign.START }
+    private fun buildEpubPreferences(prefs: ReaderPreferences): EpubPreferences {
+        val rTheme = when (prefs.theme) { "dark" -> Theme.DARK; "sepia" -> Theme.SEPIA; else -> Theme.LIGHT }
+        val rFont = prefs.fontFamily?.let { FontFamily(it) }
+        val rAlign = when (prefs.textAlign) { "left" -> TextAlign.LEFT; "justify" -> TextAlign.JUSTIFY; else -> TextAlign.START }
 
         return EpubPreferences(
-            theme = rTheme, fontSize = fontSizeVal, publisherStyles = pubStyles,
-            fontFamily = if (!pubStyles) rFont else null,
-            textAlign = if (!pubStyles) rAlign else null,
-            letterSpacing = if (!pubStyles) letterSp else null,
-            paragraphSpacing = if (!pubStyles) paraSp else null,
-            pageMargins = if (!pubStyles) marginSide else null,
-            lineHeight = if (!pubStyles) lineht else null
+            theme = rTheme,
+            fontSize = prefs.fontSize,
+            publisherStyles = prefs.publisherStyles,
+            fontFamily = if (!prefs.publisherStyles) rFont else null,
+            textAlign = if (!prefs.publisherStyles) rAlign else null,
+            letterSpacing = if (!prefs.publisherStyles) prefs.letterSpacing else null,
+            paragraphSpacing = if (!prefs.publisherStyles) prefs.paragraphSpacing else null,
+            pageMargins = if (!prefs.publisherStyles) prefs.pageMargins else null,
+            lineHeight = if (!prefs.publisherStyles) prefs.lineHeight else null,
+            wordSpacing = if (!prefs.publisherStyles) prefs.wordSpacing else null,
+            paragraphIndent = if (!prefs.publisherStyles) prefs.paragraphIndent else null,
+            hyphens = if (!prefs.publisherStyles) prefs.hyphens else null,
+            ligatures = if (!prefs.publisherStyles) prefs.ligatures else null
         )
     }
 
@@ -493,7 +491,6 @@ class ReaderViewModel @Inject constructor(
         val uri = _currentLocalUri.value ?: return
         val json = l.toJSON().toString()
 
-        // We launch this without blocking so the UI thread can immediately turn the page
         viewModelScope.launch {
             val profileId = vaultRepository.activeVaultId.first()
             bookDao.updateBookProgressByUri(uri, profileId, prog, json, System.currentTimeMillis())
@@ -525,6 +522,27 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun prepareHighlight(l: Locator) { pendingHighlightLocator = l; _showTagSelector.value = true }
+
+    fun addTestHighlightAtCurrentLocator() {
+        val locator = _currentLocator.value ?: return
+        val bookHash = _currentBookHash.value ?: return
+        val einkEnabled = isEinkEnabled.value
+
+        viewModelScope.launch {
+            val profileId = vaultRepository.activeVaultId.first()
+            highlightDao.insertHighlight(
+                HighlightEntity(
+                    bookHashId = bookHash,
+                    profileId = profileId,
+                    locatorJson = locator.toJSON().toString(),
+                    text = locator.text.highlight ?: "Test Highlight",
+                    color = if (einkEnabled) Color.DKGRAY else Color.YELLOW,
+                    tag = "Test"
+                )
+            )
+            _snackbarMessage.value = "Test highlight created"
+        }
+    }
 
     fun saveHighlightWithTag(tag: String) {
         val l = pendingHighlightLocator ?: return
@@ -589,7 +607,6 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    // OPTIMIZATION: Shift the intensive teardown process (JSON math & SQLite writes) to the IO thread
     fun onReaderPause(locationJson: String) {
         val uri = _currentLocalUri.value ?: return
         if (locationJson.isBlank() && _currentLocator.value == null) return

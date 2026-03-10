@@ -20,31 +20,38 @@
  *  * SOFTWARE.
  */
 
+
 package org.vaachak.reader.leisure.ui.catalog
 
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import org.vaachak.reader.core.domain.model.OpdsEntity
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import org.readium.r2.shared.opds.Feed
+import org.readium.r2.shared.publication.Contributor
+import org.readium.r2.shared.publication.Link
+import org.readium.r2.shared.publication.LocalizedString
+import org.readium.r2.shared.publication.Manifest
+import org.readium.r2.shared.publication.Metadata
+import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.publication.opds.images
+import org.readium.r2.shared.util.Try
+import org.readium.r2.shared.util.Url
+import org.readium.r2.shared.util.mediatype.MediaType
 import org.vaachak.reader.core.data.repository.GutendexRepository
 import org.vaachak.reader.core.data.repository.LibraryRepository
 import org.vaachak.reader.core.data.repository.OpdsRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
-import org.readium.r2.shared.publication.Metadata
-import org.readium.r2.shared.publication.Publication
-import org.readium.r2.shared.publication.Link
-import org.readium.r2.shared.publication.Contributor
-import org.readium.r2.shared.publication.Manifest
-import org.readium.r2.shared.publication.opds.images
-import org.readium.r2.shared.opds.Feed
-import org.readium.r2.shared.publication.LocalizedString
-import org.readium.r2.shared.util.Try
-import org.readium.r2.shared.util.Url
-import org.readium.r2.shared.util.mediatype.MediaType
+import org.vaachak.reader.core.domain.model.OpdsEntity
 import java.io.File
 import java.net.URL
 import javax.inject.Inject
@@ -148,7 +155,6 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    // Changed from private to public for ManagerScreen usage
     fun openCatalog(feed: OpdsEntity) {
         historyStack.clear()
         _feedItems.value = emptyList()
@@ -386,10 +392,9 @@ class CatalogViewModel @Inject constructor(
         return items
     }
 
-    // --- DOWNLOADER & CRUD (Restored Public Access) ---
+    // --- DOWNLOADER & CRUD ---
 
     fun downloadBook(publication: Publication) {
-        // ... (Same implementation as before)
         viewModelScope.launch {
             val title = publication.metadata.title ?: "Unknown"
             if (libraryRepository.isBookDuplicate(title)) {
@@ -405,8 +410,11 @@ class CatalogViewModel @Inject constructor(
             _isLoading.value = true
             val ext = "epub"
             val safeTitle = title.replace("[^a-zA-Z0-9.-]".toRegex(), "_").take(50)
-            val bookFile = File(application.filesDir, "$safeTitle.$ext")
-            val coverFile = File(application.filesDir, "$safeTitle.jpg")
+
+            // --- FIX: Append Timestamp to guarantee a unique file name ---
+            val uniqueSuffix = System.currentTimeMillis().toString()
+            val bookFile = File(application.filesDir, "${safeTitle}_$uniqueSuffix.$ext")
+            val coverFile = File(application.filesDir, "${safeTitle}_$uniqueSuffix.jpg")
 
             val downloadUrl = link.href.toString()
             val success = if (isGutendexSession) {
@@ -447,8 +455,7 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    // Changed from private to public
-    fun     addCatalog(title: String, url: String, user: String?, pass: String?, allowInsecure: Boolean) {
+    fun addCatalog(title: String, url: String, user: String?, pass: String?, allowInsecure: Boolean) {
         viewModelScope.launch {
             val cleanUrl = cleanUrl(url)
             val newFeed = OpdsEntity(title = title.ifBlank { "Library" }, url = cleanUrl, username = user?.ifBlank{null}, password = pass?.ifBlank{null}, allowInsecure = allowInsecure)
@@ -456,7 +463,6 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    // Restored public method
     fun updateCatalog(feed: OpdsEntity, title: String, url: String, user: String?, pass: String?, allowInsecure: Boolean) {
         viewModelScope.launch {
             val cleanUrl = cleanUrl(url)
@@ -465,7 +471,6 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    // Restored public method
     fun deleteCatalog(feed: OpdsEntity) {
         viewModelScope.launch { opdsRepository.deleteFeed(feed) }
     }

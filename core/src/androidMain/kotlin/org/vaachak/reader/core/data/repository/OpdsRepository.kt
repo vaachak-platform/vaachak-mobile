@@ -22,27 +22,31 @@
 
 package org.vaachak.reader.core.data.repository
 
-import org.vaachak.reader.core.data.local.OpdsDao
-import org.vaachak.reader.core.domain.model.OpdsEntity
-import org.readium.r2.shared.util.Try
-import org.readium.r2.shared.util.Try.Success
-import org.readium.r2.shared.util.Try.Failure
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.withContext
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.Credentials
+import okhttp3.HttpUrl
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 import org.readium.r2.opds.OPDS1Parser
 import org.readium.r2.opds.OPDS2Parser
 import org.readium.r2.shared.opds.ParseData
 import org.readium.r2.shared.util.AbsoluteUrl
-import okhttp3.Credentials
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.Cookie
-import okhttp3.CookieJar
-import okhttp3.HttpUrl
-import okhttp3.Interceptor
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import org.readium.r2.shared.util.Try
+import org.readium.r2.shared.util.Try.Failure
+import org.readium.r2.shared.util.Try.Success
+import org.vaachak.reader.core.data.local.OpdsDao
+import org.vaachak.reader.core.domain.model.OpdsEntity
+import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
+import java.net.URL
 import java.nio.charset.Charset
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
@@ -52,10 +56,6 @@ import javax.inject.Singleton
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
-import android.util.Log
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.onStart
-import java.net.URL
 
 /**
  * Repository for handling OPDS (Open Publication Distribution System) feeds.
@@ -243,7 +243,7 @@ class OpdsRepository @Inject constructor(
 
             if (!response.isSuccessful) {
                 val msg = "HTTP ${response.code}: ${response.message}"
-                Log.e("OpdsRepository", msg)
+                Timber.e( msg)
                 response.close()
                 return@withContext Failure<ParseData, Exception>(Exception(msg))
             }

@@ -66,7 +66,8 @@ class LibraryPlatformHelper @Inject constructor(
     fun saveCoverBitmapToStorage(bitmap: Bitmap, title: String): String? {
         return try {
             // Sanitize filename hash to ensure valid file path
-            val filename = "cover_${title.hashCode()}.png"
+            val uniqueSuffix = System.currentTimeMillis()
+            val filename = "cover_${title.hashCode()}_$uniqueSuffix.png"
             val file = File(context.filesDir, filename)
 
             FileOutputStream(file).use { out ->

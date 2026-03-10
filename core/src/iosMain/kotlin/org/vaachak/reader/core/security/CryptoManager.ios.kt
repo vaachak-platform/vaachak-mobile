@@ -22,16 +22,23 @@
 
 package org.vaachak.reader.core.security
 
+// We expect a Swift class named 'SwiftCryptoBridge' to be compiled into the iOS app.
+// This allows us to use modern Apple CryptoKit features safely.
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 actual class CryptoManager actual constructor() {
 
-    actual fun encrypt(plainTextJson: String): EncryptedPayload {
-        // TODO: Implement Apple CryptoKit AES-GCM via cinterop
-        throw NotImplementedError("iOS CryptoManager not yet implemented")
+    actual fun encrypt(plainTextJson: String, secretPass: String, usernameSalt: String): EncryptedPayload {
+        // Here we would call the Swift bridge:
+        // val result = SwiftCryptoBridge.encrypt(plainTextJson, secretPass, usernameSalt)
+        // return EncryptedPayload(result.ciphertext, result.iv)
+
+        throw NotImplementedError("To support iOS, implement SwiftCryptoBridge using CryptoKit.")
     }
 
-    actual fun decrypt(payload: EncryptedPayload): String {
-        // TODO: Implement Apple CryptoKit AES-GCM via cinterop
-        throw NotImplementedError("iOS CryptoManager not yet implemented")
+    actual fun decrypt(payload: EncryptedPayload, secretPass: String, usernameSalt: String): String {
+        // Here we would call the Swift bridge:
+        // return SwiftCryptoBridge.decrypt(payload.ciphertext, payload.iv, secretPass, usernameSalt)
+
+        throw NotImplementedError("To support iOS, implement SwiftCryptoBridge using CryptoKit.")
     }
 }
-
