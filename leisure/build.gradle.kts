@@ -31,9 +31,10 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("vaachak-key.jks")
-            storePassword = "#YqMPEY7KwFP7J"
-            keyAlias = "vaachak_alias"
-            keyPassword = "#YqMPEY7KwFP7J"
+            // This reads from the GitHub Action ENV vars, or falls back to your local properties
+            storePassword = System.getenv("ORG_GRADLE_PROJECT_KEYSTORE_PASSWORD") ?: "your_local_dev_password"
+            keyAlias = System.getenv("ORG_GRADLE_PROJECT_KEY_ALIAS") ?: "your_local_alias"
+            keyPassword = System.getenv("ORG_GRADLE_PROJECT_KEY_PASSWORD") ?: "your_local_key_password"
         }
     }
 
