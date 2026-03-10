@@ -42,3 +42,21 @@ Keys are not stored; they are derived dynamically in memory when the user initia
 * Once the 256-bit symmetric key is derived, payloads are encrypted using `AES/GCM/NoPadding`.
 * A cryptographically secure 12-byte Initialization Vector (IV) is generated for *every* update.
 * The application transmits a Base64 encoded `IV:Ciphertext` string to the server, leveraging GCM's built-in authentication tag to prevent tampering.
+
+## 5. Automated Quality & CI/CD
+
+To maintain high software integrity, the Vaachak platform utilizes a multi-stage CI/CD pipeline:
+
+* **Static Analysis:** Every Pull Request triggers a **Detekt** scan to enforce Kotlin performance rules and code style consistency.
+* **Security Guardrails:** **GitHub CodeQL** performs deep semantic analysis of the codebase weekly to identify potential vulnerabilities in the cryptographic or networking layers.
+* **Automated Supply Chain:** **Dependabot** monitors the Gradle Version Catalog (`libs.versions.toml`) to ensure third-party libraries (Timber, Ktor, Readium) are patched against known CVEs.
+* **Release Orchestration:** Production artifacts (APKs) are automatically compiled, signed, and deployed to GitHub via tag-based workflows, ensuring a consistent and reproducible build environment.
+
+## 6. Security & Compliance (OWASP Mobile Top 10)
+
+The Vaachak architecture is engineered to mitigate the following primary mobile security risks:
+
+* **M1: Cryptographic Failures:** Addressed via the implementation of AES-256-GCM and PBKDF2 with 65k iterations. All encryption is client-side (Zero-Knowledge).
+* **M2: Insecure Data Storage:** Leverages encrypted DataStore for API keys and Room DB for local library data, ensuring no sensitive plaintext exists in the app's internal storage.
+* **M4: Insecure Communication:** Enforced via Ktor TLS 1.3 configurations and strict certificate pinning possibilities for custom sync servers.
+* **M8: Security Misconfiguration:** Automated scanning via CodeQL and MobSF ensures that debug features (like LeakCanary) and sensitive logging are stripped from production release artifacts.

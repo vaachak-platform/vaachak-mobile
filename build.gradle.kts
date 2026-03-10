@@ -15,29 +15,43 @@ plugins {
     alias(libs.plugins.jetbrains.dokka) apply false
     alias(libs.plugins.kotlin.multiplatform) apply false
     id("io.gitlab.arturbosch.detekt") version "1.23.8"
+    id("org.sonarqube") version "7.2.3.7755"
 }
+
 detekt {
     // Builds will fail if it finds too many performance issues
     buildUponDefaultConfig = true
     allRules = false // We only want to turn on specific rule sets like 'Performance'
 }
+
 // Optional: Clean task configuration
 tasks.register("clean", Delete::class) {
     delete(rootProject.layout.buildDirectory)
     group= "clean"
     description="Clean build directory"
 }
+
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-    kotlinOptions {
-        freeCompilerArgs += listOf(
-            "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=" +
-                    project.buildDir.absolutePath + "/compose_metrics"
+    // Modern layout.buildDirectory instead of the deprecated buildDir
+    val composeMetricsDir = layout.buildDirectory.dir("compose_metrics").get().asFile.absolutePath
+
+    compilerOptions {
+        freeCompilerArgs.addAll(
+            "-P", "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=$composeMetricsDir",
+            "-P", "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=$composeMetricsDir"
         )
-        freeCompilerArgs += listOf(
-            "-P",
-            "plugin:androidx.compose.compiler.plugins.kotlin:metricsDestination=" +
-                    project.buildDir.absolutePath + "/compose_metrics"
-        )
+    }
+}
+
+sonar {
+    properties {
+        property("sonar.projectKey", "vaachak-platform_vaachak-mobile")
+        property("sonar.organization", "vaachak-platform")
+        property("sonar.host.url", "https://sonarcloud.io")
+
+        // Keep the scanner fast by excluding auto-generated Android files and KSP outputs
+        property("sonar.exclusions", "**/build/**, **/ksp/**, **/*.xml, **/R.class, **/BuildConfig.class")
+
+        // Removed manual sonar.sources and sonar.tests to prevent the double-indexing crash
     }
 }

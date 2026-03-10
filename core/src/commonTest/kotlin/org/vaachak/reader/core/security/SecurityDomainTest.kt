@@ -9,6 +9,10 @@ class SecurityDomainTest {
 
     private lateinit var cryptoManager: CryptoManager
 
+    // Standardized test credentials for PBKDF2 derivation
+    private val testPass = "test_password"
+    private val testUser = "test_user"
+
     @Before
     fun setup() {
         // Because this is an expect/actual class, instantiating it here
@@ -64,11 +68,11 @@ class SecurityDomainTest {
             }
         """.trimIndent()
 
-        // When: We encrypt the payload
-        val encryptedPayload = cryptoManager.encrypt(originalJsonPayload)
+        // When: We encrypt the payload using test credentials
+        val encryptedPayload = cryptoManager.encrypt(originalJsonPayload, testPass, testUser)
 
         // Then: We decrypt the payload back to plain text
-        val decryptedString = cryptoManager.decrypt(encryptedPayload)
+        val decryptedString = cryptoManager.decrypt(encryptedPayload, testPass, testUser)
 
         // Assert: The decrypted text matches the original perfectly
         assertEquals(originalJsonPayload, decryptedString)
@@ -80,14 +84,14 @@ class SecurityDomainTest {
         // for every encryption, meaning encrypting the same text twice yields different payloads.
         val payload = "SuperSecretData"
 
-        val encryption1 = cryptoManager.encrypt(payload)
-        val encryption2 = cryptoManager.encrypt(payload)
+        val encryption1 = cryptoManager.encrypt(payload, testPass, testUser)
+        val encryption2 = cryptoManager.encrypt(payload, testPass, testUser)
 
         // Assuming EncryptedPayload is a data class or has a proper toString/equals implementation
         assertNotEquals("Secure GCM should use unique IVs/nonces", encryption1, encryption2)
 
         // But both should still decrypt to the exact same string
-        assertEquals(payload, cryptoManager.decrypt(encryption1))
-        assertEquals(payload, cryptoManager.decrypt(encryption2))
+        assertEquals(payload, cryptoManager.decrypt(encryption1, testPass, testUser))
+        assertEquals(payload, cryptoManager.decrypt(encryption2, testPass, testUser))
     }
 }

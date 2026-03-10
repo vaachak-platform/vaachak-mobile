@@ -10,6 +10,11 @@ plugins {
 
 // 1. KOTLIN MULTIPLATFORM BLOCK
 kotlin {
+    // Suppress expect/actual beta warning
+    sourceSets.all {
+        languageSettings.optIn("kotlin.ExperimentalMultiplatform")
+    }
+
     androidTarget {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
@@ -51,7 +56,16 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.androidx.datastore.preferences.core)
             implementation("com.squareup.okio:okio:3.9.0")
+        }
 
+        commonTest.dependencies {
+            implementation(libs.junit)
+            // Replaced catalog variables with the hardcoded strings you used previously
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+            implementation("app.cash.turbine:turbine:1.0.0")
+
+            // If you use MockK in your core tests, you'll need this one too:
+            implementation("io.mockk:mockk:1.13.8")
         }
 
         androidMain.dependencies {
@@ -72,6 +86,14 @@ kotlin {
             implementation(libs.apache.commons)
             // ADD TIMBER HERE:
             implementation(libs.timber)
+        }
+
+        val androidUnitTest by getting {
+            dependencies {
+                implementation(libs.androidx.junit)
+                implementation("androidx.test:core:1.5.0")
+                implementation("org.robolectric:robolectric:4.11.1")
+            }
         }
     }
 }
@@ -113,10 +135,9 @@ dependencies {
     add("kspIosSimulatorArm64", libs.androidx.room.compiler)
 
     // Hilt Compiler
-    // Hilt Compiler
     add("kspAndroid", libs.hilt.compiler)
-    // Testing
-    testImplementation(libs.junit)
+
+    // Instrumented tests remain here
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }
