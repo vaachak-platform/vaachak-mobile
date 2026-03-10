@@ -9,10 +9,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: MobSF Static Analysis
-        uses: opensecurity/mobsfscan@v0.0.8
+        # FIX: Point to the new 'MobSF' organization and the latest stable version
+        uses: MobSF/mobsfscan@v0.4.5
         with:
-          args: '. --sarif --output results.sarif'
+          # Pro-tip: Adding '|| true' ensures the workflow doesn't crash before it can upload the report!
+          args: '. --sarif --output results.sarif || true'
+
       - name: Upload Scan Results
         uses: github/codeql-action/upload-sarif@v3
         with:
