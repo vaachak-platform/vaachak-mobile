@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Platform: Android](https://img.shields.io/badge/Platform-Android_8.0+-green.svg)]()
 [![Target: E-Ink](https://img.shields.io/badge/Optimized_for-E--Ink-black.svg)]()
-
+.
 **Leisure Vaachak** (Sanskrit for "Reader") is an offline-first, privacy-centric e-reader application built natively for Android. It is heavily optimized for E-Ink displays (like the ONYX BOOX series) and features an advanced, Zero-Knowledge encrypted synchronization engine.
 
 ## ✨ Key Features
