@@ -52,6 +52,7 @@ import org.vaachak.reader.core.data.repository.LibraryRepository
 import org.vaachak.reader.core.data.repository.OpdsRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.domain.model.OpdsEntity
+import timber.log.Timber
 import java.io.File
 import java.net.URL
 import javax.inject.Inject
@@ -449,7 +450,10 @@ class CatalogViewModel @Inject constructor(
 
             } else {
                 _uiEvent.send(CatalogUiEvent.ShowSnackbar("Download failed."))
-                if(bookFile.exists()) bookFile.delete()
+                if(bookFile.exists()){ val isDeleted = bookFile.delete()
+                    if (!isDeleted) {
+                        Timber.w("Failed to delete file: ${bookFile.absolutePath}")
+                    }}
             }
             _isLoading.value = false
         }

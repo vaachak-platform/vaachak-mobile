@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -57,7 +58,7 @@ import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 import org.vaachak.reader.leisure.ui.testability.Tid
 import org.vaachak.reader.leisure.ui.testability.TidScreen
 import org.vaachak.reader.leisure.ui.testability.tid
-
+import androidx.compose.foundation.text.KeyboardOptions
 @Composable
 fun SyncSettingsScreen(
     navController: androidx.navigation.NavController,
@@ -230,6 +231,10 @@ fun SyncSettingsScreen(
                                 label = { Text("Password") },
                                 singleLine = true,
                                 visualTransformation = if (passwordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Password,
+                                    autoCorrectEnabled = false // Extra safety to prevent dictionary caching
+                                ),
                                 trailingIcon = {
                                     val image = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff
                                     IconButton(onClick = { passwordVisible = !passwordVisible }) {

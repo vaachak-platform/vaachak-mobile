@@ -62,6 +62,8 @@ import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 import org.vaachak.reader.leisure.ui.testability.Tid
 import org.vaachak.reader.leisure.ui.testability.TidScreen
 import org.vaachak.reader.leisure.ui.testability.tid
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 
 @Composable
 fun AiConfigScreen(
@@ -103,6 +105,10 @@ fun AiConfigScreen(
                 modifier = Modifier.fillMaxWidth().tid("ai_config_gemini_key"),
                 singleLine = true,
                 visualTransformation = if (state.isAiMasked) PasswordVisualTransformation() else VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    autoCorrectEnabled = false // Extra safety to prevent dictionary caching
+                ),
                 trailingIcon = {
                     IconButton(
                         onClick = { viewModel.setAiMasked(!state.isAiMasked) },
@@ -134,7 +140,11 @@ fun AiConfigScreen(
                 label = { Text("Cloudflare Token") },
                 modifier = Modifier.fillMaxWidth().tid("ai_config_cloudflare_token"),
                 singleLine = true,
-                visualTransformation = if (state.isAiMasked) PasswordVisualTransformation() else VisualTransformation.None
+                visualTransformation = if (state.isAiMasked) PasswordVisualTransformation() else VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    autoCorrectEnabled = false // Extra safety to prevent dictionary caching
+                )
             )
 
             Spacer(modifier = Modifier.height(24.dp))

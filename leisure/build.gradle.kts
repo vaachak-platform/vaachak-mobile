@@ -153,7 +153,6 @@ dependencies {
 
     // Coroutines testing (for runTest and StandardTestDispatcher)
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
-
     // MockK for mocking Dao and Repository classes
     testImplementation("io.mockk:mockk:1.13.8")
 
