@@ -22,7 +22,14 @@
 
 package org.vaachak.reader.leisure.ui.catalog
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -30,8 +37,27 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,6 +66,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.vaachak.reader.core.domain.model.OpdsEntity
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,12 +86,16 @@ fun CatalogManagerScreen(
     val containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.background
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
+    TidScreen(Tid.Screen.catalogManager) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Manage Catalogs") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.tid(Tid.CatalogManager.back)
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -80,7 +113,8 @@ fun CatalogManagerScreen(
                     showDialog = true
                 },
                 containerColor = if(isEink) Color.Black else MaterialTheme.colorScheme.primary,
-                contentColor = if(isEink) Color.White else MaterialTheme.colorScheme.onPrimary
+                contentColor = if(isEink) Color.White else MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.tid(Tid.CatalogManager.add)
             ) {
                 Icon(Icons.Default.Add, "Add Catalog")
             }
@@ -109,7 +143,8 @@ fun CatalogManagerScreen(
                             editingCatalog = feed
                             showDialog = true
                         },
-                        onDelete = { viewModel.deleteCatalog(feed) }
+                        onDelete = { viewModel.deleteCatalog(feed) },
+                        modifier = if (catalogs.first() == feed) Modifier.tid(Tid.CatalogManager.first) else Modifier
                     )
                     HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
                 }
@@ -131,6 +166,7 @@ fun CatalogManagerScreen(
             )
         }
     }
+    }
 }
 
 @Composable
@@ -138,9 +174,11 @@ fun CatalogManagerItem(
     feed: OpdsEntity,
     isEink: Boolean,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     ListItem(
+        modifier = modifier.tid(Tid.CatalogManager.item(feed.id.toString())),
         headlineContent = { Text(feed.title, fontWeight = FontWeight.Bold) },
         supportingContent = { Text(feed.url, style = MaterialTheme.typography.bodySmall) },
         colors = ListItemDefaults.colors(
@@ -149,11 +187,17 @@ fun CatalogManagerItem(
         ),
         trailingContent = {
             Row {
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, "Edit", tint = Color.Gray)
+                IconButton(
+                    onClick = onEdit,
+                    modifier = Modifier.tid(Tid.CatalogManager.edit(feed.id.toString()))
+                ) {
+                    Icon(Icons.Default.Edit, "Edit Catalog", tint = Color.Gray)
                 }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.tid(Tid.CatalogManager.delete(feed.id.toString()))
+                ) {
+                    Icon(Icons.Default.Delete, "Delete Catalog", tint = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -181,42 +225,53 @@ fun AddCatalogDialog(
                     onValueChange = { title = it },
                     label = { Text("Name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .tid(Tid.CatalogManager.dialogTitle)
                 )
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
                     label = { Text("URL (OPDS)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .tid(Tid.CatalogManager.dialogUrl)
                 )
                 OutlinedTextField(
                     value = username,
                     onValueChange = { username = it },
                     label = { Text("Username (Optional)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .tid(Tid.CatalogManager.dialogUser)
                 )
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
                     label = { Text("Password (Optional)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .tid(Tid.CatalogManager.dialogPass)
                 )
             }
         },
         confirmButton = {
             Button(
                 onClick = { onSave(title, url, username, password, false) },
-                enabled = title.isNotBlank() && url.isNotBlank()
+                enabled = title.isNotBlank() && url.isNotBlank(),
+                modifier = Modifier.tid(Tid.CatalogManager.dialogSave)
             ) {
                 Text("Save")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.tid(Tid.CatalogManager.dialogCancel)
+            ) { Text("Cancel") }
         }
     )
 }
-

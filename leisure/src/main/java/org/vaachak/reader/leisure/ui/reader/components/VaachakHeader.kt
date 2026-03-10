@@ -22,10 +22,23 @@
 
 package org.vaachak.reader.leisure.ui.reader.components
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.*
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,7 +54,8 @@ fun VaachakHeader(
     onBack: () -> Unit,
     showBackButton: Boolean = true,
     isEink: Boolean = false,
-    // NEW: Flexible slot for 1 or more action buttons
+    rootModifier: Modifier = Modifier,
+    backButtonModifier: Modifier = Modifier,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
     val containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.surface
@@ -51,7 +65,7 @@ fun VaachakHeader(
     Surface(
         color = containerColor,
         contentColor = contentColor, // Automatically tints icons inside
-        modifier = Modifier.fillMaxWidth()
+        modifier = rootModifier.fillMaxWidth()
     ) {
         Column {
             Row(
@@ -63,7 +77,10 @@ fun VaachakHeader(
             ) {
                 // 1. Back Icon
                 if (showBackButton) {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = backButtonModifier
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",

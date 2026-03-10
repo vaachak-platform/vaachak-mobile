@@ -8,7 +8,17 @@ package org.vaachak.reader.leisure.ui.settings
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -16,7 +26,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Circle
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -24,6 +44,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -32,6 +54,9 @@ import androidx.navigation.NavController
 import org.vaachak.reader.core.domain.model.CoverAspectRatio
 import org.vaachak.reader.core.domain.model.DitheringMode
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
 
 @Composable
 fun LibrarySettingsScreen(
@@ -45,13 +70,15 @@ fun LibrarySettingsScreen(
     val containerColor = if (state.isOfflineMode) Color.White else MaterialTheme.colorScheme.background
     val contentColor = if (state.isOfflineMode) Color.Black else MaterialTheme.colorScheme.onBackground
 
+    TidScreen(Tid.Screen.librarySettings) {
     Scaffold(
         topBar = {
             VaachakHeader(
                 title = "Library Settings",
                 onBack = { navController.popBackStack() },
                 showBackButton = true,
-                isEink = state.isOfflineMode
+                isEink = state.isOfflineMode,
+                backButtonModifier = Modifier.tid("library_settings_back")
             )
         },
         containerColor = containerColor
@@ -72,7 +99,7 @@ fun LibrarySettingsScreen(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     // Style 1: Original
                     CoverStyleCard(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).tid("library_settings_cover_original"),
                         title = "Original ratio",
                         description = "Display original cover aspect ratio from metadata",
                         isSelected = prefs.coverAspectRatio == CoverAspectRatio.ORIGINAL,
@@ -83,7 +110,7 @@ fun LibrarySettingsScreen(
 
                     // Style 2: Uniform (NeoReader default)
                     CoverStyleCard(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).tid("library_settings_cover_uniform"),
                         title = "Uniform ratio",
                         description = "Uniform cover aspect ratio with image auto-fit (width & height)",
                         isSelected = prefs.coverAspectRatio == CoverAspectRatio.UNIFORM,
@@ -129,7 +156,11 @@ fun LibrarySettingsScreen(
                 Text("Bookshelf Settings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = contentColor)
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = "Smart Stacks, ${if (prefs.groupBySeries) "On" else "Off"}"
+                        },
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -137,7 +168,11 @@ fun LibrarySettingsScreen(
                         Text("Smart Stacks", style = MaterialTheme.typography.bodyLarge, color = contentColor)
                         Text("Automatically group books by author or series", style = MaterialTheme.typography.bodySmall, color = contentColor.copy(alpha = 0.6f))
                     }
-                    Switch(checked = prefs.groupBySeries, onCheckedChange = { viewModel.setGroupBySeries(it) })
+                    Switch(
+                        checked = prefs.groupBySeries,
+                        onCheckedChange = { viewModel.setGroupBySeries(it) },
+                        modifier = Modifier.tid("library_settings_smart_stacks")
+                    )
                 }
             }
 
@@ -166,6 +201,7 @@ fun LibrarySettingsScreen(
             }
         }
     }
+    }
 }
 
 // --- HELPER COMPONENTS ---
@@ -185,7 +221,11 @@ fun CoverStyleCard(
 
     Card(
         onClick = onClick,
-        modifier = modifier.height(180.dp),
+        modifier = modifier
+            .height(180.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$title, $description, ${if (isSelected) "Selected" else "Not Selected"}"
+            },
         border = BorderStroke(if (isSelected) 2.dp else 1.dp, borderColor),
         colors = CardDefaults.cardColors(containerColor = bgColor)
     ) {
@@ -223,7 +263,12 @@ fun CoverStyleCard(
 fun CoverElementToggle(label: String, isChecked: Boolean, onToggle: (Boolean) -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.clickable { onToggle(!isChecked) }.padding(horizontal = 4.dp, vertical = 8.dp)
+        modifier = Modifier
+            .clickable { onToggle(!isChecked) }
+            .padding(horizontal = 4.dp, vertical = 8.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$label, ${if (isChecked) "Checked" else "Unchecked"}"
+            }
     ) {
         Icon(
             imageVector = if (isChecked) Icons.Default.CheckCircle else Icons.Outlined.Circle,
@@ -246,7 +291,9 @@ fun DitheringChip(label: String, isSelected: Boolean, contentColor: Color, onCli
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = contentColor.copy(alpha = 0.1f),
             selectedLabelColor = contentColor
-        )
+        ),
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            contentDescription = "Dithering Mode: $label, ${if (isSelected) "Selected" else "Not Selected"}"
+        }
     )
 }
-

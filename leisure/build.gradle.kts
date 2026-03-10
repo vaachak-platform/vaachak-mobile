@@ -147,6 +147,19 @@ dependencies {
 
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.13")
     implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // Unit Testing core
+    testImplementation("junit:junit:4.13.2")
+
+    // Coroutines testing (for runTest and StandardTestDispatcher)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+
+    // MockK for mocking Dao and Repository classes
+    testImplementation("io.mockk:mockk:1.13.8")
+
+    // Turbine for cleanly testing Kotlin StateFlow/SharedFlow
+    testImplementation("app.cash.turbine:turbine:1.0.0")
+
 }
 
 tasks.dokkaHtml {

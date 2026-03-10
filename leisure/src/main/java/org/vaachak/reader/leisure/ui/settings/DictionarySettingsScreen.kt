@@ -27,18 +27,47 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,12 +131,13 @@ fun DictionarySettingsScreen(
 
     // --- 4. UI ---
 
+    TidScreen(Tid.Screen.dictionary) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Dictionary Settings") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onBack, modifier = Modifier.tid("dictionary_settings_back")) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
@@ -137,7 +167,11 @@ fun DictionarySettingsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { viewModel.setUseEmbeddedDictionary(false) }
-                            .padding(16.dp),
+                            .padding(16.dp)
+                            .semantics(mergeDescendants = true) {
+                                contentDescription = "Built-in English Dictionary, ${if (!useLocalDict) "Selected" else "Not Selected"}"
+                            }
+                            .tid("dictionary_source_builtin"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
@@ -158,7 +192,11 @@ fun DictionarySettingsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { viewModel.setUseEmbeddedDictionary(true) }
-                            .padding(16.dp),
+                            .padding(16.dp)
+                            .semantics(mergeDescendants = true) {
+                                contentDescription = "Custom Dictionary (StarDict), ${if (useLocalDict) "Selected" else "Not Selected"}"
+                            }
+                            .tid("dictionary_source_custom"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
@@ -180,7 +218,12 @@ fun DictionarySettingsScreen(
 
                 OutlinedCard(
                     onClick = { folderLauncher.launch(null) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .tid("dictionary_folder_select")
+                        .semantics(mergeDescendants = true) {
+                            contentDescription = "Select Dictionary Folder. Current: ${if (dictFolder.isNotBlank()) dictFolder else "None selected"}"
+                        }
                 ) {
                     Row(
                         modifier = Modifier.padding(16.dp),
@@ -217,5 +260,5 @@ fun DictionarySettingsScreen(
             }
         }
     }
+    }
 }
-

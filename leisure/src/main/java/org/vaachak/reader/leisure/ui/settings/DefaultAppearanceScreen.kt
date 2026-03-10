@@ -1,12 +1,26 @@
 package org.vaachak.reader.leisure.ui.settings
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
@@ -14,6 +28,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.readium.r2.navigator.preferences.FontFamily
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,12 +44,16 @@ fun DefaultAppearanceScreen(
     // Retrieve the active primary color from the theme to pass to components
     val primaryColor = MaterialTheme.colorScheme.primary
 
+    TidScreen(Tid.Screen.defaultAppearance) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Book Appearance") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.tid(Tid.ReaderSettings.close)
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
@@ -58,7 +79,8 @@ fun DefaultAppearanceScreen(
                 isEink = false, // Assuming standard screen here, or pass valid e-ink state if available
                 onCheckedChange = {
                     viewModel.updateReaderPreferences(readerPrefs.copy(publisherStyles = it))
-                }
+                },
+                modifier = Modifier.tid(Tid.ReaderSettings.togglePublisherStyles)
             )
 
             if (!readerPrefs.publisherStyles) {
@@ -97,7 +119,8 @@ fun DefaultAppearanceScreen(
                     range = 0.5f..2.5f,
                     unit = "x",
                     activeColor = primaryColor,
-                    enabled = true
+                    enabled = true,
+                    modifier = Modifier.tid(Tid.ReaderSettings.fontSizeSlider)
                 ) { newVal ->
                     viewModel.updateReaderPreferences(readerPrefs.copy(fontSize = newVal.toDouble()))
                 }
@@ -111,7 +134,8 @@ fun DefaultAppearanceScreen(
                     range = 1.0f..2.5f,
                     unit = "",
                     activeColor = primaryColor,
-                    enabled = true
+                    enabled = true,
+                    modifier = Modifier.tid(Tid.ReaderSettings.lineHeightSlider)
                 ) { newVal ->
                     viewModel.updateReaderPreferences(readerPrefs.copy(lineHeight = newVal.toDouble()))
                 }
@@ -120,13 +144,34 @@ fun DefaultAppearanceScreen(
                 SettingsSectionTitle("Page Color")
 
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    ThemeOption("Light", Color.White, Color.Black, readerPrefs.theme == "light", true) {
+                    ThemeOption(
+                        name = "Light",
+                        bg = Color.White,
+                        fg = Color.Black,
+                        selected = readerPrefs.theme == "light",
+                        enabled = true,
+                        modifier = Modifier.tid(Tid.ReaderSettings.themeLight)
+                    ) {
                         viewModel.updateReaderPreferences(readerPrefs.copy(theme = "light"))
                     }
-                    ThemeOption("Dark", Color(0xFF121212), Color.White, readerPrefs.theme == "dark", true) {
+                    ThemeOption(
+                        name = "Dark",
+                        bg = Color(0xFF121212),
+                        fg = Color.White,
+                        selected = readerPrefs.theme == "dark",
+                        enabled = true,
+                        modifier = Modifier.tid(Tid.ReaderSettings.themeDark)
+                    ) {
                         viewModel.updateReaderPreferences(readerPrefs.copy(theme = "dark"))
                     }
-                    ThemeOption("Sepia", Color(0xFFF5E6D3), Color(0xFF5F4B32), readerPrefs.theme == "sepia", true) {
+                    ThemeOption(
+                        name = "Sepia",
+                        bg = Color(0xFFF5E6D3),
+                        fg = Color(0xFF5F4B32),
+                        selected = readerPrefs.theme == "sepia",
+                        enabled = true,
+                        modifier = Modifier.tid(Tid.ReaderSettings.themeSepia)
+                    ) {
                         viewModel.updateReaderPreferences(readerPrefs.copy(theme = "sepia"))
                     }
                 }
@@ -145,5 +190,6 @@ fun DefaultAppearanceScreen(
                 }
             }
         }
+    }
     }
 }

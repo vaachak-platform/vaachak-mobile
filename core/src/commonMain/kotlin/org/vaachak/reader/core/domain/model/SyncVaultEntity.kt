@@ -23,13 +23,17 @@
 package org.vaachak.reader.core.domain.model
 
 import androidx.room.Entity
-import androidx.room.PrimaryKey
 
-@Entity(tableName = "sync_vault_queue")
+@Entity(
+    tableName = "sync_vault_queue",
+    primaryKeys = ["profileId", "entryKey"] // Composite key: Unique per user, per item
+)
 data class SyncVaultEntity(
-    @PrimaryKey val bookHash: String,
-    val encryptedBlob: String, // The AES-256-GCM ciphertext
-    val iv: String,            // Initialization Vector
-    val remoteUpdatedAt: Long, // Server timestamp for conflict resolution
-    val needsPush: Boolean = false // True if this device created the blob and needs to upload it
+    val profileId: String,         // NEW: Required for local Multi-Tenant isolation
+    val entryKey: String,          // CHANGED: Replaces bookHash (e.g., "book_123" or "highlight_abc")
+    val encryptedBlob: String,     // Your AES-256-GCM ciphertext
+    val iv: String,                // Your Initialization Vector
+    val remoteUpdatedAt: Long,     // Server timestamp for conflict resolution
+    val needsPush: Boolean = false,// True if this device created the blob and needs to upload it
+    val isDeleted: Boolean = false // NEW: Tombstone flag for soft-deleting items across devices
 )

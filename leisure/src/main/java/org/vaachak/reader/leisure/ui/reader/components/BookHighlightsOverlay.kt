@@ -24,23 +24,45 @@ package org.vaachak.reader.leisure.ui.reader.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.vaachak.reader.core.domain.model.HighlightEntity
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.tid
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,35 +76,29 @@ fun BookHighlightsOverlay(
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
     Scaffold(
+        modifier = Modifier.tid(Tid.Screen.bookHighlights),
         topBar = {
-            Surface(
-                color = containerColor,
-                contentColor = contentColor,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                // Close icon on LEFT
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = "Highlights & Notes",
-                            fontWeight = FontWeight.Bold
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onDismiss) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Close Highlights"
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = containerColor,
-                        titleContentColor = contentColor,
-                        navigationIconContentColor = contentColor
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Highlights & Notes",
+                        fontWeight = FontWeight.Bold
                     )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onDismiss, modifier = Modifier.tid(Tid.BookHighlights.close)) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close Highlights"
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = containerColor,
+                    titleContentColor = contentColor,
+                    navigationIconContentColor = contentColor
                 )
-            }
+            )
         },
         containerColor = containerColor
     ) { padding ->
@@ -92,14 +108,19 @@ fun BookHighlightsOverlay(
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Icon(Icons.Default.Bookmark, null, tint = Color.Gray, modifier = Modifier.size(48.dp))
+                    Icon(Icons.Default.Bookmark, contentDescription = "No highlights", tint = Color.Gray, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.height(16.dp))
                     Text("No highlights yet.", color = Color.Gray)
                 }
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(highlights) { highlight ->
-                        HighlightItem(highlight, isEink, onHighlightClick)
+                    itemsIndexed(highlights) { index, highlight ->
+                        HighlightItem(
+                            highlight = highlight,
+                            isEink = isEink,
+                            isFirstVisibleItem = index == 0,
+                            onClick = onHighlightClick
+                        )
                         HorizontalDivider(
                             thickness = 0.5.dp,
                             color = if(isEink) Color.LightGray else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -115,6 +136,7 @@ fun BookHighlightsOverlay(
 fun HighlightItem(
     highlight: HighlightEntity,
     isEink: Boolean,
+    isFirstVisibleItem: Boolean,
     onClick: (HighlightEntity) -> Unit
 ) {
     val textColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
@@ -129,7 +151,11 @@ fun HighlightItem(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (isFirstVisibleItem) Modifier.tid(Tid.BookHighlights.first) else Modifier)
             .clickable { onClick(highlight) }
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Highlight: ${highlight.text}, Tag: ${safeTag ?: "None"}"
+            }
             .padding(16.dp)
     ) {
         // 1. Tag Label (if exists) - Now using the local safeTag
@@ -167,4 +193,3 @@ fun HighlightItem(
         }
     }
 }
-

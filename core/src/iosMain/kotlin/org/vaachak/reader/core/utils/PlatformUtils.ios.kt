@@ -22,8 +22,8 @@
 
 package org.vaachak.reader.core.utils
 
-import platform.Foundation.NSUUID
 import platform.Foundation.NSDate
+import platform.Foundation.NSUUID
 import platform.Foundation.timeIntervalSince1970
 
 actual fun generateUuid(): String = NSUUID().UUIDString()

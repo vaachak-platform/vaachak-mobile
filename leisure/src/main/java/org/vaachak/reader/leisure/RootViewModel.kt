@@ -26,5 +26,6 @@ class RootViewModel @Inject constructor(
     // INSTANT-PATH: Routing logic
     val hasCompletedOnboarding = vaultRepository.hasCompletedOnboarding
     val isMultiUserMode = vaultRepository.isMultiUserMode
+    val activeVaultId = vaultRepository.activeVaultId
     val isOfflineMode = vaultRepository.isOfflineMode
 }

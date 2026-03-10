@@ -22,22 +22,40 @@
 
 package org.vaachak.reader.leisure.ui.reader.components
 
-import androidx.compose.foundation.background // <--- FIXED: Added missing import
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.readium.r2.shared.publication.Link
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.tid
+import org.vaachak.reader.leisure.ui.testability.tids
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,12 +75,13 @@ fun TableOfContents(
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
     Scaffold(
+        modifier = Modifier.tid(Tid.Screen.toc),
         topBar = {
             TopAppBar(
                 title = { Text("Table of Contents") },
                 // MOVED TO LEFT (navigationIcon)
                 navigationIcon = {
-                    IconButton(onClick = onDismiss) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.tid(Tid.Reader.TOC_CLOSE)) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close TOC",
@@ -90,7 +109,7 @@ fun TableOfContents(
             LazyColumn(
                 modifier = Modifier.padding(padding).fillMaxSize()
             ) {
-                items(flattenedToc) { (depth, link) ->
+                itemsIndexed(flattenedToc) { index, (depth, link) ->
                     // 1. VISUAL CHECK ONLY: Strip fragments for highlighting
                     val isActive = remember(currentHref, link.href) {
                         isCurrentChapter(currentHref, link.href.toString())
@@ -99,6 +118,7 @@ fun TableOfContents(
                     TocItem(
                         link = link,
                         depth = depth,
+                        isFirstVisibleItem = index == 0,
                         isActive = isActive,
                         isEink = isEink,
                         // 2. NAVIGATION: Pass original link with fragments intact
@@ -129,6 +149,7 @@ private fun isCurrentChapter(currentHref: String?, linkHref: String): Boolean {
 fun TocItem(
     link: Link,
     depth: Int,
+    isFirstVisibleItem: Boolean,
     isActive: Boolean,
     isEink: Boolean,
     onClick: () -> Unit
@@ -152,7 +173,14 @@ fun TocItem(
         modifier = Modifier
             .fillMaxWidth()
             .background(backgroundColor) // Highlight background
+            .tids(
+                if (isFirstVisibleItem) Tid.Reader.TOC_ITEM_FIRST else "",
+                Tid.Reader.tocItemByHref(link.href.toString())
+            )
             .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Chapter: ${link.title ?: "Untitled Section"}, ${if (isActive) "Current" else ""}"
+            }
             .padding(start = paddingStart, end = 16.dp, top = 16.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

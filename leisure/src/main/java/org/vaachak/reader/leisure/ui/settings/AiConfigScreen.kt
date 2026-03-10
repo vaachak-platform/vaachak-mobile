@@ -22,23 +22,46 @@
 
 package org.vaachak.reader.leisure.ui.settings
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 import org.vaachak.reader.core.domain.model.ThemeMode
+import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
 
 @Composable
 fun AiConfigScreen(
@@ -54,6 +77,7 @@ fun AiConfigScreen(
     var token by remember { mutableStateOf(state.aiConfig.authToken) }
     var autoSave by remember { mutableStateOf(state.aiConfig.autoSaveRecaps) }
 
+    TidScreen(Tid.Screen.aiConfig) {
     Scaffold(
         topBar = {
             VaachakHeader(
@@ -76,12 +100,18 @@ fun AiConfigScreen(
                 value = key,
                 onValueChange = { key = it },
                 label = { Text("Gemini API Key") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().tid("ai_config_gemini_key"),
                 singleLine = true,
                 visualTransformation = if (state.isAiMasked) PasswordVisualTransformation() else VisualTransformation.None,
                 trailingIcon = {
-                    IconButton(onClick = { viewModel.setAiMasked(!state.isAiMasked) }) {
-                        Icon(if (state.isAiMasked) Icons.Default.Visibility else Icons.Default.VisibilityOff, "Toggle")
+                    IconButton(
+                        onClick = { viewModel.setAiMasked(!state.isAiMasked) },
+                        modifier = Modifier.tid("ai_config_toggle_mask")
+                    ) {
+                        Icon(
+                            imageVector = if (state.isAiMasked) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = if (state.isAiMasked) "Show API Key" else "Hide API Key"
+                        )
                     }
                 }
             )
@@ -94,7 +124,7 @@ fun AiConfigScreen(
                 value = url,
                 onValueChange = { url = it },
                 label = { Text("Cloudflare AI URL") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().tid("ai_config_cloudflare_url"),
                 singleLine = true
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -102,19 +132,29 @@ fun AiConfigScreen(
                 value = token,
                 onValueChange = { token = it },
                 label = { Text("Cloudflare Token") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().tid("ai_config_cloudflare_token"),
                 singleLine = true,
                 visualTransformation = if (state.isAiMasked) PasswordVisualTransformation() else VisualTransformation.None
             )
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Auto-Save Recaps, ${if (autoSave) "On" else "Off"}"
+                    }
+            ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Auto-Save Recaps", style = MaterialTheme.typography.bodyLarge)
                     Text("Save generated summaries to history", style = MaterialTheme.typography.bodySmall)
                 }
-                Switch(checked = autoSave, onCheckedChange = { autoSave = it })
+                Switch(
+                    checked = autoSave,
+                    onCheckedChange = { autoSave = it },
+                    modifier = Modifier.tid("ai_config_auto_save")
+                )
             }
 
             Spacer(modifier = Modifier.weight(1f)) // Pushes the button to the bottom
@@ -125,10 +165,11 @@ fun AiConfigScreen(
                     viewModel.saveAiConfig(key, url, token, autoSave)
                     onBack() // Go back after saving
                 },
-                modifier = Modifier.fillMaxWidth().height(50.dp)
+                modifier = Modifier.fillMaxWidth().height(50.dp).tid("ai_config_save")
             ) {
                 Text("Save Changes", fontWeight = FontWeight.Bold)
             }
         }
+    }
     }
 }

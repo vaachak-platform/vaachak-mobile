@@ -24,9 +24,7 @@ package org.vaachak.reader.core.data.di
 
 import android.content.Context
 import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import dagger.Module
 import dagger.Provides
@@ -36,16 +34,17 @@ import dagger.hilt.components.SingletonComponent
 import org.vaachak.reader.core.data.local.AppDatabase
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
-import javax.inject.Singleton
-import javax.inject.Qualifier
 import org.vaachak.reader.core.data.local.OpdsDao
-import org.vaachak.reader.core.data.local.getDatabaseBuilder
-import org.vaachak.reader.core.security.CryptoManager
-import org.vaachak.reader.core.data.local.createDataStore
-import org.vaachak.reader.core.data.repository.VaultRepository
-import java.io.File
 import org.vaachak.reader.core.data.local.ProfileDao
 import org.vaachak.reader.core.data.local.SyncVaultDao
+import org.vaachak.reader.core.data.local.createDataStore
+import org.vaachak.reader.core.data.local.getDatabaseBuilder
+import org.vaachak.reader.core.data.repository.VaultRepository
+import org.vaachak.reader.core.security.CryptoManager
+import java.io.File
+import javax.inject.Qualifier
+import javax.inject.Singleton
+
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {

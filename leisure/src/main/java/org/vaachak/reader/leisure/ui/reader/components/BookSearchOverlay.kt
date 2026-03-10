@@ -23,20 +23,40 @@
 package org.vaachak.reader.leisure.ui.reader.components
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +65,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.readium.r2.shared.publication.Locator
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.tid
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +84,7 @@ fun BookSearchOverlay(
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
     Scaffold(
+        modifier = Modifier.tid(Tid.Screen.readerSearch),
         topBar = {
             Surface(
                 color = containerColor,
@@ -73,7 +96,7 @@ fun BookSearchOverlay(
                         modifier = Modifier.fillMaxWidth().padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onDismiss) {
+                        IconButton(onClick = onDismiss, modifier = Modifier.tid(Tid.Reader.SEARCH_CLOSE)) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Exit Search")
                         }
 
@@ -96,14 +119,14 @@ fun BookSearchOverlay(
                             trailingIcon = {
                                 if (query.isNotEmpty()) {
                                     IconButton(onClick = { onQueryChange("") }) {
-                                        Icon(Icons.Default.Close, "Clear")
+                                        Icon(Icons.Default.Close, contentDescription = "Clear Search")
                                     }
                                 }
                             }
                         )
 
                         IconButton(onClick = { onSearch(query) }) {
-                            Icon(Icons.Default.Search, "Search")
+                            Icon(Icons.Default.Search, contentDescription = "Search")
                         }
                     }
                     HorizontalDivider()
@@ -126,8 +149,14 @@ fun BookSearchOverlay(
                 )
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(results) { locator ->
-                        SearchResultItem(locator, query, isEink, onResultClick)
+                    itemsIndexed(results) { index, locator ->
+                        SearchResultItem(
+                            locator = locator,
+                            query = query,
+                            isEink = isEink,
+                            isFirstResult = index == 0,
+                            onClick = onResultClick
+                        )
                         HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
                     }
                 }
@@ -141,6 +170,7 @@ fun SearchResultItem(
     locator: Locator,
     query: String,
     isEink: Boolean,
+    isFirstResult: Boolean,
     onClick: (Locator) -> Unit
 ) {
     // Colors: Distinct highlighting based on mode
@@ -195,7 +225,11 @@ fun SearchResultItem(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (isFirstResult) Modifier.tid(Tid.Reader.SEARCH_RESULT_FIRST) else Modifier)
             .clickable { onClick(locator) }
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Search Result: ${annotatedText.text}, Chapter: ${locator.title ?: "Unknown"}"
+            }
             .padding(16.dp)
     ) {
         Text(

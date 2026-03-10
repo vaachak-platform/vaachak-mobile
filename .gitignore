@@ -45,3 +45,5 @@ android/
 native/
 AppConfig.example.kt
 .github/
+
+AGENTS.md

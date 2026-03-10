@@ -23,7 +23,6 @@
 package org.vaachak.reader.core.data.dictionary
 
 import android.content.Context
-import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -32,6 +31,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -93,14 +93,14 @@ class JsonDictionaryProvider @Inject constructor(
 
             // Only return if the definition actually contains text
             if (!definition.isNullOrBlank()) {
-                Log.d("VaachakDictDebug", "Word '$word' found with definition: ${definition.take(50)}...")
+
                 return@withContext definition
             }
 
-            Log.d("VaachakDictDebug", "Word '$word' (lemma: $lemma) has no valid definition in JSON")
+
             null
         } catch (e: Exception) {
-            Log.e("VaachakDict", "JSON Lookup failed", e)
+         Timber.e(e, "JSON Lookup failed")
             null
         }
     }
@@ -129,7 +129,7 @@ class JsonDictionaryProvider @Inject constructor(
                 "<b>($type)</b> $definition" // Using B for bold to help e-ink contrast
             }
         } catch (e: Exception) {
-            Log.e("VaachakDict", "Format error: ${e.message}")
+            Timber.e(e, "Format error: ${e.message}")
             "Format error in dictionary data."
         }
     }

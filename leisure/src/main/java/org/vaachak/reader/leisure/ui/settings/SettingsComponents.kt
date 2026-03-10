@@ -26,7 +26,17 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -34,7 +44,18 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedIconButton
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +63,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -50,7 +73,7 @@ import androidx.compose.ui.unit.sp
 import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.navigator.preferences.Theme
 import org.vaachak.reader.core.domain.model.UserProfile
-import org.vaachak.reader.leisure.R // Ensure R is imported
+import org.vaachak.reader.leisure.R
 import java.util.Locale
 
 // --- SHARED FONT DEFINITIONS ---
@@ -120,7 +143,10 @@ fun SettingsTile(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (subtitle != null) "$title, $subtitle" else title
+            },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
@@ -160,11 +186,20 @@ fun UserProfileCard(
     onLoginClick: () -> Unit,
     onManageClick: () -> Unit
 ) {
+    val description = if (profile.isAuthenticated) {
+        "Profile: ${profile.username ?: "User"}, Sync Active on ${profile.deviceName}"
+    } else {
+        "Sign in to Sync, Backup your library & progress"
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp)
-            .clickable { if (profile.isAuthenticated) onManageClick() else onLoginClick() },
+            .clickable { if (profile.isAuthenticated) onManageClick() else onLoginClick() }
+            .semantics(mergeDescendants = true) {
+                contentDescription = description
+            },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (profile.isAuthenticated)
@@ -319,7 +354,8 @@ fun FontFamilyGrid(
                             .clip(RoundedCornerShape(8.dp))
                             .background(bgColor)
                             .border(if(isSelected) 2.dp else 1.dp, borderColor, RoundedCornerShape(8.dp))
-                            .clickable(enabled = enabled) { onSelect(family) },
+                            .clickable(enabled = enabled) { onSelect(family) }
+                            .semantics { contentDescription = "Font Family: $name" },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -346,6 +382,7 @@ fun LabelledSlider(
     unit: String,
     activeColor: Color,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
     onValueChange: (Float) -> Unit
 ) {
     val isOverridden = (value != null)
@@ -354,7 +391,9 @@ fun LabelledSlider(
     val labelText = if (isOverridden) String.format(Locale.US, "%.1f%s", value, unit) else "Auto"
     val labelFontWeight = if (isOverridden) FontWeight.Bold else FontWeight.Normal
 
-    Column {
+    Column(modifier = modifier.semantics(mergeDescendants = true) {
+        contentDescription = "$label, $labelText"
+    }) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = MaterialTheme.typography.bodySmall, fontSize = 12.sp, color = if(enabled) Color.Unspecified else Color.Gray)
             Text(labelText, style = MaterialTheme.typography.bodySmall, fontSize = 12.sp, fontWeight = labelFontWeight, color = currentColor)
@@ -384,11 +423,15 @@ fun ThemeOption(
     fg: Color,
     selected: Boolean,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(enabled = enabled) { onClick() }
+        modifier = modifier.clickable(enabled = enabled) { onClick() }
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Theme: $name, ${if (selected) "Selected" else "Not Selected"}"
+            }
     ) {
         Box(
             modifier = Modifier
@@ -437,7 +480,10 @@ fun CompactSettingsToggle(
             .clip(RoundedCornerShape(8.dp))
             .background(bgColor)
             .clickable { onCheckedChange(!checked) }
-            .padding(12.dp),
+            .padding(12.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$title, $subtitle, ${if (checked) "On" else "Off"}"
+            },
         horizontalAlignment = Alignment.Start
     ) {
         Row(
@@ -481,6 +527,9 @@ fun AlignmentOption(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.width(60.dp).clickable(enabled = enabled) { onClick() }
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Alignment: $label, ${if (selected) "Selected" else "Not Selected"}"
+            }
     ) {
         Box(
             modifier = Modifier
@@ -553,7 +602,13 @@ fun TtsOptionChip(label: String, selected: Boolean, isEink: Boolean, onClick: ()
 @Composable
 fun SettingsToggleTile(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$title, $subtitle, ${if (checked) "On" else "Off"}"
+            }
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -561,9 +616,10 @@ fun SettingsToggleTile(title: String, subtitle: String, checked: Boolean, onChec
             Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
+
 @Composable
 fun TtsStepperSetting(
     label: String,
@@ -572,16 +628,24 @@ fun TtsStepperSetting(
     onValueChange: (Float) -> Unit,
     valueFormatter: (Float) -> String
 ) {
-    Column {
+    Column(
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            contentDescription = "$label: ${valueFormatter(value)}"
+        }
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(8.dp))
             Text(label, style = MaterialTheme.typography.bodyMedium)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            OutlinedIconButton(onClick = { onValueChange(value - 0.1f) }) { Icon(Icons.Default.Remove, null) }
+            OutlinedIconButton(onClick = { onValueChange(value - 0.1f) }) {
+                Icon(Icons.Default.Remove, contentDescription = "Decrease $label")
+            }
             Text(text = valueFormatter(value), style = MaterialTheme.typography.headlineSmall)
-            OutlinedIconButton(onClick = { onValueChange(value + 0.1f) }) { Icon(Icons.Default.Add, null) }
+            OutlinedIconButton(onClick = { onValueChange(value + 0.1f) }) {
+                Icon(Icons.Default.Add, contentDescription = "Increase $label")
+            }
         }
     }
 }

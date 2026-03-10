@@ -25,13 +25,19 @@ package org.vaachak.reader.leisure.ui.highlights
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
-import org.vaachak.reader.core.domain.model.HighlightEntity
 import org.vaachak.reader.core.data.repository.SettingsRepository
-import org.vaachak.reader.core.data.repository.VaultRepository // <-- IMPORT VAULT
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
+import org.vaachak.reader.core.data.repository.VaultRepository
+import org.vaachak.reader.core.domain.model.HighlightEntity
 import javax.inject.Inject
 
 @HiltViewModel

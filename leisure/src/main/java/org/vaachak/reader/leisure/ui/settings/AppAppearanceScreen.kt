@@ -22,22 +22,41 @@
 
 package org.vaachak.reader.leisure.ui.settings
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Contrast
-import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.vaachak.reader.core.domain.model.ThemeMode
-import androidx.compose.ui.platform.LocalContext // Needed for Context
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
 import org.vaachak.reader.leisure.utils.EinkHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,12 +67,13 @@ fun AppAppearanceScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    TidScreen(Tid.Screen.appAppearance) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("App Appearance") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = onBack, modifier = Modifier.tid("app_appearance_back")) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
@@ -72,13 +92,34 @@ fun AppAppearanceScreen(
             Text("INTERFACE THEME", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
 
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                ThemeOption("Light", Color(0xFFF0F0F0), Color.Black, uiState.themeMode == ThemeMode.LIGHT, true) {
+                ThemeOption(
+                    name = "Light",
+                    bg = Color(0xFFF0F0F0),
+                    fg = Color.Black,
+                    selected = uiState.themeMode == ThemeMode.LIGHT,
+                    enabled = true,
+                    modifier = Modifier.tid("app_appearance_theme_light")
+                ) {
                     viewModel.setAppTheme(ThemeMode.LIGHT)
                 }
-                ThemeOption("Dark", Color(0xFF1E1E1E), Color.White, uiState.themeMode == ThemeMode.DARK, true) {
+                ThemeOption(
+                    name = "Dark",
+                    bg = Color(0xFF1E1E1E),
+                    fg = Color.White,
+                    selected = uiState.themeMode == ThemeMode.DARK,
+                    enabled = true,
+                    modifier = Modifier.tid("app_appearance_theme_dark")
+                ) {
                     viewModel.setAppTheme(ThemeMode.DARK)
                 }
-                ThemeOption("E-Ink", Color.White, Color.Black, uiState.themeMode == ThemeMode.E_INK, true) {
+                ThemeOption(
+                    name = "E-Ink",
+                    bg = Color.White,
+                    fg = Color.Black,
+                    selected = uiState.themeMode == ThemeMode.E_INK,
+                    enabled = true,
+                    modifier = Modifier.tid("app_appearance_theme_eink")
+                ) {
                     viewModel.setAppTheme(ThemeMode.E_INK)
                 }
             }
@@ -89,7 +130,7 @@ fun AppAppearanceScreen(
 
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Contrast, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.Contrast, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
                         Text("E-Ink Sharpness", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                     }
@@ -104,6 +145,7 @@ fun AppAppearanceScreen(
                         onValueChange = { viewModel.setEinkContrast(it) },
                         valueRange = 0f..1f,
                         steps = 10,
+                        modifier = Modifier.tid("app_appearance_contrast_slider"),
                         // [NEW] Trigger Refresh on Release
                         onValueChangeFinished = {
                             // 1. Log or logic in ViewModel
@@ -117,5 +159,5 @@ fun AppAppearanceScreen(
             }
         }
     }
+    }
 }
-

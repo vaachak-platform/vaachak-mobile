@@ -23,7 +23,6 @@
 package org.vaachak.reader.core.data.remote.dto
 
 import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 
 // Response from https://gutendex.com/books
 data class GutendexResponse(

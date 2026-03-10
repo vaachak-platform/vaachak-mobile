@@ -6,7 +6,6 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 import org.vaachak.reader.core.domain.model.ProfileEntity
-import org.vaachak.reader.core.utils.getCurrentTimeMillis
 
 @Dao
 interface ProfileDao {

@@ -45,6 +45,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -55,27 +56,30 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import org.vaachak.reader.core.domain.model.TtsSettings
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.readium.navigator.media.tts.android.AndroidTtsEngine
+import org.vaachak.reader.core.domain.model.TtsSettings
 import org.vaachak.reader.leisure.ui.reader.ReaderViewModel
 import org.vaachak.reader.leisure.ui.settings.TtsOptionChip
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.tid
 import java.util.Locale
 
 
@@ -147,6 +151,7 @@ fun TtsSettingsBottomSheet(
         Box(contentAlignment = Alignment.BottomCenter) {
             Column(
                 modifier = Modifier
+                    .tid(Tid.Screen.ttsSettings)
                     .fillMaxWidth()
                     .background(containerColor, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                     // Block clicks from passing through the sheet to the scrim behind it
@@ -168,6 +173,17 @@ fun TtsSettingsBottomSheet(
                             .size(width = 32.dp, height = 4.dp)
                             .background(contentColor.copy(alpha = 0.4f), RoundedCornerShape(2.dp))
                     )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("TTS Settings", style = MaterialTheme.typography.titleMedium, color = contentColor, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss, modifier = Modifier.tid(Tid.Tts.settingsClose)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close TTS Settings", tint = contentColor)
+                    }
                 }
 
                 // --- ROW 1: SPEED & PITCH (Side-by-Side) ---
@@ -203,12 +219,14 @@ fun TtsSettingsBottomSheet(
                         Box {
                             OutlinedButton(
                                 onClick = { langExpanded = true },
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+                                    contentDescription = "Language Selection: $currentLangLabel"
+                                },
                                 contentPadding = PaddingValues(horizontal = 8.dp)
                             ) {
                                 Text(currentLangLabel, maxLines = 1, overflow = TextOverflow.Ellipsis, color = contentColor)
                                 Spacer(Modifier.weight(1f))
-                                Icon(Icons.Default.ArrowDropDown, null, tint = contentColor)
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = contentColor)
                             }
                             DropdownMenu(
                                 expanded = langExpanded,
@@ -248,6 +266,7 @@ fun TtsSettingsBottomSheet(
                                 value = activeVoiceLabel,
                                 onValueChange = {},
                                 readOnly = true,
+                                label = { Text("Voice / Accent", color = contentColor) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = voiceExpanded) },
                                 colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(
                                     focusedTextColor = contentColor,
@@ -258,6 +277,9 @@ fun TtsSettingsBottomSheet(
                                 modifier = Modifier
                                     .menuAnchor()
                                     .fillMaxWidth()
+                                    .semantics(mergeDescendants = true) {
+                                        contentDescription = "Voice Selection: $activeVoiceLabel"
+                                    }
                             )
 
                             ExposedDropdownMenu(
@@ -306,7 +328,13 @@ fun TtsSettingsBottomSheet(
 
                     Column(horizontalAlignment = Alignment.End) {
                         Text("Auto-Turn Pages", style = MaterialTheme.typography.labelSmall, color = contentColor.copy(alpha = 0.7f))
-                        Switch(checked = ttsSettings.isAutoPageTurnEnabled, onCheckedChange = onAutoPageTurnChange)
+                        Switch(
+                            checked = ttsSettings.isAutoPageTurnEnabled,
+                            onCheckedChange = onAutoPageTurnChange,
+                            modifier = Modifier.semantics(mergeDescendants = true) {
+                                contentDescription = "Auto-Turn Pages, ${if (ttsSettings.isAutoPageTurnEnabled) "On" else "Off"}"
+                            }
+                        )
                     }
                 }
             }
@@ -320,10 +348,13 @@ fun CompactStepper(title: String, value: Float, onValueChange: (Float) -> Unit, 
     Column(modifier = modifier) {
         Text(title, style = MaterialTheme.typography.labelSmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onValueChange(value - 0.1f) }) { Icon(Icons.Default.Remove, null) }
+            IconButton(onClick = { onValueChange(value - 0.1f) }) {
+                Icon(Icons.Default.Remove, contentDescription = "Decrease $title")
+            }
             Text(format(value), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            IconButton(onClick = { onValueChange(value + 0.1f) }) { Icon(Icons.Default.Add, null) }
+            IconButton(onClick = { onValueChange(value + 0.1f) }) {
+                Icon(Icons.Default.Add, contentDescription = "Increase $title")
+            }
         }
     }
 }
-

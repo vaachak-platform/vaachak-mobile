@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Settings
@@ -43,12 +44,24 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.node.DelegatableNode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -68,6 +81,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
+import org.vaachak.reader.core.data.repository.VaultRepository
 import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.core.domain.model.ThemeMode
 import org.vaachak.reader.leisure.navigation.Screen
@@ -84,20 +98,20 @@ import org.vaachak.reader.leisure.ui.settings.AppAppearanceScreen
 import org.vaachak.reader.leisure.ui.settings.DefaultAppearanceScreen
 import org.vaachak.reader.leisure.ui.settings.DictionarySettingsScreen
 import org.vaachak.reader.leisure.ui.settings.LibrarySettingsScreen
-import org.vaachak.reader.leisure.ui.settings.ProfileViewModel
 import org.vaachak.reader.leisure.ui.settings.ReaderProfilesScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsScreen
 import org.vaachak.reader.leisure.ui.settings.SettingsViewModel
 import org.vaachak.reader.leisure.ui.settings.SyncSettingsScreen
 import org.vaachak.reader.leisure.ui.settings.TtsSettingsScreen
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.tid
+import org.vaachak.reader.leisure.ui.testability.tids
 import org.vaachak.reader.leisure.ui.theme.VaachakTheme
 import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 import java.util.zip.ZipFile
-import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.ui.text.font.FontWeight
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
@@ -159,31 +173,39 @@ class MainActivity : AppCompatActivity() {
             val einkContrast by rootViewModel.einkContrastVal.collectAsState()
             val hasCompletedOnboarding by rootViewModel.hasCompletedOnboarding.collectAsState(initial = false)
             val isMultiUser by rootViewModel.isMultiUserMode.collectAsState(initial = false)
+            val activeVaultId by rootViewModel.activeVaultId.collectAsState(initial = VaultRepository.DEFAULT_VAULT_ID)
             val isOffline by rootViewModel.isOfflineMode.collectAsState(initial = true)
 
             val isEink = currentTheme == ThemeMode.E_INK
 
-            val startDestination = remember(hasCompletedOnboarding, isMultiUser) {
-                if (!hasCompletedOnboarding) "welcome"
-                else if (isMultiUser) "profile_picker"
+            val startDestination = remember(hasCompletedOnboarding, isMultiUser, activeVaultId) {
+                if (!hasCompletedOnboarding) "profile_picker"
+                else if (isMultiUser && activeVaultId == VaultRepository.DEFAULT_VAULT_ID) "profile_picker"
                 else Screen.Library.route
             }
 
             CompositionLocalProvider(
                 LocalIndication provides if (isEink) NoIndication else LocalIndication.current
             ) {
-                VaachakTheme(themeMode = currentTheme, contrast = einkContrast) {
-                    Scaffold(
-                        containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.background
-                    ) { padding ->
-                        Surface(
-                            modifier = Modifier.padding(padding).fillMaxSize(),
-                            color = if (isEink) Color.White else MaterialTheme.colorScheme.background
-                        ) {
-                            NavHost(
-                                navController = navController,
-                                startDestination = startDestination
+                // Maestro's `id:` selector maps to Android resource-id, so this must wrap
+                // the full Compose hierarchy to surface all test tags from screens and overlays.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .semantics { testTagsAsResourceId = true }
+                ) {
+                    VaachakTheme(themeMode = currentTheme, contrast = einkContrast) {
+                        Scaffold(
+                            containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.background
+                        ) { padding ->
+                            Surface(
+                                modifier = Modifier.padding(padding).fillMaxSize(),
+                                color = if (isEink) Color.White else MaterialTheme.colorScheme.background
                             ) {
+                                NavHost(
+                                    navController = navController,
+                                    startDestination = startDestination
+                                ) {
                                 composable("welcome") {
                                     val settingsViewModel: SettingsViewModel = hiltViewModel()
                                     WelcomeScreen(
@@ -204,7 +226,7 @@ class MainActivity : AppCompatActivity() {
                                     ProfilePickerScreen(
                                         isEink = isEink,
                                         viewModel = profileViewModel,
-                                        onProfileSelected = { profileId ->
+                                        onProfileSelected = {
                                             navController.navigate(Screen.Library.route) {
                                                 popUpTo("profile_picker") { inclusive = true }
                                             }
@@ -218,8 +240,8 @@ class MainActivity : AppCompatActivity() {
                                         bookshelfViewModel = bookshelfViewModel,
                                         isEink = isEink,
                                         isMultiUser = isMultiUser, // <-- 1. PASS IT DOWN HERE
-                                        onBookClick = { uri ->
-                                            val book = bookshelfViewModel.uiState.value.findBookByUri(uri)
+                                        onBookClick = { bookHash ->
+                                            val book = bookshelfViewModel.uiState.value.findBookByHash(bookHash)
                                             if (book != null) {
                                                 navController.navigate(Screen.Reader.createRoute(book.bookHash, book.lastCfiLocation))
                                             }
@@ -280,6 +302,7 @@ class MainActivity : AppCompatActivity() {
                                 composable(Screen.AppAppearance.route) { AppAppearanceScreen(onBack = { navController.popBackStack() }) }
                                 composable(Screen.Dictionary.route) { DictionarySettingsScreen(onBack = { navController.popBackStack() }) }
                                 composable(Screen.Bookshelf.route) { LibrarySettingsScreen(navController = navController) }
+                                }
                             }
                         }
                     }
@@ -484,8 +507,12 @@ fun MainAppScreen(
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
+                                .tid(Tid.Vault.switchProfile)
                                 .clickable { onSwitchProfileClick() }
                                 .padding(4.dp)
+                                .semantics(mergeDescendants = true) {
+                                    contentDescription = "Switch Profile, Current: ${activeProfile?.name ?: "Guest"}"
+                                }
                         ) {
                             Text(
                                 text = activeProfile?.name ?: "Guest",
@@ -493,7 +520,7 @@ fun MainAppScreen(
                                 color = contentColor
                             )
                             Spacer(Modifier.width(8.dp))
-                            Icon(Icons.Default.AccountCircle, contentDescription = "Switch Profile", tint = contentColor)
+                            Icon(Icons.Default.AccountCircle, contentDescription = null, tint = contentColor)
                         }
                     }
                 }
@@ -511,7 +538,26 @@ fun MainAppScreen(
                             3 -> Icons.Default.Settings
                             else -> Icons.Default.Book
                         }
-                        Tab(selected = selectedTabIndex == index, onClick = { selectedTabIndex = index }, text = { Text(title) }, icon = { Icon(icon, contentDescription = title) })
+                        val tabTid = when (index) {
+                            0 -> Tid.Tabs.books
+                            1 -> Tid.Tabs.comics
+                            2 -> Tid.Tabs.audio
+                            3 -> Tid.Tabs.settings
+                            else -> Tid.Tabs.books
+                        }
+                        Tab(
+                            selected = selectedTabIndex == index,
+                            onClick = { selectedTabIndex = index },
+                            modifier = if (index == 3) {
+                                Modifier.tids(Tid.Bookshelf.SETTINGS_TAB, Tid.Bookshelf.OPEN_SETTINGS)
+                            } else {
+                                Modifier.tid(tabTid)
+                            }.semantics(mergeDescendants = true) {
+                                contentDescription = "$title Tab, ${if (selectedTabIndex == index) "Selected" else "Not Selected"}"
+                            },
+                            text = { Text(title) },
+                            icon = { Icon(icon, contentDescription = null) }
+                        )
                     }
                 }
             }
@@ -527,6 +573,3 @@ fun MainAppScreen(
         }
     }
 }
-
-
-

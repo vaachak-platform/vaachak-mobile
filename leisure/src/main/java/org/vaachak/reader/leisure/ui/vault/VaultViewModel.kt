@@ -33,7 +33,7 @@ class VaultViewModel @Inject constructor(
 
     fun switchVault(newVaultId: String) {
         viewModelScope.launch {
-            vaultRepository.setActiveVault(newVaultId)
+            vaultRepository.setActiveVaultId(newVaultId)
         }
     }
 

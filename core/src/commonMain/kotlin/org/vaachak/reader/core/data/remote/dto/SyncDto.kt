@@ -1,33 +1,12 @@
-/*
- *  Copyright (c) 2026 Piyush Daiya
- *  *
- *  * Permission is hereby granted, free of charge, to any person obtaining a copy
- *  * of this software and associated documentation files (the "Software"), to deal
- *  * in the Software without restriction, including without limitation the rights
- *  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  * copies of the Software, and to permit persons to whom the Software is
- *  * furnished to do so, subject to the following conditions:
- *  *
- *  * The above copyright notice and this permission notice shall be included in all
- *  * copies or substantial portions of the Software.
- *  *
- *  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  * SOFTWARE.
- */
-
 package org.vaachak.reader.core.data.remote.dto
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import org.vaachak.reader.core.domain.model.HighlightEntity
 
 object SyncDto {
 
-    // The raw data that gets serialized into JSON before encryption
+    // 1. The raw data that gets serialized into JSON BEFORE encryption
     @Serializable
     data class CleartextPayload(
         val bookHash: String,
@@ -37,12 +16,34 @@ object SyncDto {
         val highlights: List<HighlightEntity>
     )
 
-    // The encrypted AES-256-GCM blob that actually hits the network
+    // 2. The exact JSON structure for a single row matching the Cloudflare KV schema
     @Serializable
-    data class NetworkPayload(
-        val bookHash: String,
-        val ciphertext: String,
-        val iv: String,
-        val updatedAt: Long
+    data class VaultEntry(
+        @SerialName("entry_key") val entryKey: String,
+        @SerialName("encrypted_payload") val encryptedPayload: String, // Format: "iv:ciphertext"
+        @SerialName("updated_at") val updatedAt: Long,
+        val deleted: Boolean
+    )
+    @Serializable
+    data class AuthDto(
+        val username: String,
+        val password: String
+    )
+    // 3. The payload sent TO Cloudflare
+    @Serializable
+    data class SyncRequest(
+        val auth: AuthDto, // Assuming you have this defined for username/password
+        @SerialName("device_id") val deviceId: String,
+        @SerialName("last_sync_timestamp") val lastSyncTimestamp: Long,
+        @SerialName("vault_entries") val vaultEntries: List<VaultEntry>
+    )
+
+    // 4. The payload received FROM Cloudflare
+    @Serializable
+    data class SyncResponse(
+        @SerialName("new_sync_timestamp") val newSyncTimestamp: Long,
+        @SerialName("vault_entries") val vaultEntries: List<VaultEntry>
     )
 }
+
+// The credentials sent with every sync request

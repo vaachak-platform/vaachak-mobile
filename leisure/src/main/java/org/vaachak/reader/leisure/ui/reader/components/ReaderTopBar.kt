@@ -22,26 +22,53 @@
 
 package org.vaachak.reader.leisure.ui.reader.components
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PauseCircle
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.BookmarkBorder
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.tid
 
 @Composable
 fun ReaderTopBar(
     bookTitle: String,
     isEink: Boolean,
     showRecap: Boolean,
+    showDebugHighlightButton: Boolean,
     isBookmarked: Boolean,
     isTtsActive: Boolean,
     onBack: () -> Unit,
@@ -52,6 +79,7 @@ fun ReaderTopBar(
     onBookmarkToggleClick: () -> Unit,
     onRecapClick: () -> Unit,
     onTtsClick: () -> Unit,
+    onAddHighlightClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
     val containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.surface
@@ -73,8 +101,8 @@ fun ReaderTopBar(
                     .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = contentColor)
+                IconButton(onClick = onBack, modifier = Modifier.tid(Tid.Reader.back)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = contentColor)
                 }
 
                 Text(
@@ -89,37 +117,37 @@ fun ReaderTopBar(
                         .padding(horizontal = 8.dp)
                 )
 
-                IconButton(onClick = onTtsClick) {
+                IconButton(onClick = onTtsClick, modifier = Modifier.tid(Tid.Reader.TTS)) {
                     Icon(
                         imageVector = if (isTtsActive) Icons.Default.PauseCircle else Icons.Default.Headphones,
-                        contentDescription = "Read Aloud",
+                        contentDescription = if (isTtsActive) "Pause Read Aloud" else "Start Read Aloud",
                         tint = if (isTtsActive && !isEink) MaterialTheme.colorScheme.primary else contentColor
                     )
                 }
 
-                IconButton(onClick = onBookmarkToggleClick) {
+                IconButton(onClick = onBookmarkToggleClick, modifier = Modifier.tid(Tid.Reader.BOOKMARK)) {
                     Icon(
                         imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder,
-                        contentDescription = "Bookmark",
+                        contentDescription = if (isBookmarked) "Remove Bookmark" else "Add Bookmark",
                         tint = if (isBookmarked && !isEink) MaterialTheme.colorScheme.primary else contentColor
                     )
                 }
 
-                IconButton(onClick = onTocClick) {
-                    Icon(Icons.AutoMirrored.Filled.List, "Table of Contents", tint = contentColor)
+                IconButton(onClick = onTocClick, modifier = Modifier.tid(Tid.Reader.TOC)) {
+                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Table of Contents", tint = contentColor)
                 }
 
-                IconButton(onClick = onBookmarksListClick) {
-                    Icon(Icons.Default.Bookmarks, "Bookmarks List", tint = contentColor)
+                IconButton(onClick = onBookmarksListClick, modifier = Modifier.tid(Tid.Reader.bookmarksList)) {
+                    Icon(Icons.Default.Bookmarks, contentDescription = "Bookmarks List", tint = contentColor)
                 }
 
-                IconButton(onClick = onHighlightsClick) {
-                    Icon(Icons.Default.Edit, "Highlights", tint = contentColor)
+                IconButton(onClick = onHighlightsClick, modifier = Modifier.tid(Tid.Reader.highlights)) {
+                    Icon(Icons.Default.Edit, contentDescription = "Highlights", tint = contentColor)
                 }
 
                 Box {
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(Icons.Default.MoreVert, "More Options", tint = contentColor)
+                    IconButton(onClick = { showMenu = true }, modifier = Modifier.tid(Tid.Reader.overflow)) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More Options", tint = contentColor)
                     }
 
                     DropdownMenu(
@@ -129,20 +157,23 @@ fun ReaderTopBar(
                     ) {
                         DropdownMenuItem(
                             text = { Text("Search") },
-                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            modifier = Modifier.tid(Tid.Reader.SEARCH),
                             onClick = { showMenu = false; onSearchClick() }
                         )
                         if (showRecap) {
                             DropdownMenuItem(
                                 text = { Text("Recap") },
-                                leadingIcon = { Icon(Icons.Default.History, null) },
+                                leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
+                                modifier = Modifier.tid(Tid.Reader.menuRecap),
                                 onClick = { showMenu = false; onRecapClick() }
                             )
                         }
                         HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text("Settings") },
-                            leadingIcon = { Icon(Icons.Default.Settings, null) },
+                            leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                            modifier = Modifier.tid(Tid.Reader.SETTINGS),
                             onClick = { showMenu = false; onSettingsClick() }
                         )
                     }

@@ -24,7 +24,19 @@ package org.vaachak.reader.leisure.ui.reader.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.CollectionsBookmark
@@ -38,9 +50,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.tid
 
 // --- 1. READER FOOTER (Unchanged) ---
 @Composable
@@ -92,7 +108,8 @@ fun VaachakNavigationFooter(
                     label = "Bookshelf",
                     icon = Icons.AutoMirrored.Filled.LibraryBooks,
                     onClick = onBookshelfClick,
-                    isEink = isEink
+                    isEink = isEink,
+                    modifier = Modifier.tid(Tid.Tab.books)
                 )
 
                 if (isEink) VerticalDivider()
@@ -101,7 +118,8 @@ fun VaachakNavigationFooter(
                     label = "Highlights",
                     icon = Icons.Default.CollectionsBookmark,
                     onClick = onHighlightsClick,
-                    isEink = isEink
+                    isEink = isEink,
+                    modifier = Modifier.tid(Tid.Library.HIGHLIGHTS)
                 )
 
                 if (isEink) VerticalDivider()
@@ -110,7 +128,8 @@ fun VaachakNavigationFooter(
                     label = "About",
                     icon = Icons.Default.Info,
                     onClick = onAboutClick,
-                    isEink = isEink
+                    isEink = isEink,
+                    modifier = Modifier.tid(Tid.Tab.settings)
                 )
             }
             // This spacer pushes the row up above the Android navigation bar
@@ -124,15 +143,19 @@ fun FooterNavItem(
     label: String,
     icon: ImageVector,
     onClick: () -> Unit,
-    isEink: Boolean
+    isEink: Boolean,
+    modifier: Modifier = Modifier
 ) {
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
 
     // CHANGED: Column -> Row for horizontal layout
     Row(
-        modifier = Modifier
+        modifier = modifier
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$label Tab"
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {

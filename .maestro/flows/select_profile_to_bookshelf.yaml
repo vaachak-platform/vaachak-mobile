@@ -1,0 +1,20 @@
+appId: org.vaachak.reader.leisure
+---
+# Prefer stable ids if present
+- runFlow:
+      when:
+          visible:
+              id: "profile_switch"
+      commands:
+          - tapOn:
+                id: "profile_switch"
+
+# Tap the first profile (if you have profile_<id>, replace with a known one)
+# If you don't have deterministic first profile id, use text fallback
+- tapOn:
+      text: "Sleepy Cat"
+
+- extendedWaitUntil:
+      visible:
+          id: "screen_bookshelf"
+      timeout: 30000

@@ -7,23 +7,26 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.vaachak.reader.core.data.local.ProfileDao
+import org.vaachak.reader.core.data.repository.SyncRepository
 import org.vaachak.reader.core.data.repository.VaultRepository
 import org.vaachak.reader.core.domain.model.ProfileEntity
 import org.vaachak.reader.core.utils.SecurityUtils
 import org.vaachak.reader.core.utils.getCurrentTimeMillis
 import javax.inject.Inject
-import kotlinx.coroutines.flow.combine
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
     private val profileDao: ProfileDao,
-    private val vaultRepository: VaultRepository
+    private val vaultRepository: VaultRepository,
+    private val syncRepository: SyncRepository // Injected
 ) : ViewModel() {
 
-
+    // --- NEW: Expose Multi-User State ---
+    val isMultiUserMode: StateFlow<Boolean> = vaultRepository.isMultiUserMode
 
     // Automatically reacts to database changes (e.g., when a new profile is added)
     val profiles: StateFlow<List<ProfileEntity>> = profileDao.getAllProfiles()
@@ -36,7 +39,7 @@ class ProfileViewModel @Inject constructor(
     // Reactively fetches the active profile based on the DataStore Vault ID
     val activeProfile: StateFlow<ProfileEntity?> = combine(
         profiles,
-        vaultRepository.activeVaultIdFlow
+        vaultRepository.activeVaultId // FIXED: Removed "Flow" suffix to match VaultRepository
     ) { allProfiles, vaultId ->
         allProfiles.find { it.profileId == vaultId }
     }.stateIn(
@@ -96,16 +99,46 @@ class ProfileViewModel @Inject constructor(
         }
     }
 
+    fun selectProfile(
+        profile: ProfileEntity,
+        enteredPin: String?,
+        onActivated: (String) -> Unit
+    ) {
+        if (profile.pinHash == null) {
+            activateProfile(profile.profileId, onActivated)
+            return
+        }
+
+        if (enteredPin.isNullOrBlank()) {
+            _pinError.value = "PIN required"
+            return
+        }
+
+        val enteredHash = SecurityUtils.hashPin(enteredPin)
+        if (profile.pinHash != enteredHash) {
+            _pinError.value = "Incorrect PIN"
+            return
+        }
+
+        _pinError.value = null
+        activateProfile(profile.profileId, onActivated)
+    }
+
     /**
      * Tells the app which vault to look at, and updates the "last active" sorting.
      */
-    private fun activateProfile(profileId: String) {
+    private fun activateProfile(profileId: String, onActivated: ((String) -> Unit)? = null) {
         viewModelScope.launch {
             // Tell the database this profile was just used (pushes it to the left of the picker)
             profileDao.updateLastActive(profileId, getCurrentTimeMillis())
 
             // Tell the DataStore to unlock this specific user's books/settings
             vaultRepository.setActiveVaultId(profileId)
+
+            // NEW: Trigger a background sync immediately using the new profile's credentials
+            syncRepository.sync()
+
+            onActivated?.invoke(profileId)
         }
     }
 

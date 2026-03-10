@@ -22,12 +22,12 @@
 
 package org.vaachak.reader.core.data.repository
 
-import android.util.Log
-import org.vaachak.reader.core.data.dictionary.JsonDictionaryProvider
-import org.vaachak.reader.core.data.dictionary.StarDictParser
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import org.vaachak.reader.core.data.dictionary.JsonDictionaryProvider
+import org.vaachak.reader.core.data.dictionary.StarDictParser
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -54,10 +54,10 @@ class DictionaryRepository @Inject constructor(
         if (settingsRepository.getUseEmbeddedDictionary().first()) {
             val internal = jsonProvider.lookup(word)
             if (internal != null){
-                Log.d("VaachakDictDebug", "Word '$word'  found in internal JSON dictionary with definition '$internal'")
+
                 return@withContext internal
             }
-            Log.d("VaachakDictDebug", "Word '$word' not found in internal JSON dictionary")
+
         }
         null // Final return for the block if nothing is found
     }
@@ -75,10 +75,10 @@ class DictionaryRepository @Inject constructor(
             //Check in StarDict
             val folderUri = settingsRepository.getDictionaryFolder().first()
             if (folderUri.isNotEmpty()) {
-                Log.d("VaachakDictDebug", "Searching external StarDict folder...")
+
                 val externalResult = starDictParser.lookup(folderUri, word)
                 if (externalResult != null) {
-                    Log.d("VaachakDictDebug", "Found in external StarDict folder with definition '$externalResult'")
+
                     return@withContext externalResult // Correct labeled return
                 }
             }
@@ -86,10 +86,10 @@ class DictionaryRepository @Inject constructor(
         //Fallback to Json
         val internal = jsonProvider.lookup(word)
         if (internal != null){
-            Log.d("VaachakDictDebug", "Word '$word'  found in internal JSON dictionary with definition '$internal'")
+
             return@withContext internal
         }
-        Log.d("VaachakDictDebug", "Word '$word' not found in internal JSON dictionary- External fallback used")
+
 
 
 

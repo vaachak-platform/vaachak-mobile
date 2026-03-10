@@ -26,9 +26,20 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,15 +47,42 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,6 +91,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
+import org.vaachak.reader.leisure.ui.testability.Tid
+import org.vaachak.reader.leisure.ui.testability.TidScreen
+import org.vaachak.reader.leisure.ui.testability.tid
+import org.vaachak.reader.leisure.ui.testability.tids
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,6 +114,10 @@ fun CatalogBrowserScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val paginationItem = feedItems.filterIsInstance<CatalogItem.Pagination>().firstOrNull()
+    val firstItemIndex = remember(feedItems) { feedItems.indexOfFirst { it !is CatalogItem.Pagination } }
+    val firstServerIndex = remember(feedItems) { feedItems.indexOfFirst { it is CatalogItem.Server } }
+    val firstFolderIndex = remember(feedItems) { feedItems.indexOfFirst { it is CatalogItem.Folder } }
+    val firstBookIndex = remember(feedItems) { feedItems.indexOfFirst { it is CatalogItem.Book } }
 
     LaunchedEffect(Unit) {
         viewModel.uiEvent.collect { event ->
@@ -98,71 +144,114 @@ fun CatalogBrowserScreen(
     val containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.background
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
-    Scaffold(
-        topBar = {
-            Column {
-                VaachakHeader(
-                    title = screenTitle,
-                    onBack = { if (!viewModel.goBack()) onBack() },
-                    showBackButton = true,
-                    isEink = isEink
-                )
-
-                if (!isOffline && breadcrumbs.size > 1) {
-                    BreadcrumbBar(
-                        breadcrumbs = breadcrumbs,
+    TidScreen(Tid.Screen.catalog) {
+        Scaffold(
+            topBar = {
+                Column {
+                    VaachakHeader(
+                        title = screenTitle,
+                        onBack = { if (!viewModel.goBack()) onBack() },
+                        showBackButton = true,
                         isEink = isEink,
-                        onBreadcrumbClick = { index -> viewModel.onBreadcrumbClick(index) }
+                        rootModifier = Modifier.tid(Tid.Catalog.HEADER),
+                        backButtonModifier = Modifier.tid(Tid.Catalog.BACK)
                     )
-                }
 
-                if (paginationItem != null) {
-                    CatalogPaginationItem(
-                        item = paginationItem,
-                        isEink = isEink,
-                        onNext = { viewModel.handlePaginationClick(it) },
-                        onPrev = { viewModel.handlePaginationClick(it) },
-                        isCompact = true
-                    )
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
-                }
-            }
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        containerColor = containerColor,
-        contentColor = contentColor
-    ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            when {
-                isOffline -> OfflinePlaceholder(isEink)
-                isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = if(isEink) Color.Black else MaterialTheme.colorScheme.primary)
-                feedItems.isEmpty() -> {
-                    Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.CloudOff, null, Modifier.size(64.dp), tint = Color.Gray)
-                        Text("No items found.", color = contentColor)
+                    if (!isOffline && breadcrumbs.size > 1) {
+                        BreadcrumbBar(
+                            breadcrumbs = breadcrumbs,
+                            isEink = isEink,
+                            onBreadcrumbClick = { index -> viewModel.onBreadcrumbClick(index) }
+                        )
+                    }
+
+                    if (paginationItem != null) {
+                        CatalogPaginationItem(
+                            item = paginationItem,
+                            isEink = isEink,
+                            onNext = { viewModel.handlePaginationClick(it) },
+                            onPrev = { viewModel.handlePaginationClick(it) },
+                            isCompact = true
+                        )
+                        HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
                     }
                 }
-                else -> {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(feedItems) { item ->
-                            when (item) {
-                                is CatalogItem.Server -> CatalogServerItem(item, isEink) { viewModel.handleItemClick(item) }
-                                is CatalogItem.Folder -> CatalogFolderItem(item, isEink) { viewModel.handleItemClick(item) }
-                                is CatalogItem.Book -> CatalogBookItem(item, isEink) { viewModel.handleItemClick(item) }
-                                is CatalogItem.Pagination -> {
-                                    CatalogPaginationItem(
-                                        item,
-                                        isEink,
-                                        onNext = { viewModel.handlePaginationClick(it) },
-                                        onPrev = { viewModel.handlePaginationClick(it) }
-                                    )
+            },
+            snackbarHost = {
+                SnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier.tid(Tid.Catalog.SNACKBAR)
+                ) { snackbarData ->
+                    Snackbar(
+                        action = {
+                            snackbarData.visuals.actionLabel?.let { actionLabel ->
+                                TextButton(
+                                    onClick = { snackbarData.performAction() },
+                                    modifier = if (actionLabel == "View Library") {
+                                        Modifier.tid(Tid.Catalog.SNACKBAR_ACTION_VIEW_LIBRARY)
+                                    } else {
+                                        Modifier
+                                    }
+                                ) {
+                                    Text(actionLabel)
                                 }
                             }
-                            if (item !is CatalogItem.Pagination) {
-                                HorizontalDivider(thickness = 0.5.dp, color = if(isEink) Color.Black else MaterialTheme.colorScheme.outlineVariant)
-                            }
                         }
-                        item { Spacer(Modifier.height(80.dp)) }
+                    ) {
+                        Text(snackbarData.visuals.message)
+                    }
+                }
+            },
+            containerColor = containerColor,
+            contentColor = contentColor
+        ) { padding ->
+            Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+                when {
+                    isOffline -> OfflinePlaceholder(isEink)
+                    isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = if(isEink) Color.Black else MaterialTheme.colorScheme.primary)
+                    feedItems.isEmpty() -> {
+                        Column(modifier = Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.CloudOff, contentDescription = "No items found", Modifier.size(64.dp), tint = Color.Gray)
+                            Text("No items found.", color = contentColor)
+                        }
+                    }
+                    else -> {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            itemsIndexed(feedItems) { index, item ->
+                                when (item) {
+                                    is CatalogItem.Server -> CatalogServerItem(
+                                        item = item,
+                                        isEink = isEink,
+                                        isFirstItem = index == firstItemIndex,
+                                        isFirstServer = index == firstServerIndex
+                                    ) { viewModel.handleItemClick(item) }
+                                    is CatalogItem.Folder -> CatalogFolderItem(
+                                        item = item,
+                                        isEink = isEink,
+                                        isFirstItem = index == firstItemIndex,
+                                        isFirstFolder = index == firstFolderIndex
+                                    ) { viewModel.handleItemClick(item) }
+                                    is CatalogItem.Book -> CatalogBookItem(
+                                        item = item,
+                                        isEink = isEink,
+                                        isFirstItem = index == firstItemIndex,
+                                        isFirstBook = index == firstBookIndex
+                                    ) { viewModel.handleItemClick(item) }
+                                    is CatalogItem.Pagination -> {
+                                        CatalogPaginationItem(
+                                            item,
+                                            isEink,
+                                            onNext = { viewModel.handlePaginationClick(it) },
+                                            onPrev = { viewModel.handlePaginationClick(it) }
+                                        )
+                                    }
+                                }
+                                if (item !is CatalogItem.Pagination) {
+                                    HorizontalDivider(thickness = 0.5.dp, color = if(isEink) Color.Black else MaterialTheme.colorScheme.outlineVariant)
+                                }
+                            }
+                            item { Spacer(Modifier.height(80.dp)) }
+                        }
                     }
                 }
             }
@@ -171,17 +260,47 @@ fun CatalogBrowserScreen(
 }
 
 // --- COMPONENTS ---
+// adb shell uiautomator dump /sdcard/window_dump.xml
+// adb shell cat /sdcard/window_dump.xml | grep -E 'screen_catalog|catalog_back|catalog_item_first|catalog_book_action_first|catalog_pagination_(next|prev)'
 
 @Composable
-fun CatalogServerItem(item: CatalogItem.Server, isEink: Boolean, onClick: () -> Unit) {
+fun CatalogServerItem(
+    item: CatalogItem.Server,
+    isEink: Boolean,
+    isFirstItem: Boolean,
+    isFirstServer: Boolean,
+    onClick: () -> Unit
+) {
     val textColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
     ListItem(
         colors = ListItemDefaults.colors(containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.surface, headlineColor = textColor),
         headlineContent = { Text(item.title, fontWeight = FontWeight.Bold) },
         supportingContent = { Text(item.url, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall) },
-        leadingContent = { Icon(Icons.Default.Dns, null, tint = if(isEink) Color.Black else MaterialTheme.colorScheme.primary) },
-        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color.Gray) },
-        modifier = Modifier.clickable(onClick = onClick)
+        leadingContent = { Icon(Icons.Default.Dns, contentDescription = null, tint = if(isEink) Color.Black else MaterialTheme.colorScheme.primary) },
+        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Color.Gray) },
+        modifier = Modifier
+            .then(
+                when {
+                    isFirstItem && isFirstServer -> Modifier.tids(
+                        Tid.Catalog.item("server", item.url),
+                        Tid.Catalog.ITEM_FIRST,
+                        Tid.Catalog.SERVER_FIRST
+                    )
+                    isFirstItem -> Modifier.tids(
+                        Tid.Catalog.item("server", item.url),
+                        Tid.Catalog.ITEM_FIRST
+                    )
+                    isFirstServer -> Modifier.tids(
+                        Tid.Catalog.item("server", item.url),
+                        Tid.Catalog.SERVER_FIRST
+                    )
+                    else -> Modifier.tid(Tid.Catalog.item("server", item.url))
+                }
+            )
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Server: ${item.title}, ${item.url}"
+            }
     )
 }
 
@@ -202,6 +321,7 @@ fun CatalogPaginationItem(
         if (item.prevUrl != null) {
             Button(
                 onClick = { onPrev(item.prevUrl) },
+                modifier = Modifier.tid(Tid.Catalog.PAGINATION_PREV),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSecondaryContainer
@@ -209,7 +329,7 @@ fun CatalogPaginationItem(
                 border = if (isEink) BorderStroke(1.dp, Color.Black) else null,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBackIos, null, Modifier.size(14.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowBackIos, contentDescription = null, Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Prev", style = MaterialTheme.typography.labelLarge)
             }
@@ -220,6 +340,7 @@ fun CatalogPaginationItem(
         if (item.nextUrl != null) {
             Button(
                 onClick = { onNext(item.nextUrl) },
+                modifier = Modifier.tid(Tid.Catalog.PAGINATION_NEXT),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.primaryContainer,
                     contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onPrimaryContainer
@@ -229,7 +350,7 @@ fun CatalogPaginationItem(
             ) {
                 Text("Next", style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.width(4.dp))
-                Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, null, Modifier.size(14.dp))
+                Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, Modifier.size(14.dp))
             }
         }
     }
@@ -248,9 +369,23 @@ fun BreadcrumbBar(
         breadcrumbs.forEachIndexed { index, item ->
             val isLast = index == breadcrumbs.lastIndex
             val color = if (isLast) if (isEink) Color.Black else MaterialTheme.colorScheme.primary else Color.Gray
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable(enabled = !isLast) { onBreadcrumbClick(index) }) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .then(
+                        when {
+                            index == 0 -> Modifier.tid(Tid.Catalog.BREADCRUMB_FIRST)
+                            isLast -> Modifier.tid(Tid.Catalog.BREADCRUMB_LAST)
+                            else -> Modifier
+                        }
+                    )
+                    .clickable(enabled = !isLast) { onBreadcrumbClick(index) }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = if (isLast) "Current location: ${item.second}" else "Go to ${item.second}"
+                    }
+            ) {
                 Text(item.second, style = MaterialTheme.typography.bodySmall, color = color, fontWeight = if (isLast) FontWeight.Bold else FontWeight.Normal)
-                if (!isLast) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Color.Gray, modifier = Modifier.size(16.dp).padding(horizontal = 2.dp))
+                if (!isLast) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp).padding(horizontal = 2.dp))
             }
         }
     }
@@ -258,18 +393,52 @@ fun BreadcrumbBar(
 }
 
 @Composable
-fun CatalogFolderItem(item: CatalogItem.Folder, isEink: Boolean, onClick: () -> Unit) {
+fun CatalogFolderItem(
+    item: CatalogItem.Folder,
+    isEink: Boolean,
+    isFirstItem: Boolean,
+    isFirstFolder: Boolean,
+    onClick: () -> Unit
+) {
     val textColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
     ListItem(
         colors = ListItemDefaults.colors(containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.surface, headlineColor = textColor),
         headlineContent = { Text(item.title, fontWeight = FontWeight.SemiBold) },
-        leadingContent = { Icon(Icons.Default.Folder, null, tint = if(isEink) Color.Black else MaterialTheme.colorScheme.primary) },
-        modifier = Modifier.clickable(onClick = onClick)
+        leadingContent = { Icon(Icons.Default.Folder, contentDescription = null, tint = if(isEink) Color.Black else MaterialTheme.colorScheme.primary) },
+        modifier = Modifier
+            .then(
+                when {
+                    isFirstItem && isFirstFolder -> Modifier.tids(
+                        Tid.Catalog.item("folder", item.title),
+                        Tid.Catalog.ITEM_FIRST,
+                        Tid.Catalog.FOLDER_FIRST
+                    )
+                    isFirstItem -> Modifier.tids(
+                        Tid.Catalog.item("folder", item.title),
+                        Tid.Catalog.ITEM_FIRST
+                    )
+                    isFirstFolder -> Modifier.tids(
+                        Tid.Catalog.item("folder", item.title),
+                        Tid.Catalog.FOLDER_FIRST
+                    )
+                    else -> Modifier.tid(Tid.Catalog.item("folder", item.title))
+                }
+            )
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Folder: ${item.title}"
+            }
     )
 }
 
 @Composable
-fun CatalogBookItem(item: CatalogItem.Book, isEink: Boolean, onClick: () -> Unit) {
+fun CatalogBookItem(
+    item: CatalogItem.Book,
+    isEink: Boolean,
+    isFirstItem: Boolean,
+    isFirstBook: Boolean,
+    onClick: () -> Unit
+) {
     val textColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
     val subColor = if (isEink) Color.DarkGray else MaterialTheme.colorScheme.onSurfaceVariant
     val isNavigable = item.format == "DETAIL"
@@ -281,6 +450,11 @@ fun CatalogBookItem(item: CatalogItem.Book, isEink: Boolean, onClick: () -> Unit
         else -> Icons.Default.CloudDownload
     }
     val iconTint = if (isEink) Color.Black else if (isDownloaded) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary
+    val actionDescription = when {
+        isDownloaded -> "Read Book"
+        isNavigable -> "View Details"
+        else -> "Download Book"
+    }
 
     ListItem(
         colors = ListItemDefaults.colors(containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.surface, headlineColor = textColor, supportingColor = subColor),
@@ -306,18 +480,50 @@ fun CatalogBookItem(item: CatalogItem.Book, isEink: Boolean, onClick: () -> Unit
             }
         },
         trailingContent = {
-            IconButton(onClick = onClick) {
-                Icon(icon, "Action", tint = iconTint, modifier = Modifier.size(24.dp))
+            IconButton(
+                onClick = onClick,
+                modifier = if (isFirstBook) {
+                    Modifier.tids(
+                        Tid.Catalog.bookActionByTitle(item.title),
+                        Tid.Catalog.BOOK_ACTION_FIRST
+                    )
+                } else {
+                    Modifier.tid(Tid.Catalog.bookActionByTitle(item.title))
+                }
+            ) {
+                Icon(icon, contentDescription = actionDescription, tint = iconTint, modifier = Modifier.size(24.dp))
             }
         },
-        modifier = Modifier.clickable(onClick = onClick)
+        modifier = Modifier
+            .then(
+                when {
+                    isFirstItem && isFirstBook -> Modifier.tids(
+                        Tid.Catalog.item("book", item.title),
+                        Tid.Catalog.ITEM_FIRST,
+                        Tid.Catalog.BOOK_FIRST
+                    )
+                    isFirstItem -> Modifier.tids(
+                        Tid.Catalog.item("book", item.title),
+                        Tid.Catalog.ITEM_FIRST
+                    )
+                    isFirstBook -> Modifier.tids(
+                        Tid.Catalog.item("book", item.title),
+                        Tid.Catalog.BOOK_FIRST
+                    )
+                    else -> Modifier.tid(Tid.Catalog.item("book", item.title))
+                }
+            )
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Book: ${item.title}, by ${item.author.ifBlank { "Unknown" }}"
+            }
     )
 }
 
 @Composable
 fun OfflinePlaceholder(isEink: Boolean) {
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Default.WifiOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = Color.Gray)
+        Icon(Icons.Default.WifiOff, contentDescription = "Offline Mode", modifier = Modifier.size(64.dp), tint = Color.Gray)
         Spacer(modifier = Modifier.height(16.dp))
         Text("You are in Offline Mode", style = MaterialTheme.typography.titleMedium, color = if(isEink) Color.Black else MaterialTheme.colorScheme.onBackground)
         Text("Disable Offline Mode in Settings to browse catalogs.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)

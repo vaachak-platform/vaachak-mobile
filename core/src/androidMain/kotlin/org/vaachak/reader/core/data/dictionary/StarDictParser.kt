@@ -24,12 +24,12 @@ package org.vaachak.reader.core.data.dictionary
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
+import timber.log.Timber
 import java.io.BufferedInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -96,7 +96,7 @@ class StarDictParser @Inject constructor(
 
         cachedDictionaries = foundDicts
         lastLoadedFolder = folderUriString
-        Log.d("StarDictParser", "Cached ${foundDicts.size} dictionaries from $folderUriString")
+
     }
 
     /**
@@ -129,7 +129,7 @@ class StarDictParser @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                Log.e("StarDictParser", "Error searching ${dict.baseName}: ${e.message}")
+                Timber.e(e, "Error searching ${dict.baseName}: ${e.message}")
             }
         }
 
@@ -207,7 +207,7 @@ class StarDictParser @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e("StarDictParser", "Dict read error: ${e.message}")
+            Timber.e(e, "Dict read error: ${e.message}")
             null
         }
     }

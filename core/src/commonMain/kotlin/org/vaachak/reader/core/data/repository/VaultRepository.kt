@@ -1,11 +1,13 @@
 package org.vaachak.reader.core.data.repository
 
 import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -51,12 +53,7 @@ class VaultRepository(
         initialValue = DEFAULT_VAULT_ID
     )
 
-    // Continuously emits the currently active vault ID
-    val activeVaultIdFlow: Flow<String> = globalDataStore.data.map { prefs ->
-        prefs[ACTIVE_VAULT_ID] ?: DEFAULT_VAULT_ID
-    }
-
-    // FAST-PATH: Loads into memory on app launch instantly.
+      // FAST-PATH: Loads into memory on app launch instantly.
     val isMultiUserMode: StateFlow<Boolean> = globalDataStore.data.map { prefs ->
         prefs[IS_MULTI_USER_MODE] ?: false
     }.stateIn(
@@ -65,8 +62,9 @@ class VaultRepository(
         initialValue = false
     )
 
+    @Deprecated("Use setActiveVaultId for clarity", ReplaceWith("setActiveVaultId(vaultId)"))
     suspend fun setActiveVault(vaultId: String) {
-        globalDataStore.edit { it[ACTIVE_VAULT_ID] = vaultId }
+        setActiveVaultId(vaultId)
     }
 
     suspend fun setMultiUserMode(enabled: Boolean) {

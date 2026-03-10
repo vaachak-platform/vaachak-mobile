@@ -1,0 +1,26 @@
+appId: org.vaachak.reader.leisure
+---
+- launchApp:
+    clearState: false
+
+# Optional: handle first-run onboarding (Welcome)
+- runFlow:
+    when:
+      visible:
+        text: "Continue to Library"
+    commands:
+      - tapOn:
+          text: "Continue to Library"
+
+# Optional: handle profile picker if it appears
+- runFlow:
+    when:
+      visible:
+        id: "screen_vault"
+    file: "select_profile_to_bookshelf.yaml"
+
+# Now wait for Bookshelf root
+- extendedWaitUntil:
+    visible:
+      id: "screen_bookshelf"
+    timeout: 30000
