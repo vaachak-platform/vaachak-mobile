@@ -11,9 +11,38 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Platform: Android](https://img.shields.io/badge/Platform-Android_8.0+-green.svg)]()
 [![Target: E-Ink](https://img.shields.io/badge/Optimized_for-E--Ink-black.svg)]()
-.
-**Leisure Vaachak** (Sanskrit for "Reader") is an offline-first, privacy-centric e-reader application built natively for Android. It is heavily optimized for E-Ink displays (like the ONYX BOOX series) and features an advanced, Zero-Knowledge encrypted synchronization engine.
 
+
+Leisure Vaachak is a privacy-first Android reading app built for distraction-free leisure reading on phones, tablets, and e-ink devices.
+
+It is part of the **Vaachak Platform**, which is designed around a simple product philosophy:  
+**leisure reading and study/work reading should not compete inside the same experience.**
+
+Most reading apps mix leisure, work, notifications, and productivity signals in one place. Leisure Vaachak takes a different approach by focusing on calm, immersive reading with offline-first behavior, privacy-aware sync, and hardware-aware UX for e-ink-friendly devices.
+
+## Why it is different
+
+- **Distraction-free by design** — built specifically for leisure reading
+- **Offline-first** — your library and reading state stay useful even without connectivity
+- **Privacy-first sync** — integrates with Vaachak Sync Server using zero-knowledge principles
+- **E-Ink aware UX** — designed with low-friction reading flows and display constraints in mind
+- **Indian language direction** — already benefits from Android TTS support for Hindi and Gujarati where available
+
+## Current status
+
+### Available now
+- Android app
+- EPUB reading
+- bookmarks, highlights, progress tracking
+- sync support
+- Android TTS support
+- e-ink-friendly reading experience
+
+### Planned
+- PDF support
+- audiobook support
+- iOS expansion
+- 
 ## ✨ Key Features
 
 ### ✒️ Hardware-Aware E-Ink Optimization

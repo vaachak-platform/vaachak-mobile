@@ -30,6 +30,7 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: java-kotlin
+          build-mode: manual
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -44,8 +45,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Stop existing Gradle daemons
+        run: ./gradlew --stop || true
+
       - name: Clean
-        run: ./gradlew clean --no-configuration-cache
+        run: ./gradlew clean --no-daemon --no-build-cache --no-configuration-cache
 
       - name: Build for CodeQL
         run: |
@@ -53,6 +57,9 @@ jobs:
             :core:compileCommonMainKotlinMetadata \
             :leisure:assembleDebug \
             --stacktrace \
+            --rerun-tasks \
+            --no-daemon \
+            --no-build-cache \
             --no-configuration-cache
 
       - name: Perform CodeQL analysis
@@ -65,5 +72,7 @@ jobs:
           name: codeql-build-reports
           path: |
             **/build/reports/**
+            **/build/test-results/**
             **/build/tmp/**
+            **/build/kotlin/**
             **/build/outputs/**
