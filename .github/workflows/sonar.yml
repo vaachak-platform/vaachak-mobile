@@ -2,14 +2,15 @@ name: SonarCloud Analysis
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
   build:
     name: Build and analyze
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -18,23 +19,58 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'gradle'
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Cache SonarCloud packages
-        uses: actions/cache@v4 # Updated to v4
+        uses: actions/cache@v4
         with:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
 
-      - name: Build and analyze
+      - name: Diagnose failing Kotlin metadata compile
+        run: |
+          ./gradlew :core:compileCommonMainKotlinMetadata \
+            --stacktrace \
+            --info \
+            --rerun-tasks \
+            --no-build-cache \
+            --no-configuration-cache
+
+      - name: Build
+        run: |
+          ./gradlew build \
+            --stacktrace \
+            --info \
+            --no-build-cache \
+            --no-configuration-cache
+
+      - name: Sonar
+        if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        # Added --build-cache to speed up analysis
-        run: ./gradlew build sonar --info --build-cache
+        run: |
+          ./gradlew sonar \
+            --stacktrace \
+            --info \
+            --no-configuration-cache
+
+      - name: Upload build reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-reports
+          path: |
+            **/build/reports/**
+            **/build/tmp/**
+            **/build/kotlin/**
+            **/build/test-results/**
