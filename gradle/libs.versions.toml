@@ -30,7 +30,7 @@ uiText = "1.10.4" # Safely bumped
 
 # -- Navigation & DI --
 navigation = "2.9.7"
-hilt = "2.51.1"
+hilt = "2.59.2"
 hiltNavigationCompose = "1.3.0"
 
 # -- Networking & Data --
