@@ -14,7 +14,7 @@ ksp = "2.3.6"
 agp = "8.11.2" # Safely bumped
 
 # -- Core Libraries --
-coreKtx = "1.17.0"
+coreKtx = "1.15.0"
 appcompat = "1.7.1"
 material = "1.13.0"
 desugar = "2.1.5" # Safely bumped

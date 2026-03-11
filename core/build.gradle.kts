@@ -52,12 +52,7 @@ kotlin {
             implementation("com.squareup.okio:okio:3.16.4")
         }
 
-        commonTest.dependencies {
-            implementation(libs.junit)
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-            implementation("app.cash.turbine:turbine:1.2.1")
-            implementation("io.mockk:mockk:1.14.9")
-        }
+        // commonTest block removed entirely as requested
 
         androidMain.dependencies {
             implementation(libs.androidx.core.ktx)
@@ -73,17 +68,23 @@ kotlin {
             implementation(libs.timber)
         }
 
-        // Fix for line 88: Accessing room version safely via string if alias fails
         val androidUnitTest by getting {
             dependencies {
+                // Core Android Test Infrastructure
                 implementation(libs.androidx.junit)
                 implementation("androidx.test:core-ktx:1.7.0")
                 implementation("androidx.test.ext:junit-ktx:1.3.0")
-
-                // Use a safe string reference for room-testing to avoid the "androidx" resolve error
-                implementation("androidx.room:room-testing:2.8.4") // Adjust version to match your libs.versions
+                implementation("androidx.room:room-testing:2.8.4")
                 implementation("org.robolectric:robolectric:4.16.1")
                 implementation("org.bouncycastle:bcprov-jdk15on:1.70")
+
+                // Migrated from commonTest to support your BaseDaoTest and Security Domain tests
+                implementation(libs.junit)
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+                implementation("app.cash.turbine:turbine:1.2.1")
+
+                // Added here to fix the iOS compilation crash in KMP
+                implementation("io.mockk:mockk:1.14.9")
             }
         }
     }
@@ -92,10 +93,12 @@ kotlin {
 // 2. ANDROID CONFIGURATION BLOCK
 android {
     namespace = "org.vaachak.reader.core"
-    compileSdk = 34 // Hardcoded for stability in this script, or use libs.versions.android.compileSdk.get().toInt()
+
+    // Bumped to 36 to satisfy the androidx.core:core-ktx:1.17.0 requirement from your CI logs
+    compileSdk = 36
 
     defaultConfig {
-        minSdk = 26 // Matches your project needs
+        minSdk = 26
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
     }

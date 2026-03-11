@@ -7,17 +7,23 @@ on:
 jobs:
   mobsf-scan:
     runs-on: ubuntu-latest
+
+    # FIX 1: Added permissions block so the workflow is allowed to upload SARIF results to GitHub's Security tab
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
 
       - name: MobSF Static Analysis
-        # FIX: Point to the new 'MobSF' organization and the latest stable version
         uses: MobSF/mobsfscan@0.4.5
         with:
-          # Pro-tip: Adding '|| true' ensures the workflow doesn't crash before it can upload the report!
           args: '. --sarif --output results.sarif || true'
 
       - name: Upload Scan Results
-        uses: github/codeql-action/upload-sarif@v3
+        # FIX 2: Bumped to v4 to remove the deprecation warning
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
