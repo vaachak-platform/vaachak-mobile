@@ -77,11 +77,11 @@ kotlin {
         val androidUnitTest by getting {
             dependencies {
                 implementation(libs.androidx.junit)
-                implementation("androidx.test:core-ktx:1.6.1")
-                implementation("androidx.test.ext:junit-ktx:1.2.1")
+                implementation("androidx.test:core-ktx:1.7.0")
+                implementation("androidx.test.ext:junit-ktx:1.3.0")
 
                 // Use a safe string reference for room-testing to avoid the "androidx" resolve error
-                implementation("androidx.room:room-testing:2.7.0-alpha01") // Adjust version to match your libs.versions
+                implementation("androidx.room:room-testing:2.8.4") // Adjust version to match your libs.versions
 
                 implementation("org.robolectric:robolectric:4.12.2")
                 implementation("io.github.ganadist.sqlite4java:sqlite4java:1.0.392")
