@@ -11,7 +11,7 @@ app-versionName = "1.0.0"
 # -- Kotlin / Java --
 kotlin = "2.3.10"
 ksp = "2.3.6"
-agp = "8.13.2" # Safely bumped
+agp = "8.11.2" # Safely bumped
 
 # -- Core Libraries --
 coreKtx = "1.17.0"
