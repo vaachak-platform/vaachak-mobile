@@ -146,7 +146,7 @@ dependencies {
 
     implementation(libs.timber)
 
-    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.13")
+    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
     implementation("androidx.core:core-splashscreen:1.2.0")
 
     // Unit Testing core
