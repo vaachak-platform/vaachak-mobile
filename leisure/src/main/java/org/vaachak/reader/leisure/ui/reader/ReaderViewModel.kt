@@ -6,13 +6,11 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,6 +44,7 @@ import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.publication.services.positions
 import org.readium.r2.shared.publication.services.search.SearchService
+import org.vaachak.reader.core.common.AppCoroutineConfig
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
 import org.vaachak.reader.core.data.repository.AiRepository
@@ -78,40 +77,47 @@ class ReaderViewModel @Inject constructor(
     private val _currentTtsVoice = MutableStateFlow<AndroidTtsEngine.Voice?>(null)
     val currentTtsVoiceId: StateFlow<String?> = _currentTtsVoice
         .map { it?.id?.value }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
+        .stateIn(viewModelScope, AppCoroutineConfig.whileSubscribed, null)
 
     private val _currentTtsLanguage = MutableStateFlow("default")
     val currentTtsLanguage = _currentTtsLanguage.asStateFlow()
 
     val isEinkEnabled: StateFlow<Boolean> = settingsRepo.isEinkEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+        .stateIn(viewModelScope, AppCoroutineConfig.whileSubscribed, false)
 
     val isOfflineModeEnabled: StateFlow<Boolean> = settingsRepo.isOfflineModeEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+        .stateIn(viewModelScope, AppCoroutineConfig.whileSubscribed, false)
 
     private val _bookAiEnabled = MutableStateFlow(true)
-    val isAiEnabled = combine(isOfflineModeEnabled, _bookAiEnabled) { _, local -> local }
-        .stateIn(viewModelScope, SharingStarted.Lazily, true)
+    val isAiEnabled = combine(isOfflineModeEnabled, _bookAiEnabled) { _, local ->
+        local
+    }.stateIn(viewModelScope, AppCoroutineConfig.lazily, true)
 
     val epubPreferences: StateFlow<EpubPreferences> = settingsRepo.readerPreferences
         .map { prefs -> buildEpubPreferences(prefs) }
         .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, EpubPreferences())
+        .stateIn(viewModelScope, AppCoroutineConfig.eagerly, EpubPreferences())
 
     private var currentTotalPositions: Int = 0
     private var isFirstLocator = true
     private val _publication = MutableStateFlow<Publication?>(null)
     val publication: StateFlow<Publication?> = _publication.asStateFlow()
+
     private val _currentLocator = MutableStateFlow<Locator?>(null)
     val currentLocator: StateFlow<Locator?> = _currentLocator.asStateFlow()
+
     private val _currentPageInfo = MutableStateFlow("Page 1")
     val currentPageInfo = _currentPageInfo.asStateFlow()
+
     private val _initialLocator = MutableStateFlow<Locator?>(null)
     val initialLocator: StateFlow<Locator?> = _initialLocator.asStateFlow()
+
     private val _showToc = MutableStateFlow(false)
     val showToc: StateFlow<Boolean> = _showToc.asStateFlow()
+
     private val _navigationEvent = MutableSharedFlow<Link>()
     val navigationEvent = _navigationEvent.asSharedFlow()
+
     private val _hasChapterError = MutableStateFlow(false)
     val hasChapterError: StateFlow<Boolean> = _hasChapterError.asStateFlow()
 
@@ -120,12 +126,16 @@ class ReaderViewModel @Inject constructor(
 
     private val _showSearch = MutableStateFlow(false)
     val showSearch: StateFlow<Boolean> = _showSearch.asStateFlow()
+
     private val _bookSearchQuery = MutableStateFlow("")
     val bookSearchQuery: StateFlow<String> = _bookSearchQuery.asStateFlow()
+
     private val _isBookSearching = MutableStateFlow(false)
     val isBookSearching: StateFlow<Boolean> = _isBookSearching.asStateFlow()
+
     private val _searchResults = MutableStateFlow<List<Locator>>(emptyList())
     val searchResults: StateFlow<List<Locator>> = _searchResults.asStateFlow()
+
     private val _jumpEvent = MutableSharedFlow<Locator>()
     val jumpEvent = _jumpEvent.asSharedFlow()
 
@@ -137,21 +147,28 @@ class ReaderViewModel @Inject constructor(
 
     private val _isBottomSheetVisible = MutableStateFlow(false)
     val isBottomSheetVisible = _isBottomSheetVisible.asStateFlow()
+
     private val _aiResponse = MutableStateFlow("")
     val aiResponse = _aiResponse.asStateFlow()
+
     private val _isImageResponse = MutableStateFlow(false)
     val isImageResponse = _isImageResponse.asStateFlow()
+
     private val _isDictionaryLookup = MutableStateFlow(false)
     val isDictionaryLookup = _isDictionaryLookup.asStateFlow()
+
     private val _isDictionaryLoading = MutableStateFlow(false)
     val isDictionaryLoading = _isDictionaryLoading.asStateFlow()
+
     private val _showTagSelector = MutableStateFlow(false)
     val showTagSelector = _showTagSelector.asStateFlow()
 
     private val _showRecapConfirmation = MutableStateFlow(false)
     val showRecapConfirmation: StateFlow<Boolean> = _showRecapConfirmation.asStateFlow()
+
     private val _recapText = MutableStateFlow<String?>(null)
     val recapText: StateFlow<String?> = _recapText.asStateFlow()
+
     private val _isRecapLoading = MutableStateFlow(false)
     val isRecapLoading: StateFlow<Boolean> = _isRecapLoading.asStateFlow()
 
@@ -174,35 +191,44 @@ class ReaderViewModel @Inject constructor(
         id to profileId
     }.flatMapLatest { (id, profileId) ->
         highlightDao.getHighlightsForBook(id, profileId)
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, AppCoroutineConfig.lazily, emptyList())
 
-    val bookmarksList: StateFlow<List<HighlightEntity>> = allBookItems.map { list ->
-        list.filter { it.tag != "BOOKMARK" && it.tag != "recap" }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val bookmarksList: StateFlow<List<HighlightEntity>> = allBookItems
+        .map { list -> list.filter { it.tag != "BOOKMARK" && it.tag != "recap" } }
+        .stateIn(viewModelScope, AppCoroutineConfig.lazily, emptyList())
 
-    val savedBookmarks: StateFlow<List<HighlightEntity>> = allBookItems.map { list ->
-        list.filter { it.tag == "BOOKMARK" }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val savedBookmarks: StateFlow<List<HighlightEntity>> = allBookItems
+        .map { list -> list.filter { it.tag == "BOOKMARK" } }
+        .stateIn(viewModelScope, AppCoroutineConfig.lazily, emptyList())
 
-    val isCurrentPageBookmarked: StateFlow<Boolean> = combine(currentLocator, savedBookmarks) { locator, bookmarks ->
+    val isCurrentPageBookmarked: StateFlow<Boolean> = combine(
+        currentLocator,
+        savedBookmarks
+    ) { locator, bookmarks ->
         if (locator == null) return@combine false
-        withContext(Dispatchers.Default) {
+
+        withContext(AppCoroutineConfig.default) {
             bookmarks.any { entity ->
                 try {
                     val bLoc = Locator.fromJSON(JSONObject(entity.locatorJson))
                     bLoc?.href == locator.href &&
-                            abs((bLoc.locations.totalProgression ?: 0.0) - (locator.locations.totalProgression ?: 0.0)) < 0.01
-                } catch (e: Exception) {
+                            abs(
+                                (bLoc.locations.totalProgression ?: 0.0) -
+                                        (locator.locations.totalProgression ?: 0.0)
+                            ) < 0.01
+                } catch (_: Exception) {
                     false
                 }
             }
         }
-    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Lazily, false)
+    }.distinctUntilChanged()
+        .stateIn(viewModelScope, AppCoroutineConfig.lazily, false)
 
     val currentBookHighlights: StateFlow<List<Decoration>> = combine(
-        allBookItems, isEinkEnabled
+        allBookItems,
+        isEinkEnabled
     ) { items, isEink ->
-        withContext(Dispatchers.Default) {
+        withContext(AppCoroutineConfig.default) {
             items.filter { it.tag != "BOOKMARK" }.mapNotNull { entity ->
                 try {
                     val locator = Locator.fromJSON(JSONObject(entity.locatorJson))
@@ -210,36 +236,53 @@ class ReaderViewModel @Inject constructor(
                         Decoration(
                             id = entity.id.toString(),
                             locator = locator,
-                            style = Decoration.Style.Highlight(tint = if (isEink) Color.LTGRAY else entity.color)
+                            style = Decoration.Style.Highlight(
+                                tint = if (isEink) Color.LTGRAY else entity.color
+                            )
                         )
-                    } else null
+                    } else {
+                        null
+                    }
                 } catch (_: Exception) {
                     null
                 }
             }
         }
-    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    }.stateIn(viewModelScope, AppCoroutineConfig.lazily, emptyList())
 
     private val _isTtsActive = MutableStateFlow(false)
     val isTtsActive = _isTtsActive.asStateFlow()
+
     private val _ttsDecoration = MutableStateFlow<List<Decoration>>(emptyList())
     val ttsDecoration: StateFlow<List<Decoration>> = _ttsDecoration.asStateFlow()
+
     private var visualNavigatorProvider: (() -> DecorableNavigator?)? = null
-    private var ttsNavigator: TtsNavigator<AndroidTtsSettings, AndroidTtsPreferences, AndroidTtsEngine.Error, AndroidTtsEngine.Voice>? = null
+    private var ttsNavigator: TtsNavigator<
+            AndroidTtsSettings,
+            AndroidTtsPreferences,
+            AndroidTtsEngine.Error,
+            AndroidTtsEngine.Voice
+            >? = null
+
     private var sleepTimerJob: kotlinx.coroutines.Job? = null
     private var lockedOutUtteranceText: String? = null
 
     val ttsSettings: StateFlow<TtsSettings> = settingsRepo.ttsSettings.stateIn(
         scope = viewModelScope,
-        started = SharingStarted.Lazily,
-        initialValue = TtsSettings(1.0f, true, "underline", "default",false, 0, 0.5f,"default")
+        started = AppCoroutineConfig.lazily,
+        initialValue = TtsSettings(1.0f, true, "underline", "default", false, 0, 0.5f, "default")
     )
 
     private val _showTtsBar = MutableStateFlow(false)
     val showTtsBar: StateFlow<Boolean> = _showTtsBar.asStateFlow()
 
-    fun setInitialLocation(json: String?) { this.pendingJumpLocator = json }
-    fun setVisualNavigatorProvider(provider: () -> DecorableNavigator?) { this.visualNavigatorProvider = provider }
+    fun setInitialLocation(json: String?) {
+        this.pendingJumpLocator = json
+    }
+
+    fun setVisualNavigatorProvider(provider: () -> DecorableNavigator?) {
+        this.visualNavigatorProvider = provider
+    }
 
     fun onFileSelected(uri: Uri) {
         _bookSearchQuery.value = ""
@@ -270,9 +313,14 @@ class ReaderViewModel @Inject constructor(
 
             val targetJson = pendingJumpLocator ?: book?.lastLocationJson
             val locator = targetJson?.let {
-                try { Locator.fromJSON(JSONObject(it)) } catch (_: Exception) { null }
+                try {
+                    Locator.fromJSON(JSONObject(it))
+                } catch (_: Exception) {
+                    null
+                }
             }
             _initialLocator.value = locator
+
             val pub = readiumManager.openEpubFromUri(uri)
             _publication.value = pub
             currentTotalPositions = pub?.positions()?.size ?: 0
@@ -284,22 +332,33 @@ class ReaderViewModel @Inject constructor(
 
     fun toggleBookmarksList() {
         _showBookmarks.value = !_showBookmarks.value
-        if (_showBookmarks.value) { _showHighlights.value = false; _showToc.value = false }
+        if (_showBookmarks.value) {
+            _showHighlights.value = false
+            _showToc.value = false
+        }
     }
 
     fun toggleBookmarkOnCurrentPage() {
         val locator = _currentLocator.value ?: return
-        val bookId =_currentBookHash.value ?: return
+        val bookId = _currentBookHash.value ?: return
         val isBookmarked = isCurrentPageBookmarked.value
+
         viewModelScope.launch {
             if (isBookmarked) {
                 val bookmarks = savedBookmarks.value
                 val toDelete = bookmarks.find { entity ->
                     try {
                         val bLoc = Locator.fromJSON(JSONObject(entity.locatorJson))
-                        bLoc?.href == locator.href && abs((bLoc.locations.totalProgression ?: 0.0) - (locator.locations.totalProgression ?: 0.0)) < 0.01
-                    } catch (e: Exception) { false }
+                        bLoc?.href == locator.href &&
+                                abs(
+                                    (bLoc.locations.totalProgression ?: 0.0) -
+                                            (locator.locations.totalProgression ?: 0.0)
+                                ) < 0.01
+                    } catch (_: Exception) {
+                        false
+                    }
                 }
+
                 if (toDelete != null) {
                     highlightDao.deleteHighlightById(toDelete.id)
                     _snackbarMessage.value = "Bookmark removed"
@@ -311,7 +370,8 @@ class ReaderViewModel @Inject constructor(
                     profileId = profileId,
                     locatorJson = locator.toJSON().toString(),
                     text = "Bookmark at ${currentPageInfo.value}",
-                    color = Color.TRANSPARENT, tag = "BOOKMARK"
+                    color = Color.TRANSPARENT,
+                    tag = "BOOKMARK"
                 )
                 highlightDao.insertHighlight(bookmark)
                 _snackbarMessage.value = "Bookmark added"
@@ -323,17 +383,28 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val l = Locator.fromJSON(JSONObject(entity.locatorJson))
-                if (l != null) { _showBookmarks.value = false; _jumpEvent.emit(l) }
-            } catch (_: Exception) {}
+                if (l != null) {
+                    _showBookmarks.value = false
+                    _jumpEvent.emit(l)
+                }
+            } catch (_: Exception) {
+            }
         }
     }
 
-    fun toggleReaderSettings() { _showReaderSettings.value = !_showReaderSettings.value }
-    fun dismissReaderSettings() { _showReaderSettings.value = false }
-    fun toggleBookAi(enabled: Boolean) { _bookAiEnabled.value = enabled }
+    fun toggleReaderSettings() {
+        _showReaderSettings.value = !_showReaderSettings.value
+    }
+
+    fun dismissReaderSettings() {
+        _showReaderSettings.value = false
+    }
+
+    fun toggleBookAi(enabled: Boolean) {
+        _bookAiEnabled.value = enabled
+    }
 
     fun savePreferences(newPrefs: EpubPreferences) = viewModelScope.launch {
-        // Convert Readium EpubPreferences to our domain model, using Elvis operator for null safety
         val readerPrefs = ReaderPreferences(
             theme = newPrefs.theme?.name?.lowercase() ?: "light",
             fontSize = newPrefs.fontSize ?: 1.0,
@@ -353,9 +424,19 @@ class ReaderViewModel @Inject constructor(
     }
 
     private fun buildEpubPreferences(prefs: ReaderPreferences): EpubPreferences {
-        val rTheme = when (prefs.theme) { "dark" -> Theme.DARK; "sepia" -> Theme.SEPIA; else -> Theme.LIGHT }
+        val rTheme = when (prefs.theme) {
+            "dark" -> Theme.DARK
+            "sepia" -> Theme.SEPIA
+            else -> Theme.LIGHT
+        }
+
         val rFont = prefs.fontFamily?.let { FontFamily(it) }
-        val rAlign = when (prefs.textAlign) { "left" -> TextAlign.LEFT; "justify" -> TextAlign.JUSTIFY; else -> TextAlign.START }
+
+        val rAlign = when (prefs.textAlign) {
+            "left" -> TextAlign.LEFT
+            "justify" -> TextAlign.JUSTIFY
+            else -> TextAlign.START
+        }
 
         return EpubPreferences(
             theme = rTheme,
@@ -374,19 +455,30 @@ class ReaderViewModel @Inject constructor(
         )
     }
 
-    fun onRecapClicked() { _showRecapConfirmation.value = true }
-    fun dismissRecapConfirmation() { _showRecapConfirmation.value = false }
+    fun onRecapClicked() {
+        _showRecapConfirmation.value = true
+    }
+
+    fun dismissRecapConfirmation() {
+        _showRecapConfirmation.value = false
+    }
 
     fun getQuickRecap() {
         if (!_bookAiEnabled.value) return
+
         _showRecapConfirmation.value = false
         _isRecapLoading.value = true
+
         viewModelScope.launch {
             val title = _publication.value?.metadata?.title ?: "Unknown Book"
             val currentContext = "Current Position: ${_currentPageInfo.value}"
             val profileId = vaultRepository.activeVaultId.first()
-            val highlights = highlightDao.getHighlightsForBook(_currentBookHash.value ?: "", profileId)
-                .first().take(10).joinToString("\n") { "- ${it.text}" }
+            val highlights = highlightDao
+                .getHighlightsForBook(_currentBookHash.value ?: "", profileId)
+                .first()
+                .take(10)
+                .joinToString("\n") { "- ${it.text}" }
+
             val summary = aiRepository.generateRecap(title, highlights, currentContext)
             _recapText.value = summary
             _isRecapLoading.value = false
@@ -395,16 +487,19 @@ class ReaderViewModel @Inject constructor(
 
     fun saveRecapAsHighlight() {
         val summary = _recapText.value ?: return
-        val currentUri =_currentBookHash.value ?: return
+        val currentUri = _currentBookHash.value ?: return
         val locator = _currentLocator.value ?: return
         val isEink = isEinkEnabled.value
+
         viewModelScope.launch {
             val profileId = vaultRepository.activeVaultId.first()
             val highlight = HighlightEntity(
                 bookHashId = currentUri,
                 profileId = profileId,
                 locatorJson = locator.toJSON().toString(),
-                text = "RECAP: $summary", color = if (isEink) Color.DKGRAY else Color.CYAN, tag = "recap"
+                text = "RECAP: $summary",
+                color = if (isEink) Color.DKGRAY else Color.CYAN,
+                tag = "recap"
             )
             highlightDao.insertHighlight(highlight)
             _recapText.value = null
@@ -412,49 +507,104 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    fun dismissRecapResult() { _recapText.value = null }
-    fun toggleToc() { _showToc.value = !_showToc.value }
+    fun dismissRecapResult() {
+        _recapText.value = null
+    }
+
+    fun toggleToc() {
+        _showToc.value = !_showToc.value
+    }
 
     fun onTocItemSelected(link: Link) {
         val currentHref = _currentLocator.value?.href.toString().substringBefore('#')
         val linkHref = link.href.toString().substringBefore('#')
+
         if (currentHref == linkHref && !link.href.toString().contains('#')) {
             _showToc.value = false
         } else {
-            viewModelScope.launch { _navigationEvent.emit(link) }
+            viewModelScope.launch {
+                _navigationEvent.emit(link)
+            }
             _showToc.value = false
         }
     }
 
     fun toggleSearch() {
-        if (_showSearch.value) { _bookSearchQuery.value = ""; _searchResults.value = emptyList() }
+        if (_showSearch.value) {
+            _bookSearchQuery.value = ""
+            _searchResults.value = emptyList()
+        }
         _showSearch.value = !_showSearch.value
     }
-    fun toggleHighlights() { _showHighlights.value = !_showHighlights.value }
+
+    fun toggleHighlights() {
+        _showHighlights.value = !_showHighlights.value
+    }
 
     fun searchInBook(query: String) {
         val pub = _publication.value ?: return
         val sanitized = query.filter { !it.isISOControl() }.trim()
-        if (sanitized.length > 100) { _snackbarMessage.value = "Query too long"; return }
+
+        if (sanitized.length > 100) {
+            _snackbarMessage.value = "Query too long"
+            return
+        }
+
         _bookSearchQuery.value = sanitized
-        if (sanitized.isBlank()) { _searchResults.value = emptyList(); return }
-        _isBookSearching.value = true; _searchResults.value = emptyList()
+        if (sanitized.isBlank()) {
+            _searchResults.value = emptyList()
+            return
+        }
+
+        _isBookSearching.value = true
+        _searchResults.value = emptyList()
+
         viewModelScope.launch {
             try {
                 val svc = pub.findService(SearchService::class)
-                if (svc == null) { _snackbarMessage.value = "Search not supported"; _isBookSearching.value = false; return@launch }
+                if (svc == null) {
+                    _snackbarMessage.value = "Search not supported"
+                    _isBookSearching.value = false
+                    return@launch
+                }
+
                 val iter = svc.search(sanitized)
                 val res = mutableListOf<Locator>()
                 while (res.size < 50) {
-                    val c = iter.next().getOrNull() ?: break; res.addAll(c.locators); if (c.locators.isEmpty()) break
+                    val c = iter.next().getOrNull() ?: break
+                    res.addAll(c.locators)
+                    if (c.locators.isEmpty()) break
                 }
                 _searchResults.value = res
-            } catch (e: Exception) { _snackbarMessage.value = e.message } finally { _isBookSearching.value = false }
+            } catch (e: Exception) {
+                _snackbarMessage.value = e.message
+            } finally {
+                _isBookSearching.value = false
+            }
         }
     }
 
-    fun onSearchResultClicked(l: Locator) { viewModelScope.launch { _showSearch.value = false; _jumpEvent.emit(l); _bookSearchQuery.value = ""; _searchResults.value = emptyList() } }
-    fun onHighlightClicked(h: HighlightEntity) { viewModelScope.launch { try { val l = Locator.fromJSON(JSONObject(h.locatorJson)); if (l != null) { _showHighlights.value = false; _jumpEvent.emit(l) } } catch (_: Exception) {} } }
+    fun onSearchResultClicked(l: Locator) {
+        viewModelScope.launch {
+            _showSearch.value = false
+            _jumpEvent.emit(l)
+            _bookSearchQuery.value = ""
+            _searchResults.value = emptyList()
+        }
+    }
+
+    fun onHighlightClicked(h: HighlightEntity) {
+        viewModelScope.launch {
+            try {
+                val l = Locator.fromJSON(JSONObject(h.locatorJson))
+                if (l != null) {
+                    _showHighlights.value = false
+                    _jumpEvent.emit(l)
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
 
     fun updateProgress(l: Locator) {
         if (isFirstLocator) {
@@ -500,13 +650,21 @@ class ReaderViewModel @Inject constructor(
     fun closeBook() {
         val finalUri = _currentLocalUri.value
         val finalLocator = _currentLocator.value
+
         viewModelScope.launch {
             if (finalUri != null && finalLocator != null) {
                 val json = finalLocator.toJSON().toString()
                 val prog = finalLocator.locations.totalProgression ?: 0.0
                 val profileId = vaultRepository.activeVaultId.first()
-                bookDao.updateBookProgressByUri(finalUri, profileId, prog, json, System.currentTimeMillis())
+                bookDao.updateBookProgressByUri(
+                    finalUri,
+                    profileId,
+                    prog,
+                    json,
+                    System.currentTimeMillis()
+                )
             }
+
             closeTts()
             readiumManager.closePublication()
             _publication.value = null
@@ -521,7 +679,10 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    fun prepareHighlight(l: Locator) { pendingHighlightLocator = l; _showTagSelector.value = true }
+    fun prepareHighlight(l: Locator) {
+        pendingHighlightLocator = l
+        _showTagSelector.value = true
+    }
 
     fun addTestHighlightAtCurrentLocator() {
         val locator = _currentLocator.value ?: return
@@ -546,8 +707,9 @@ class ReaderViewModel @Inject constructor(
 
     fun saveHighlightWithTag(tag: String) {
         val l = pendingHighlightLocator ?: return
-        val u =_currentBookHash.value ?: return
+        val u = _currentBookHash.value ?: return
         val e = isEinkEnabled.value
+
         viewModelScope.launch {
             val profileId = vaultRepository.activeVaultId.first()
             highlightDao.insertHighlight(
@@ -564,42 +726,127 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    fun deleteHighlight(id: String) { viewModelScope.launch { highlightDao.deleteHighlightById(id) } }
-    fun dismissTagSelector() { _showTagSelector.value = false; pendingHighlightLocator = null }
-    fun onTextSelected(t: String) { currentSelectedText = t; _isBottomSheetVisible.value = true }
+    fun deleteHighlight(id: String) {
+        viewModelScope.launch {
+            highlightDao.deleteHighlightById(id)
+        }
+    }
 
-    fun onActionExplain() { _isDictionaryLookup.value = false; _isDictionaryLoading.value = false; _isImageResponse.value = false; if (!_bookAiEnabled.value) return; viewModelScope.launch { performAiAction("Thinking...") { aiRepository.explainContext(currentSelectedText) } } }
-    fun onActionWhoIsThis() { _isDictionaryLookup.value = false; _isDictionaryLoading.value = false; _isImageResponse.value = false; if (!_bookAiEnabled.value) return; viewModelScope.launch { performAiAction("Investigating...") { aiRepository.whoIsThis(currentSelectedText, _publication.value?.metadata?.title ?: "", "") } } }
-    fun onActionVisualize() { _isDictionaryLookup.value = false; _isDictionaryLoading.value = false; if (!_bookAiEnabled.value) return; viewModelScope.launch { performAiAction("Drawing...") { aiRepository.visualizeText(currentSelectedText) }; _isImageResponse.value = true; } }
+    fun dismissTagSelector() {
+        _showTagSelector.value = false
+        pendingHighlightLocator = null
+    }
 
-    private suspend fun performAiAction(m: String, a: suspend () -> String) { _aiResponse.value = m; try { _aiResponse.value = a() } catch (e: Exception) { _aiResponse.value = e.message ?: "" } }
-    fun dismissRecap() { _recapText.value = null }
-    fun dismissBottomSheet() { _isBottomSheetVisible.value = false; clearAiState() }
-    private fun clearAiState() { _aiResponse.value = ""; _isImageResponse.value = false; _isDictionaryLookup.value = false; _isDictionaryLoading.value = false }
-    fun clearSnackbar() { _snackbarMessage.value = null }
+    fun onTextSelected(t: String) {
+        currentSelectedText = t
+        _isBottomSheetVisible.value = true
+    }
+
+    fun onActionExplain() {
+        _isDictionaryLookup.value = false
+        _isDictionaryLoading.value = false
+        _isImageResponse.value = false
+        if (!_bookAiEnabled.value) return
+
+        viewModelScope.launch {
+            performAiAction("Thinking...") {
+                aiRepository.explainContext(currentSelectedText)
+            }
+        }
+    }
+
+    fun onActionWhoIsThis() {
+        _isDictionaryLookup.value = false
+        _isDictionaryLoading.value = false
+        _isImageResponse.value = false
+        if (!_bookAiEnabled.value) return
+
+        viewModelScope.launch {
+            performAiAction("Investigating...") {
+                aiRepository.whoIsThis(
+                    currentSelectedText,
+                    _publication.value?.metadata?.title ?: "",
+                    ""
+                )
+            }
+        }
+    }
+
+    fun onActionVisualize() {
+        _isDictionaryLookup.value = false
+        _isDictionaryLoading.value = false
+        if (!_bookAiEnabled.value) return
+
+        viewModelScope.launch {
+            performAiAction("Drawing...") {
+                aiRepository.visualizeText(currentSelectedText)
+            }
+            _isImageResponse.value = true
+        }
+    }
+
+    private suspend fun performAiAction(message: String, action: suspend () -> String) {
+        _aiResponse.value = message
+        try {
+            _aiResponse.value = action()
+        } catch (e: Exception) {
+            _aiResponse.value = e.message ?: ""
+        }
+    }
+
+    fun dismissRecap() {
+        _recapText.value = null
+    }
+
+    fun dismissBottomSheet() {
+        _isBottomSheetVisible.value = false
+        clearAiState()
+    }
+
+    private fun clearAiState() {
+        _aiResponse.value = ""
+        _isImageResponse.value = false
+        _isDictionaryLookup.value = false
+        _isDictionaryLoading.value = false
+    }
+
+    fun clearSnackbar() {
+        _snackbarMessage.value = null
+    }
 
     fun lookupWord(word: String) {
         val trimmedWord = word.trim()
         val wordCount = trimmedWord.split(Regex("\\s+")).size
+
         if (wordCount > 5 || trimmedWord.length > 50) {
-            _isBottomSheetVisible.value = true; _isDictionaryLookup.value = true; _isDictionaryLoading.value = false
+            _isBottomSheetVisible.value = true
+            _isDictionaryLookup.value = true
+            _isDictionaryLoading.value = false
             _aiResponse.value = "Selection too long for dictionary."
             return
         }
+
         viewModelScope.launch {
             val isEmbedded = settingsRepo.getUseEmbeddedDictionary().first()
             _isDictionaryLookup.value = true
-            var definition: String?
+
+            val definition: String?
             if (isEmbedded) {
-                _isBottomSheetVisible.value = true; _aiResponse.value = "Searching device dictionaries..."; _isDictionaryLoading.value = true
+                _isBottomSheetVisible.value = true
+                _aiResponse.value = "Searching device dictionaries..."
+                _isDictionaryLoading.value = true
                 try {
                     definition = dictionaryRepository.getDefinition(word)
                     _aiResponse.value = definition ?: "No definition found in local dictionary."
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     _aiResponse.value = "Error searching local dictionaries."
-                } finally { _isDictionaryLoading.value = false }
+                } finally {
+                    _isDictionaryLoading.value = false
+                }
             } else {
-                _isBottomSheetVisible.value = true; _aiResponse.value = "Searching embedded directory..."; _isDictionaryLoading.value = true
+                _isBottomSheetVisible.value = true
+                _aiResponse.value = "Searching embedded directory..."
+                _isDictionaryLoading.value = true
                 definition = dictionaryRepository.getjsonDefinition(word)
                 _aiResponse.value = definition ?: "No definition found in embedded json."
                 _isDictionaryLoading.value = false
@@ -611,45 +858,97 @@ class ReaderViewModel @Inject constructor(
         val uri = _currentLocalUri.value ?: return
         if (locationJson.isBlank() && _currentLocator.value == null) return
 
-        viewModelScope.launch(Dispatchers.IO) {
-            val finalJson = if (locationJson.isNotBlank()) locationJson else _currentLocator.value?.toJSON()?.toString() ?: return@launch
-            val prog = try { JSONObject(finalJson).optJSONObject("locations")?.optDouble("totalProgression") ?: 0.0 } catch (e: Exception) { 0.0 }
+        viewModelScope.launch(AppCoroutineConfig.io) {
+            val finalJson = if (locationJson.isNotBlank()) {
+                locationJson
+            } else {
+                _currentLocator.value?.toJSON()?.toString() ?: return@launch
+            }
+
+            val prog = try {
+                JSONObject(finalJson).optJSONObject("locations")?.optDouble("totalProgression") ?: 0.0
+            } catch (_: Exception) {
+                0.0
+            }
 
             val profileId = vaultRepository.activeVaultId.first()
             bookDao.updateBookProgressByUri(uri, profileId, prog, finalJson, System.currentTimeMillis())
             yield()
-            withContext(NonCancellable) { syncRepository.sync() }
+            withContext(NonCancellable) {
+                syncRepository.sync()
+            }
         }
     }
 
-    fun resetLayoutToDefaults() { viewModelScope.launch { settingsRepo.resetLayoutPreferences() } }
+    fun resetLayoutToDefaults() {
+        viewModelScope.launch {
+            settingsRepo.resetLayoutPreferences()
+        }
+    }
 
-    private val ttsListener = object : TtsNavigator.Listener { override fun onStopRequested() { ttsNavigator?.pause() } }
+    private val ttsListener = object : TtsNavigator.Listener {
+        override fun onStopRequested() {
+            ttsNavigator?.pause()
+        }
+    }
+
     suspend fun initTts() {
         if (ttsNavigator != null) return
         val currentPub = _publication.value ?: return
-        val factory = AndroidTtsNavigatorFactory(application = application, publication = currentPub, ttsEngineProvider = AndroidTtsEngineProvider(application))
+
+        val factory = AndroidTtsNavigatorFactory(
+            application = application,
+            publication = currentPub,
+            ttsEngineProvider = AndroidTtsEngineProvider(application)
+        )
 
         factory?.createNavigator(ttsListener)?.onSuccess { navigator ->
             this.ttsNavigator = navigator
 
             viewModelScope.launch {
-                combine(settingsRepo.ttsSettings, _currentTtsVoice, _currentTtsLanguage) { prefs: TtsSettings, voice: AndroidTtsEngine.Voice?, lang: String ->
+                combine(
+                    settingsRepo.ttsSettings,
+                    _currentTtsVoice,
+                    _currentTtsLanguage
+                ) { prefs: TtsSettings, voice: AndroidTtsEngine.Voice?, lang: String ->
                     Triple(prefs, voice, lang)
                 }.collect { (prefs, voice, langCode) ->
-                    val activeLangObj = if (langCode == "default" || langCode.isEmpty()) voice?.language else org.readium.r2.shared.util.Language(langCode)
-                    val voiceMap = if (voice != null && activeLangObj != null) mapOf(activeLangObj to voice.id) else emptyMap()
-                    val newPrefs = AndroidTtsPreferences(speed = prefs.defaultSpeed.toDouble(), pitch = prefs.pitch.toDouble(), language = activeLangObj, voices = voiceMap)
+                    val activeLangObj = if (langCode == "default" || langCode.isEmpty()) {
+                        voice?.language
+                    } else {
+                        org.readium.r2.shared.util.Language(langCode)
+                    }
+
+                    val voiceMap = if (voice != null && activeLangObj != null) {
+                        mapOf(activeLangObj to voice.id)
+                    } else {
+                        emptyMap()
+                    }
+
+                    val newPrefs = AndroidTtsPreferences(
+                        speed = prefs.defaultSpeed.toDouble(),
+                        pitch = prefs.pitch.toDouble(),
+                        language = activeLangObj,
+                        voices = voiceMap
+                    )
                     navigator.submitPreferences(newPrefs)
-                    val isPlaying = navigator.playback.value.playWhenReady && navigator.playback.value.state is TtsNavigator.State.Ready
+
+                    val isPlaying = navigator.playback.value.playWhenReady &&
+                            navigator.playback.value.state is TtsNavigator.State.Ready
                     manageSleepTimer(prefs.sleepTimerMinutes, isPlaying)
                 }
             }
+
             viewModelScope.launch {
                 navigator.playback.collect { playback ->
-                    val isPlaying = playback.playWhenReady && playback.state is TtsNavigator.State.Ready
+                    val isPlaying = playback.playWhenReady &&
+                            playback.state is TtsNavigator.State.Ready
+
                     _isTtsActive.value = isPlaying
-                    if (!isPlaying) _ttsDecoration.value = emptyList()
+                    if (!isPlaying) {
+                        _ttsDecoration.value = emptyList()
+                    }
+
                     val currentMins = settingsRepo.ttsSettings.first().sleepTimerMinutes
                     manageSleepTimer(currentMins, isPlaying)
                 }
@@ -660,32 +959,57 @@ class ReaderViewModel @Inject constructor(
                     val currentPrefs = settingsRepo.ttsSettings.first()
                     val utteranceText = ttsLocation.utterance
                     val locator = ttsLocation.utteranceLocator
+
                     if (locator != null && _isTtsActive.value) {
                         if (lockedOutUtteranceText != null) {
-                            if (utteranceText == lockedOutUtteranceText) return@collect else lockedOutUtteranceText = null
+                            if (utteranceText == lockedOutUtteranceText) {
+                                return@collect
+                            } else {
+                                lockedOutUtteranceText = null
+                            }
                         }
-                        if (currentPrefs.isAutoPageTurnEnabled) _jumpEvent.emit(locator)
-                        val ttsStyle = if (currentPrefs.visualStyle == "underline") Decoration.Style.Underline(tint = android.graphics.Color.BLACK) else Decoration.Style.Highlight(tint = android.graphics.Color.argb(80, 255, 255, 0))
-                        _ttsDecoration.value = listOf(Decoration(id = "tts-active-utterance", locator = locator, style = ttsStyle))
+
+                        if (currentPrefs.isAutoPageTurnEnabled) {
+                            _jumpEvent.emit(locator)
+                        }
+
+                        val ttsStyle = if (currentPrefs.visualStyle == "underline") {
+                            Decoration.Style.Underline(tint = android.graphics.Color.BLACK)
+                        } else {
+                            Decoration.Style.Highlight(
+                                tint = android.graphics.Color.argb(80, 255, 255, 0)
+                            )
+                        }
+
+                        _ttsDecoration.value = listOf(
+                            Decoration(
+                                id = "tts-active-utterance",
+                                locator = locator,
+                                style = ttsStyle
+                            )
+                        )
                     } else {
                         _ttsDecoration.value = emptyList()
                     }
                 }
             }
-        }?.onFailure { error ->
+        }?.onFailure {
             _snackbarMessage.value = "TTS Initialization failed"
         }
     }
 
     fun getHumanVoiceName(voiceId: String, index: Int): String? {
         if (!voiceId.endsWith("local", ignoreCase = true)) return null
+
         val parts = voiceId.split("-")
         return try {
             val lang = parts.getOrNull(0) ?: return voiceId
             val region = parts.getOrNull(1) ?: return voiceId
             val locale = Locale.Builder().setLanguage(lang).setRegion(region).build()
             "${locale.displayCountry} (${locale.displayLanguage}) • Voice $index"
-        } catch (e: Exception) { voiceId }
+        } catch (_: Exception) {
+            voiceId
+        }
     }
 
     fun toggleTts() {
@@ -694,10 +1018,14 @@ class ReaderViewModel @Inject constructor(
             if (ttsNavigator == null) initTts()
             val nav = ttsNavigator ?: return@launch
             val playback = nav.playback.value
-            val isPlaying = playback.playWhenReady && playback.state is TtsNavigator.State.Ready
+            val isPlaying = playback.playWhenReady &&
+                    playback.state is TtsNavigator.State.Ready
 
-            if (isPlaying) { nav.pause() } else {
-                val visualNav = visualNavigatorProvider?.invoke() as? org.readium.r2.navigator.epub.EpubNavigatorFragment
+            if (isPlaying) {
+                nav.pause()
+            } else {
+                val visualNav =
+                    visualNavigatorProvider?.invoke() as? org.readium.r2.navigator.epub.EpubNavigatorFragment
                 val screenLocator = visualNav?.firstVisibleElementLocator() ?: currentLocator.value
                 lockedOutUtteranceText = nav.location.value?.utterance
                 if (screenLocator != null) nav.go(screenLocator)
@@ -706,46 +1034,113 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    fun closeTts() { ttsNavigator?.close(); ttsNavigator = null; _isTtsActive.value = false; _ttsDecoration.value = emptyList(); _showTtsBar.value = false }
-    override fun onCleared() { super.onCleared(); closeTts() }
-    fun updateTtsSpeed(newSpeed: Float) { viewModelScope.launch { settingsRepo.setTtsDefaultSpeed(newSpeed.coerceIn(0.5f, 2.5f)) } }
-    fun updateTtsPitch(newPitch: Float) { viewModelScope.launch { settingsRepo.setTtsPitch(newPitch.coerceIn(0.5f, 2.0f)) } }
-    fun setTtsAutoPageTurn(enabled: Boolean) { viewModelScope.launch { settingsRepo.setTtsAutoPageTurn(enabled) } }
-    fun setTtsVisualStyle(style: String) { viewModelScope.launch { settingsRepo.setTtsVisualStyle(style) } }
-    fun openTtsSettings() { _showTtsSettingsSheet.value = true }
-    fun closeTtsSettings() { _showTtsSettingsSheet.value = false }
+    fun closeTts() {
+        ttsNavigator?.close()
+        ttsNavigator = null
+        _isTtsActive.value = false
+        _ttsDecoration.value = emptyList()
+        _showTtsBar.value = false
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        closeTts()
+    }
+
+    fun updateTtsSpeed(newSpeed: Float) {
+        viewModelScope.launch {
+            settingsRepo.setTtsDefaultSpeed(newSpeed.coerceIn(0.5f, 2.5f))
+        }
+    }
+
+    fun updateTtsPitch(newPitch: Float) {
+        viewModelScope.launch {
+            settingsRepo.setTtsPitch(newPitch.coerceIn(0.5f, 2.0f))
+        }
+    }
+
+    fun setTtsAutoPageTurn(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepo.setTtsAutoPageTurn(enabled)
+        }
+    }
+
+    fun setTtsVisualStyle(style: String) {
+        viewModelScope.launch {
+            settingsRepo.setTtsVisualStyle(style)
+        }
+    }
+
+    fun openTtsSettings() {
+        _showTtsSettingsSheet.value = true
+    }
+
+    fun closeTtsSettings() {
+        _showTtsSettingsSheet.value = false
+    }
 
     fun skipForward() {
         viewModelScope.launch {
-            val visualNav = visualNavigatorProvider?.invoke() as? org.readium.r2.navigator.epub.EpubNavigatorFragment ?: return@launch
+            val visualNav =
+                visualNavigatorProvider?.invoke() as? org.readium.r2.navigator.epub.EpubNavigatorFragment
+                    ?: return@launch
             val nav = ttsNavigator ?: return@launch
             val oldLocator = visualNav.firstVisibleElementLocator()
+
             lockedOutUtteranceText = nav.location.value.utterance
             nav.pause()
             visualNav.goForward(animated = false)
+
             var newLocator = visualNav.firstVisibleElementLocator()
             var attempts = 0
-            while (newLocator == oldLocator && attempts < 20) { kotlinx.coroutines.delay(50); newLocator = visualNav.firstVisibleElementLocator(); attempts++ }
-            if (newLocator != null && newLocator != oldLocator) { nav.go(newLocator); nav.play() } else { lockedOutUtteranceText = null }
+            while (newLocator == oldLocator && attempts < 20) {
+                kotlinx.coroutines.delay(50)
+                newLocator = visualNav.firstVisibleElementLocator()
+                attempts++
+            }
+
+            if (newLocator != null && newLocator != oldLocator) {
+                nav.go(newLocator)
+                nav.play()
+            } else {
+                lockedOutUtteranceText = null
+            }
         }
     }
 
     fun skipBackward() {
         viewModelScope.launch {
-            val visualNav = visualNavigatorProvider?.invoke() as? org.readium.r2.navigator.epub.EpubNavigatorFragment ?: return@launch
+            val visualNav =
+                visualNavigatorProvider?.invoke() as? org.readium.r2.navigator.epub.EpubNavigatorFragment
+                    ?: return@launch
             val nav = ttsNavigator ?: return@launch
             val oldLocator = visualNav.firstVisibleElementLocator()
+
             lockedOutUtteranceText = nav.location.value.utterance
             nav.pause()
             visualNav.goBackward(animated = false)
+
             var newLocator = visualNav.firstVisibleElementLocator()
             var attempts = 0
-            while (newLocator == oldLocator && attempts < 20) { kotlinx.coroutines.delay(50); newLocator = visualNav.firstVisibleElementLocator(); attempts++ }
-            if (newLocator != null && newLocator != oldLocator) { nav.go(newLocator); nav.play() } else { lockedOutUtteranceText = null }
+            while (newLocator == oldLocator && attempts < 20) {
+                kotlinx.coroutines.delay(50)
+                newLocator = visualNav.firstVisibleElementLocator()
+                attempts++
+            }
+
+            if (newLocator != null && newLocator != oldLocator) {
+                nav.go(newLocator)
+                nav.play()
+            } else {
+                lockedOutUtteranceText = null
+            }
         }
     }
 
-    fun dismissChapterErrorAndClose() { _hasChapterError.value = false; closeBook() }
+    fun dismissChapterErrorAndClose() {
+        _hasChapterError.value = false
+        closeBook()
+    }
 
     private fun manageSleepTimer(minutes: Int, isPlaying: Boolean) {
         sleepTimerJob?.cancel()
@@ -759,12 +1154,25 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    fun setBookSpecificVoice(voice: AndroidTtsEngine.Voice) { _currentTtsVoice.value = voice }
-    fun setTtsLanguage(languageCode: String) { viewModelScope.launch { _currentTtsVoice.value = null; _currentTtsLanguage.value = languageCode } }
+    fun setBookSpecificVoice(voice: AndroidTtsEngine.Voice) {
+        _currentTtsVoice.value = voice
+    }
+
+    fun setTtsLanguage(languageCode: String) {
+        viewModelScope.launch {
+            _currentTtsVoice.value = null
+            _currentTtsLanguage.value = languageCode
+        }
+    }
 
     fun getVoicesForLanguage(languageCode: String): List<Voice> {
         val nav = ttsNavigator ?: return emptyList()
-        val targetLangCode = if (languageCode == "default" || languageCode.isEmpty()) Locale.getDefault().language else languageCode.take(2)
+        val targetLangCode = if (languageCode == "default" || languageCode.isEmpty()) {
+            Locale.getDefault().language
+        } else {
+            languageCode.take(2)
+        }
+
         return nav.voices.filter { it.language.code.startsWith(targetLangCode) }
     }
 }

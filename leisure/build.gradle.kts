@@ -160,6 +160,8 @@ dependencies {
     // Turbine for cleanly testing Kotlin StateFlow/SharedFlow
     testImplementation("app.cash.turbine:turbine:1.2.1")
 
+    testImplementation("org.robolectric:robolectric:4.16.1")
+
 }
 
 tasks.dokkaHtml {
