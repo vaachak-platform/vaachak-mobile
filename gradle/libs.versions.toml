@@ -19,7 +19,7 @@ appcompat = "1.7.1"
 material = "1.13.0"
 desugar = "2.1.5" # Safely bumped
 activityCompose = "1.12.4" # Safely bumped
-serializationJson = "1.7.3"
+serializationJson = "1.10.0"
 coroutines = "1.7.3"
 
 # -- Compose --
