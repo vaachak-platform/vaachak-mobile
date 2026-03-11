@@ -8,7 +8,7 @@ jobs:
   mobsf-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: MobSF Static Analysis
         # FIX: Point to the new 'MobSF' organization and the latest stable version
