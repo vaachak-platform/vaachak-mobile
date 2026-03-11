@@ -53,9 +53,11 @@ jobs:
             --no-build-cache \
             --no-configuration-cache
 
-      - name: Build
+      - name: Run Android verification tasks
         run: |
-          ./gradlew build \
+          ./gradlew \
+            :leisure:testDebugUnitTest \
+            :leisure:assembleDebug \
             --stacktrace \
             --info \
             --no-build-cache \
@@ -79,6 +81,7 @@ jobs:
           name: gradle-reports
           path: |
             **/build/reports/**
+            **/build/test-results/**
             **/build/tmp/**
             **/build/kotlin/**
-            **/build/test-results/**
+            **/build/outputs/**

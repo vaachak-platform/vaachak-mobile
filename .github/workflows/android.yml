@@ -43,14 +43,29 @@ jobs:
       - name: Clean
         run: ./gradlew clean --no-configuration-cache
 
+      - name: Verify shared KMP metadata
+        run: |
+          ./gradlew :core:compileCommonMainKotlinMetadata \
+            --stacktrace \
+            --no-build-cache \
+            --no-configuration-cache
+
       - name: Run Detekt
         run: ./gradlew detekt --stacktrace --build-cache --parallel --continue
 
-      - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace --build-cache --parallel
+      - name: Run Android unit tests
+        run: |
+          ./gradlew :leisure:testDebugUnitTest \
+            --stacktrace \
+            --build-cache \
+            --parallel
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace --build-cache --parallel
+        run: |
+          ./gradlew :leisure:assembleDebug \
+            --stacktrace \
+            --build-cache \
+            --parallel
 
       - name: Upload APK artifact
         if: success()
@@ -69,5 +84,6 @@ jobs:
             **/build/reports/**
             **/build/test-results/**
             **/build/tmp/**
+            **/build/kotlin/**
+            **/build/outputs/**
             **/detekt.*
-            **/build/outputs/apk/debug/*.apk
