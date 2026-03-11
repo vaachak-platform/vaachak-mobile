@@ -55,7 +55,7 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.junit)
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-            implementation("app.cash.turbine:turbine:1.1.0")
+            implementation("app.cash.turbine:turbine:1.2.1")
             implementation("io.mockk:mockk:1.14.9")
         }
 
