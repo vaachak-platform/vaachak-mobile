@@ -9,7 +9,7 @@ app-versionCode = "1"
 app-versionName = "1.0.0"
 
 # -- Kotlin / Java --
-kotlin = "2.1.10"
+kotlin = "2.3.10"
 ksp = "2.1.10-1.0.30"
 agp = "8.11.2" # Safely bumped
 
