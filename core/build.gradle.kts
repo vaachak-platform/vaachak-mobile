@@ -83,7 +83,7 @@ kotlin {
                 // Use a safe string reference for room-testing to avoid the "androidx" resolve error
                 implementation("androidx.room:room-testing:2.8.4") // Adjust version to match your libs.versions
 
-                implementation("org.robolectric:robolectric:4.12.2")
+                implementation("org.robolectric:robolectric:4.16.1")
                 implementation("io.github.ganadist.sqlite4java:sqlite4java:1.0.392")
                 implementation("org.bouncycastle:bcprov-jdk15on:1.70")
             }
