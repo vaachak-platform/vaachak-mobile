@@ -158,7 +158,7 @@ dependencies {
     testImplementation("io.mockk:mockk:1.14.9")
 
     // Turbine for cleanly testing Kotlin StateFlow/SharedFlow
-    testImplementation("app.cash.turbine:turbine:1.0.0")
+    testImplementation("app.cash.turbine:turbine:1.2.1")
 
 }
 
