@@ -27,7 +27,7 @@ jobs:
 
       # Caching for the native SQLite binaries required by your :core tests
       - name: Cache SQLite4Java
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.sqlite4java
           key: ${{ runner.os }}-sqlite4java-${{ hashFiles('**/*.gradle*') }}
