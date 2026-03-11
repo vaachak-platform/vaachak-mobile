@@ -56,7 +56,7 @@ kotlin {
             implementation(libs.junit)
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
             implementation("app.cash.turbine:turbine:1.1.0")
-            implementation("io.mockk:mockk:1.13.8")
+            implementation("io.mockk:mockk:1.14.9")
         }
 
         androidMain.dependencies {
