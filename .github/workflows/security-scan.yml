@@ -12,7 +12,7 @@ jobs:
 
       - name: MobSF Static Analysis
         # FIX: Point to the new 'MobSF' organization and the latest stable version
-        uses: MobSF/mobsfscan@v0.4.5
+        uses: MobSF/mobsfscan@0.4.5
         with:
           # Pro-tip: Adding '|| true' ensures the workflow doesn't crash before it can upload the report!
           args: '. --sarif --output results.sarif || true'

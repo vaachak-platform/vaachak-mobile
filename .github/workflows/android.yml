@@ -1,4 +1,4 @@
-name: Android CI
+name: Android CI & Analysis
 
 on:
   push:
@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-test-lint:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,6 +23,14 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: 'gradle' # Automatically caches Gradle dependencies
+
+      # Caching for the native SQLite binaries required by your :core tests
+      - name: Cache SQLite4Java
+        uses: actions/cache@v4
+        with:
+          path: ~/.sqlite4java
+          key: ${{ runner.os }}-sqlite4java-${{ hashFiles('**/*.gradle*') }}
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -32,12 +40,15 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      # Integrated from lint.yml: Runs static analysis first to fail fast on code style
       - name: Run Detekt (Static Analysis)
         run: ./gradlew detekt --build-cache --parallel --continue
 
+      # Runs your refactored BaseDaoTest-driven unit tests
       - name: Run Unit Tests
         run: ./gradlew testDebugUnitTest --build-cache --parallel
 
+      # Final build to ensure the project assembles correctly
       - name: Build Debug APK
         run: ./gradlew assembleDebug --build-cache --parallel
 

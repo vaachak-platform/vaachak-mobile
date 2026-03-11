@@ -22,7 +22,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
-            # ADD THIS STEP: Decode the keystore
+
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -30,7 +30,6 @@ jobs:
           echo $KEYSTORE_BASE64 | base64 --decode > leisure/vaachak-key.jks
 
       - name: Build Release APK
-        # This triggers the 'release' buildType you defined in build.gradle.kts
         env:
           ORG_GRADLE_PROJECT_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           ORG_GRADLE_PROJECT_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -40,8 +39,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          # Targets the naming convention you set in build.gradle.kts: LeisureVaachak-Release.apk
           files: leisure/build/outputs/apk/release/LeisureVaachak-Release.apk
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup Keystore
+        if: always() # Ensure this runs even if the build fails
+        run: rm -f leisure/vaachak-key.jks

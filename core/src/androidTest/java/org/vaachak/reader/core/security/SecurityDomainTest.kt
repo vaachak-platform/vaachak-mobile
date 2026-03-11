@@ -15,8 +15,7 @@ class SecurityDomainTest {
 
     @Before
     fun setup() {
-        // Because this is an expect/actual class, instantiating it here
-        // will automatically wire up the underlying Android JVM 'actual' implementation during testing.
+        java.security.Security.addProvider(org.bouncycastle.jce.provider.BouncyCastleProvider())
         cryptoManager = CryptoManager()
     }
 
