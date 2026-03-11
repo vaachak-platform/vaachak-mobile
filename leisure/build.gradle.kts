@@ -155,7 +155,7 @@ dependencies {
     // Coroutines testing (for runTest and StandardTestDispatcher)
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     // MockK for mocking Dao and Repository classes
-    testImplementation("io.mockk:mockk:1.13.8")
+    testImplementation("io.mockk:mockk:1.14.9")
 
     // Turbine for cleanly testing Kotlin StateFlow/SharedFlow
     testImplementation("app.cash.turbine:turbine:1.0.0")
