@@ -1,5 +1,6 @@
 import org.gradle.api.GradleException
-import java.io.ByteArrayOutputStream
+import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
+import org.gradle.testing.jacoco.tasks.JacocoReport
 
 plugins {
     alias(libs.plugins.android.application)
@@ -10,6 +11,11 @@ plugins {
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.jetbrains.dokka)
+    jacoco
+}
+
+jacoco {
+    toolVersion = libs.versions.jacoco.get()
 }
 
 fun gitSha(): String {
@@ -139,6 +145,15 @@ android {
             output.outputFileName = normalizedFileName
         }
     }
+
+    testOptions {
+        unitTests.all {
+            it.extensions.configure(JacocoTaskExtension::class.java) {
+                isIncludeNoLocationClasses = true
+                excludes = listOf("jdk.internal.*")
+            }
+        }
+    }
 }
 
 dependencies {
@@ -148,6 +163,7 @@ dependencies {
     coreLibraryDesugaring(libs.android.desugar)
 
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(platform(libs.androidx.compose.bom))
@@ -193,22 +209,21 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.apache.commons)
     implementation(libs.timber)
-    implementation("androidx.core:core-splashscreen:1.0.1")
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
     testImplementation(libs.junit)
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-    testImplementation("io.mockk:mockk:1.14.9")
-    testImplementation("app.cash.turbine:turbine:1.2.1")
-    testImplementation("org.robolectric:robolectric:4.16.1")
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk)
+    testImplementation(libs.turbine)
+    testImplementation(libs.robolectric)
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 
-    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
+    debugImplementation(libs.leakcanary.android)
 }
 
 tasks.dokkaHtml {
@@ -220,4 +235,53 @@ tasks.dokkaHtml {
             reportUndocumented.set(true)
         }
     }
+}
+
+tasks.register<JacocoReport>("jacocoDebugUnitTestReport") {
+    dependsOn("testDebugUnitTest")
+
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+
+    val fileFilter = listOf(
+        "**/R.class",
+        "**/R$*.class",
+        "**/BuildConfig.*",
+        "**/Manifest*.*",
+        "**/*Test*.*",
+        "android/**/*.*",
+        "**/*_Factory*.*",
+        "**/*_HiltModules*.*",
+        "**/*Hilt*.*",
+        "**/*MembersInjector*.*",
+        "**/*_Provide*Factory*.*",
+        "**/*ComposableSingletons*.*"
+    )
+
+    val javaClasses = fileTree("${layout.buildDirectory.get().asFile}/intermediates/javac/debug/compileDebugJavaWithJavac/classes") {
+        exclude(fileFilter)
+    }
+
+    val kotlinClasses = fileTree("${layout.buildDirectory.get().asFile}/tmp/kotlin-classes/debug") {
+        exclude(fileFilter)
+    }
+
+    classDirectories.setFrom(files(javaClasses, kotlinClasses))
+    sourceDirectories.setFrom(
+        files(
+            "src/main/java",
+            "src/main/kotlin"
+        )
+    )
+    executionData.setFrom(
+        fileTree(layout.buildDirectory.get().asFile) {
+            include(
+                "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec",
+                "jacoco/testDebugUnitTest.exec"
+            )
+        }
+    )
 }
