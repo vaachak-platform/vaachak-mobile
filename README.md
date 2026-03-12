@@ -1,99 +1,228 @@
-# 📱 Leisure Vaachak (वाचक)
+# Leisure Vaachak (वाचक)
 
 [![Android CI](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/android.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/android.yml)
 [![Lint & Static Analysis](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/lint.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/lint.yml)
 [![Build & Release APK](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/release.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/release.yml)
-
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=vaachak-platform_vaachak-mobile&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=vaachak-platform_vaachak-mobile)
 [![CodeQL Security Scan](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/codeql.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/codeql.yml)
 [![OWASP MobSF Scan](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/security-scan.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/security-scan.yml)
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Platform: Android](https://img.shields.io/badge/Platform-Android_8.0+-green.svg)]()
+[![Platform: Android](https://img.shields.io/badge/Platform-Android_11+-green.svg)]()
 [![Target: E-Ink](https://img.shields.io/badge/Optimized_for-E--Ink-black.svg)]()
 
 
-Leisure Vaachak is a privacy-first Android reading app built for distraction-free leisure reading on phones, tablets, and e-ink devices.
+Privacy-first Android reading app for distraction-free leisure reading, designed for phones, tablets, and e-ink devices.
 
-It is part of the **Vaachak Platform**, which is designed around a simple product philosophy:  
-**leisure reading and study/work reading should not compete inside the same experience.**
+Leisure Vaachak is part of the **Vaachak Platform**, a reading ecosystem built on a simple product principle:
 
-Most reading apps mix leisure, work, notifications, and productivity signals in one place. Leisure Vaachak takes a different approach by focusing on calm, immersive reading with offline-first behavior, privacy-aware sync, and hardware-aware UX for e-ink-friendly devices.
+> **Leisure reading and study/work reading should not compete inside the same experience.**
 
-## Why it is different
+Most reading apps mix books, productivity, notifications, research, and work-like flows into one interface. Leisure Vaachak takes a different approach by focusing on calm, immersive reading with offline-first behavior, privacy-aware sync, and hardware-aware UX for e-ink-friendly devices.
 
-- **Distraction-free by design** — built specifically for leisure reading
-- **Offline-first** — your library and reading state stay useful even without connectivity
-- **Privacy-first sync** — integrates with Vaachak Sync Server using zero-knowledge principles
-- **E-Ink aware UX** — designed with low-friction reading flows and display constraints in mind
-- **Indian language direction** — already benefits from Android TTS support for Hindi and Gujarati where available
+---
 
-## Current status
+## Why this project stands out
+
+Leisure Vaachak is not just an EPUB reader. It is a product-led engineering project built around four deliberate constraints:
+
+- **Distraction-free by design**  
+  Optimized for leisure reading instead of trying to be a general-purpose content app.
+
+- **Offline-first architecture**  
+  Core reading workflows remain useful without connectivity.
+
+- **Privacy-first sync**  
+  Reading state, bookmarks, and highlights are designed to sync without turning user data into a product.
+
+- **Hardware-aware UX**  
+  Special attention is given to e-ink devices, low-refresh displays, and low-friction reading interactions.
+
+It also supports a broader platform direction around **Indian language accessibility**, with Android TTS support already working for languages such as **Hindi** and **Gujarati** where available on-device.
+
+---
+
+## Product status
 
 ### Available now
 - Android app
 - EPUB reading
-- bookmarks, highlights, progress tracking
-- sync support
+- Bookmarks, highlights, and reading progress tracking
+- Privacy-aware sync support
 - Android TTS support
-- e-ink-friendly reading experience
+- E-ink-friendly reading experience
 
 ### Planned
 - PDF support
-- audiobook support
+- Audiobook support
 - iOS expansion
-- 
-## ✨ Key Features
+- Continued expansion of Indian language support
+- Future alignment with the broader Vaachak Platform roadmap
 
-### ✒️ Hardware-Aware E-Ink Optimization
-* **Ghosting Prevention:** Zero-animation transitions, solid-state UI components, and a strict bitonal theme designed specifically for e-paper refresh rates.
-* **Sharpness Engine:** Custom contrast sliders to sharpen secondary text and dividers, mitigating the washed-out look common on Android E-Ink devices.
-* **Pro-Level Typography:** Dual-tab controls for granular layout adjustments (Letter Spacing, Line Height, Paragraph Indents) and specialized fonts (*OpenDyslexic*, *IA Writer Duospace*).
+---
 
-### 🔐 Zero-Knowledge Cross-Device Sync
-* **End-to-End Encryption (E2EE):** Reading progress, bookmarks, and highlights are encrypted *on the device* using AES-256-GCM and PBKDF2 derived keys.
-* **Blind Cloud Storage:** Syncs seamlessly via the [Vaachak Sync Server](https://github.com/vaachak-platform/vaachak-sync-server). The server acts as a blind relay and cannot read your data.
-* **Offline-First Delta Sync:** Read anywhere. Changes are queued locally in Room DB and pushed automatically via timestamp-based delta syncs when a connection is restored.
+## Key capabilities
 
-### 🧠 Bring-Your-Own-Key (BYOK) AI Intelligence
-* **The Story So Far:** Context-aware, spoiler-free summaries generated locally using your personal Gemini API key.
-* **Contextual Actions:** Select text to *Explain* archaic terms, *Investigate* character lore, or *Visualize* scenes.
-* **Privacy by Default:** Your API keys are stored securely on-device in encrypted DataStore preferences. Toggle "Offline Mode" to instantly air-gap the reader.
+### E-Ink-aware reading experience
+- Zero-animation, low-distraction UI behavior tuned for e-paper refresh characteristics
+- Contrast controls to improve readability on Android e-ink hardware
+- Reader preferences for typography, spacing, layout, and visual comfort
+- Support for specialized reading fonts such as **OpenDyslexic** and **IA Writer Duospace**
 
-## 🏗️ Architecture & Tech Stack
+### Privacy-preserving sync
+- Client-side encryption model for reading progress, highlights, and bookmarks
+- Sync integration through the [Vaachak Sync Server](https://github.com/vaachak-platform/vaachak-sync-server)
+- Offline-first queueing and deferred synchronization when connectivity returns
 
-Vaachak is built using **Modern Android Development (MAD)** standards, Clean Architecture, and Kotlin Multiplatform (KMP) principles.
+### Bring-your-own-key AI features
+- Context-aware reading recap using the user’s own Gemini API key
+- Text actions such as explain, investigate, and visualize
+- Offline Mode to disable cloud-dependent AI behavior instantly
+- Local-first settings storage with user-controlled configuration
 
-* **UI Layer:** Jetpack Compose (Material 3) with Unidirectional Data Flow.
-* **Reading Engine:** Readium Kotlin Toolkit.
-* **Networking:** Ktor Client & Kotlinx Serialization.
-* **Persistence:** Room (SQLite) & Jetpack DataStore.
-* **Dependency Injection:** Dagger Hilt.
-* **Security:** `javax.crypto` (AES-GCM / PBKDF2WithHmacSHA256).
+---
 
-👉 **[Read the full Architecture Document here](ARCHITECTURE.md)**
+## Engineering highlights
 
-## 🚀 Getting Started
+This repository is designed to demonstrate product thinking, mobile engineering depth, and platform-level architecture decisions.
 
-### Download & Install
-Pre-compiled APKs for the latest release can be downloaded directly:
-👉 **[Download Vaachak APK](https://github.com/vaachak-platform/vaachak-mobile/releases)**
+### Architecture
+- Modular Android app structure with `:leisure` and shared `:core` modules
+- Kotlin Multiplatform-oriented foundation for future platform expansion
+- Unidirectional data flow and state-driven UI
+- Separation of domain, persistence, sync, and reading-engine concerns
 
-Need help side-loading? 📲 **[Read the Installation Instructions](docs/Install_Instructions.md)**
+### Core technologies
+- **UI:** Jetpack Compose, Material 3
+- **Language:** Kotlin
+- **Shared foundation:** Kotlin Multiplatform principles
+- **Reading engine:** Readium Kotlin Toolkit
+- **Persistence:** Room, SQLite, Jetpack DataStore
+- **Networking:** Ktor Client, Retrofit, OkHttp
+- **Dependency Injection:** Dagger Hilt
+- **Security:** AES-GCM and PBKDF2-based client-side encryption primitives
 
-### Local Development
+### Quality and release posture
+- Android CI
+- static analysis and linting
+- SonarCloud quality gate
+- CodeQL security scanning
+- OWASP MobSF workflow
+- GitHub Actions-based APK release pipeline
+
+👉 **[Read the full architecture document](ARCHITECTURE.md)**
+
+---
+
+## Repository structure
+
+```text
+.
+├── core/                  # Shared platform, data, sync, persistence, and domain logic
+├── leisure/               # Android application module for Leisure Vaachak
+├── docs/                  # User-facing and technical documentation
+├── .github/               # CI, release, security, and automation workflows
+└── ARCHITECTURE.md        # System-level architecture overview
+```
+
+---
+
+## Download
+
+Prebuilt APKs are available from GitHub Releases:
+
+👉 **[Download the latest APK](https://github.com/vaachak-platform/vaachak-mobile/releases)**
+
+Need help side-loading?
+
+📲 **[Installation Instructions](docs/Install_Instructions.md)**
+
+---
+
+## Local development
+
+### Prerequisites
+- Android Studio
+- JDK 21 recommended
+- Android SDK configured
+- Git
+
+### Setup
 1. Clone the repository:
    ```bash
-   git clone [https://github.com/vaachak-platform/vaachak-mobile.git](https://github.com/vaachak-platform/vaachak-mobile.git)
+   git clone https://github.com/vaachak-platform/vaachak-mobile.git
+   cd vaachak-mobile
    ```
-2. Open the project in **Android Studio** (Koala Feature Drop or newer).
-3. Ensure JDK 17+ is installed.
-4. Sync Gradle and build the `:leisure` module.
 
-## 📖 Documentation
-* [**User Guide**](docs/user_guide.md) - Configuration, AI setup, and StarDict dictionary integration.
-* [**System Architecture**](ARCHITECTURE.md) - Deep dive into the E2EE sync model and module structure.
+2. Open the project in Android Studio.
 
-## 📄 License & Attribution
-Vaachak is open-source software licensed under the **MIT License**.
-*Developed by [Piyush Daiya](https://www.linkedin.com/in/piyush-daiya)*
+3. Sync Gradle.
+
+4. Build the Android app module:
+   ```bash
+   ./gradlew :leisure:assembleDebug
+   ```
+
+### Release build
+Release builds require local signing configuration and keystore setup.
+
+```bash
+./gradlew :leisure:assembleRelease
+```
+
+---
+
+## Documentation
+
+- [User Guide](docs/user_guide.md)  
+  Setup, reader configuration, AI configuration, and dictionary support
+
+- [Architecture](ARCHITECTURE.md)  
+  Module structure, sync model, and system design
+
+---
+
+## Platform context
+
+Leisure Vaachak is the flagship Android reading app within **Vaachak Platform**.
+
+**Vaachak Platform** aims to build:
+- focused reading experiences instead of one overloaded app
+- privacy-first sync and local ownership of data
+- better support for e-ink hardware
+- stronger support for Indian languages over time
+
+Current platform repositories:
+- [vaachak-mobile](https://github.com/vaachak-platform/vaachak-mobile)
+- [vaachak-sync-server](https://github.com/vaachak-platform/vaachak-sync-server)
+
+---
+
+## Roadmap
+
+Near-term priorities:
+- strengthen EPUB experience
+- add PDF support
+- add audiobook support
+- continue refining e-ink UX
+- expand Indian language support
+- prepare for broader Vaachak Platform expansion
+
+---
+
+## License
+
+Leisure Vaachak is open-source software licensed under the **MIT License**.
+
+See [LICENSE](LICENSE).
+
+---
+
+## Author
+
+Built by [Piyush Daiya](https://www.linkedin.com/in/piyush-daiya)
+
+If you are a recruiter, hiring manager, or engineer evaluating this project, the best starting points are:
+- the product framing above
+- the [architecture document](ARCHITECTURE.md)
+- the release pipeline and security workflows
+- the modular `core` + `leisure` structure

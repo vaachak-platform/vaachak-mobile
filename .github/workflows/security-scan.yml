@@ -1,4 +1,4 @@
-name: Security Scan (OWASP)
+name: OWASP MobSF Scan
 
 on:
   push:
@@ -11,30 +11,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  mobsf-scan:
+  mobsfscan:
+    name: Source security scan
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
-      security-events: write
-      actions: read
       contents: read
+      security-events: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Run MobSF static analysis
-        uses: MobSF/mobsfscan@0.4.5
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          args: ". --sarif --output results.sarif || true"
+          python-version: "3.12"
 
-      - name: Upload scan results
+      - name: Run MobSFScan
+        uses: MobSF/mobsfscan@main
+        with:
+          args: ". --sarif --output mobsfscan-results.sarif --type android || true"
+
+      - name: Upload SARIF to GitHub code scanning
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: results.sarif
+          sarif_file: mobsfscan-results.sarif
+          category: mobsfscan-android
 
-      - name: Upload SARIF artifact
-        if: always()
+      - name: Upload MobSFScan report artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mobsf-sarif
-          path: results.sarif
+          name: mobsfscan-results
+          path: mobsfscan-results.sarif

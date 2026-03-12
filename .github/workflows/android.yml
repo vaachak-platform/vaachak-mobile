@@ -1,4 +1,4 @@
-name: Android CI & Analysis
+name: Android CI
 
 on:
   push:
@@ -11,9 +11,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test-lint:
+  build:
+    name: Build, test, and static analysis
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -32,50 +33,67 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Cache SQLite4Java
-        uses: actions/cache@v4
-        with:
-          path: ~/.sqlite4java
-          key: ${{ runner.os }}-sqlite4java-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'gradle/libs.versions.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-sqlite4java-
+      - name: Stop Gradle daemons
+        run: ./gradlew --stop || true
 
       - name: Clean
-        run: ./gradlew clean --no-configuration-cache
+        run: |
+          ./gradlew clean \
+            --stacktrace \
+            --console=plain \
+            --warning-mode=summary \
+            --no-problems-report \
+            --no-configuration-cache
 
-      - name: Verify shared KMP metadata
+      - name: Build shared metadata
         run: |
           ./gradlew :core:compileCommonMainKotlinMetadata \
             --stacktrace \
+            --console=plain \
+            --warning-mode=summary \
+            --no-problems-report \
+            --no-daemon \
             --no-build-cache \
-            --no-configuration-cache
+            --no-configuration-cache \
+            --rerun-tasks
 
-      - name: Run Detekt
-        run: ./gradlew detekt --stacktrace --build-cache --parallel --continue
+      - name: Run static analysis
+        run: |
+          ./gradlew detekt \
+            --stacktrace \
+            --console=plain \
+            --warning-mode=summary \
+            --no-problems-report \
+            --no-daemon \
+            --no-build-cache \
+            --no-configuration-cache \
+            --rerun-tasks
 
-      - name: Run Android unit tests
+      - name: Run unit tests
         run: |
           ./gradlew :leisure:testDebugUnitTest \
             --stacktrace \
-            --build-cache \
-            --parallel
+            --console=plain \
+            --warning-mode=summary \
+            --no-problems-report \
+            --no-daemon \
+            --no-build-cache \
+            --no-configuration-cache \
+            --rerun-tasks
 
-      - name: Build debug APK
+      - name: Assemble debug APK
         run: |
           ./gradlew :leisure:assembleDebug \
             --stacktrace \
-            --build-cache \
-            --parallel
+            --console=plain \
+            --warning-mode=summary \
+            --no-problems-report \
+            --no-daemon \
+            --no-build-cache \
+            --no-configuration-cache \
+            --rerun-tasks
 
-      - name: Upload APK artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Vaachak-Debug-APK
-          path: leisure/build/outputs/apk/debug/*.apk
-          retention-days: 7
-
-      - name: Upload reports on failure
+      - name: Upload test and build reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -83,7 +101,4 @@ jobs:
           path: |
             **/build/reports/**
             **/build/test-results/**
-            **/build/tmp/**
-            **/build/kotlin/**
             **/build/outputs/**
-            **/detekt.*

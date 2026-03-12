@@ -17,7 +17,8 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -41,47 +42,34 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
 
-      - name: Clean workspace outputs
-        run: ./gradlew clean --no-build-cache --no-configuration-cache
+      - name: Stop Gradle daemons
+        run: ./gradlew --stop || true
 
-      - name: Diagnose Kotlin metadata compile
-        run: |
-          ./gradlew :core:compileCommonMainKotlinMetadata \
-            --stacktrace \
-            --info \
-            --rerun-tasks \
-            --no-build-cache \
-            --no-configuration-cache
-
-      - name: Run Android verification tasks
-        run: |
-          ./gradlew \
-            :leisure:testDebugUnitTest \
-            :leisure:assembleDebug \
-            --stacktrace \
-            --info \
-            --no-build-cache \
-            --no-configuration-cache
-
-      - name: Sonar
-        if: success()
+      - name: Build and analyze
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          ./gradlew sonar \
+          ./gradlew clean \
+            :core:compileCommonMainKotlinMetadata \
+            :leisure:testDebugUnitTest \
+            :leisure:assembleDebug \
+            sonar \
             --stacktrace \
-            --info \
-            --no-configuration-cache
+            --console=plain \
+            --warning-mode=summary \
+            --no-problems-report \
+            --no-daemon \
+            --no-build-cache \
+            --no-configuration-cache \
+            --rerun-tasks
 
-      - name: Upload build reports on failure
+      - name: Upload sonar-related reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: gradle-reports
+          name: sonar-reports
           path: |
             **/build/reports/**
             **/build/test-results/**
-            **/build/tmp/**
-            **/build/kotlin/**
             **/build/outputs/**
