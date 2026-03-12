@@ -140,3 +140,84 @@ android {
         }
     }
 }
+
+dependencies {
+    implementation(project(":core"))
+    implementation(libs.androidx.foundation.layout)
+
+    coreLibraryDesugaring(libs.android.desugar)
+
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.ui.tooling.preview)
+    implementation(libs.androidx.material3)
+    implementation(libs.androidx.foundation)
+    implementation(libs.androidx.ui.text)
+    implementation(libs.androidx.ui.viewbinding)
+    implementation(libs.androidx.material.icons)
+    implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.activity.compose)
+
+    implementation(libs.androidx.navigation.compose)
+
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
+
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.gson)
+    implementation(libs.okhttp)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.android)
+    implementation(libs.ktor.client.content.negotiation)
+    implementation(libs.ktor.serialization.json)
+    implementation(libs.ktor.client.logging)
+
+    implementation(libs.readium.shared)
+    implementation(libs.readium.streamer)
+    implementation(libs.readium.navigator)
+    implementation(libs.readium.opds)
+    implementation(libs.readium.lcp)
+    implementation(libs.readium.navigator.media.tts)
+    implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.media3.common)
+
+    implementation(libs.google.generativeai)
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.coil.compose)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.apache.commons)
+    implementation(libs.timber)
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
+    testImplementation(libs.junit)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation("io.mockk:mockk:1.14.9")
+    testImplementation("app.cash.turbine:turbine:1.2.1")
+    testImplementation("org.robolectric:robolectric:4.16.1")
+
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+
+    debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
+}
+
+tasks.dokkaHtml {
+    outputDirectory.set(layout.buildDirectory.dir("dokka"))
+    moduleName.set("Leisure Vaachak API Reference")
+    dokkaSourceSets {
+        configureEach {
+            skipDeprecated.set(true)
+            reportUndocumented.set(true)
+        }
+    }
+}
