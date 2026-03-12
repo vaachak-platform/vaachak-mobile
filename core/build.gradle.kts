@@ -51,7 +51,8 @@ kotlin {
             implementation(libs.androidx.documentfile)
             implementation(libs.androidx.datastore.preferences)
             implementation(libs.androidx.room.ktx)
-            implementation(libs.hilt.android)
+
+            implementation("com.google.dagger:hilt-android:2.57.2")
 
             implementation(libs.retrofit)
             implementation(libs.retrofit.gson)
@@ -126,7 +127,7 @@ dependencies {
     add("kspIosArm64", libs.androidx.room.compiler)
     add("kspIosSimulatorArm64", libs.androidx.room.compiler)
 
-    add("kspAndroid", libs.hilt.compiler)
+    add("kspAndroid", "com.google.dagger:hilt-android-compiler:2.57.2")
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

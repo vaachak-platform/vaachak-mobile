@@ -1,9 +1,9 @@
 package org.vaachak.reader.core.data.local
 
+import app.cash.turbine.test
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
-import kotlinx.coroutines.test.runTest
-import app.cash.turbine.test
 import org.vaachak.reader.core.domain.model.ProfileEntity
 import org.vaachak.reader.core.local.BaseDaoTest
 

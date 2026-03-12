@@ -24,11 +24,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           xmlns:tools="http://schemas.android.com/tools"
           package="org.vaachak.reader.leisure">
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.TTS_SERVICE" />
-        </intent>
-    </queries>
+
     <application
             android:name="org.vaachak.reader.leisure.VaachakApplication"
             android:allowBackup="false"

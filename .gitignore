@@ -1,49 +1,31 @@
-# Gradle and Android Studio
+# IDE / OS
 *.iml
-.gradle
-/local.properties
-/.idea/
 .DS_Store
-/build
-/captures
-/caches
-/daemon
-/native
-/wrapper
-.externalNativeBuild
-.cxx
-.kotlin
+.idea/
+.kotlin/
 
-# Module specific build folders
+# Gradle
+.gradle/
+local.properties
+
+# Build outputs
+build/
 */build/
+captures/
+.externalNativeBuild/
+.cxx/
 
-# Do not include APKs in the source tree (we will use GitHub Releases for this)
+# Android artifacts
 *.apk
 *.ap_
 *.aab
 
-# Keystore files
+# Signing / secrets
 *.jks
 *.keystore
+secrets.properties
+/leisure/vaachak-key.jks
 
-# DO NOT UPLOAD API KEYS
-# Assuming your keys are here. If they are in local.properties, they are already ignored above.
+# Local-only config/examples that should not be committed
 AppConfig.kt
-future_roadmap.md
-assemblyai.md
-*.txt
-
-# Gradle internals and caches
-.gradle/
-caches/
-build/
-
-# Ignore full Gradle distributions (but keep the small wrapper jar)
-wrapper/dists/kotlin/
-daemon/
-android/
-native/
 AppConfig.example.kt
-
-
-AGENTS.md

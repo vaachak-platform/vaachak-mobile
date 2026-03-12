@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.ChevronRight
@@ -23,8 +25,6 @@ import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.LibraryBooks
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.SwitchAccount
@@ -221,7 +221,7 @@ fun GlobalSettingsTab(
 fun BookSettingsTab(navController: NavController) {
     SettingsGroup(title = "Library & Visuals") {
         SettingsTile(
-            icon = Icons.Default.LibraryBooks, title = "Library Settings (Visuals)", subtitle = "E-ink optimization, Cover Styles, Smart Stacks",
+            icon = Icons.AutoMirrored.Filled.LibraryBooks, title = "Library Settings (Visuals)", subtitle = "E-ink optimization, Cover Styles, Smart Stacks",
             onClick = { navController.navigate(Screen.Bookshelf.route) }
         )
     }
@@ -246,7 +246,7 @@ fun BookSettingsTab(navController: NavController) {
 fun ContentSettingsTab(navController: NavController) {
     SettingsGroup(title = "Sources") {
         SettingsTile(
-            icon = Icons.Default.List, title = "Manage Catalogs", subtitle = "Add or remove OPDS feeds",
+            icon = Icons.AutoMirrored.Filled.List, title = "Manage Catalogs", subtitle = "Add or remove OPDS feeds",
             onClick = { navController.navigate("catalog_manage") }
         )
     }

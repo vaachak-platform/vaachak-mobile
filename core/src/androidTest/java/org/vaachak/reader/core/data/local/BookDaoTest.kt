@@ -1,11 +1,11 @@
 package org.vaachak.reader.core.local
 
+import app.cash.turbine.test
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.domain.model.BookEntity
-import kotlinx.coroutines.test.runTest
-import app.cash.turbine.test
 
 class BookDaoTest : BaseDaoTest() {
 

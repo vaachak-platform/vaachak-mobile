@@ -42,18 +42,23 @@ jobs:
 
       - name: Build release APK
         env:
-          ORG_GRADLE_PROJECT_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          ORG_GRADLE_PROJECT_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          ORG_GRADLE_PROJECT_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_VAACHAK_KEYSTORE_PASSWORD: ${{ secrets.VAACHAK_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_VAACHAK_KEY_ALIAS: ${{ secrets.VAACHAK_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_VAACHAK_KEY_PASSWORD: ${{ secrets.VAACHAK_KEY_PASSWORD }}
         run: |
           ./gradlew :leisure:assembleRelease \
             --stacktrace \
             --no-configuration-cache
 
+      - name: Verify release APK exists
+        run: |
+          ls -lah leisure/build/outputs/apk/release/
+          test -n "$(find leisure/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)"
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: leisure/build/outputs/apk/release/LeisureVaachak-Release.apk
+          files: leisure/build/outputs/apk/release/*.apk
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -9,16 +9,41 @@ plugins {
     alias(libs.plugins.jetbrains.dokka)
 }
 
+fun gitSha(): String {
+    return try {
+        providers.exec {
+            commandLine("git", "rev-parse", "--short", "HEAD")
+        }.standardOutput.asText.get().trim().ifBlank { "unknown" }
+    } catch (_: Exception) {
+        "unknown"
+    }
+}
+
+fun requireSigningValue(name: String, value: String?): String {
+    return value ?: throw GradleException(
+        "Missing signing value: $name. " +
+                "For local release builds, set it in ~/.gradle/gradle.properties. " +
+                "For CI, provide ORG_GRADLE_PROJECT_$name through GitHub Actions secrets."
+    )
+}
+
+val releaseKeystoreFile = file("vaachak-key.jks")
+val releaseStorePassword =
+    System.getenv("ORG_GRADLE_PROJECT_VAACHAK_KEYSTORE_PASSWORD")
+        ?: providers.gradleProperty("VAACHAK_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias =
+    System.getenv("ORG_GRADLE_PROJECT_VAACHAK_KEY_ALIAS")
+        ?: providers.gradleProperty("VAACHAK_KEY_ALIAS").orNull
+val releaseKeyPassword =
+    System.getenv("ORG_GRADLE_PROJECT_VAACHAK_KEY_PASSWORD")
+        ?: providers.gradleProperty("VAACHAK_KEY_PASSWORD").orNull
+
 android {
     namespace = "org.vaachak.reader.leisure"
-
-    // Updated to use TOML variable
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
         applicationId = "org.vaachak.reader.leisure"
-
-        // Updated to use TOML variables
         minSdk = libs.versions.android.minSdk.get().toInt()
         targetSdk = libs.versions.android.targetSdk.get().toInt()
 
@@ -26,29 +51,45 @@ android {
         versionName = libs.versions.app.versionName.get()
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "GIT_SHA", "\"${gitSha()}\"")
     }
 
-    signingConfigs {
-        create("release") {
-            storeFile = file("vaachak-key.jks")
-            // This reads from the GitHub Action ENV vars, or falls back to your local properties
-            storePassword = System.getenv("ORG_GRADLE_PROJECT_KEYSTORE_PASSWORD") ?: "your_local_dev_password"
-            keyAlias = System.getenv("ORG_GRADLE_PROJECT_KEY_ALIAS") ?: "your_local_alias"
-            keyPassword = System.getenv("ORG_GRADLE_PROJECT_KEY_PASSWORD") ?: "your_local_key_password"
+    val releaseSigningConfig = signingConfigs.create("release") {
+        if (!releaseKeystoreFile.exists()) {
+            throw GradleException(
+                "Missing release keystore file: ${releaseKeystoreFile.absolutePath}"
+            )
         }
+
+        storeFile = releaseKeystoreFile
+        storePassword = requireSigningValue("VAACHAK_KEYSTORE_PASSWORD", releaseStorePassword)
+        keyAlias = requireSigningValue("VAACHAK_KEY_ALIAS", releaseKeyAlias)
+        keyPassword = requireSigningValue("VAACHAK_KEY_PASSWORD", releaseKeyPassword)
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            buildConfigField("boolean", "SHOW_GIT_INFO", "true")
+        }
+
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Tell it to use the config we just made above
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = releaseSigningConfig
+            buildConfigField("boolean", "SHOW_GIT_INFO", "false")
         }
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -57,30 +98,43 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    applicationVariants.all {
-        val variantName = name.replaceFirstChar { it.uppercase() }
-        outputs.all {
-            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            output.outputFileName = "LeisureVaachak-$variantName.apk" // Updated naming
-        }
-    }
-
     kotlin {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
+
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    applicationVariants.all {
+        val variantNameLower = name.lowercase()
+        val appVersionName = versionName ?: "0.0.0"
+
+        val normalizedFileName = if (appVersionName.endsWith("-$variantNameLower")) {
+            "LeisureVaachak-v$appVersionName.apk"
+        } else {
+            "LeisureVaachak-v$appVersionName-$variantNameLower.apk"
+        }
+
+        outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            output.outputFileName = normalizedFileName
+        }
+    }
 }
-
 dependencies {
-    // --- CONNECT TO CORE MODULE ---
     implementation(project(":core"))
-    implementation(libs.androidx.foundation.layout)
 
-    // Desugaring
+    implementation("com.google.dagger:hilt-android:2.57.2")
+    ksp("com.google.dagger:hilt-android-compiler:2.57.2")
+    implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
+
     coreLibraryDesugaring(libs.android.desugar)
 
-    // Android & UI
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
@@ -95,73 +149,49 @@ dependencies {
     implementation(libs.androidx.material.icons)
     implementation(libs.androidx.documentfile)
     implementation(libs.androidx.activity.compose)
-
-    // Navigation
     implementation(libs.androidx.navigation.compose)
 
-    // Hilt (DI)
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
-    implementation(libs.androidx.hilt.navigation.compose)
-
-    // Networking
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)
     implementation(libs.okhttp)
     implementation(libs.ktor.client.core)
-    implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.android)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.json)
     implementation(libs.ktor.client.logging)
 
-    // Readium
     implementation(libs.readium.shared)
     implementation(libs.readium.streamer)
     implementation(libs.readium.navigator)
     implementation(libs.readium.opds)
     implementation(libs.readium.lcp)
     implementation(libs.readium.navigator.media.tts)
-    // ADD THESE for TTS Navigator support
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.common)
 
-    // AI & Utilities
     implementation(libs.google.generativeai)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.apache.commons)
+    implementation(libs.timber)
+    implementation("androidx.core:core-splashscreen:1.2.0")
 
-    // Database (Room)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-    // Testing
     testImplementation(libs.junit)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation("io.mockk:mockk:1.14.9")
+    testImplementation("app.cash.turbine:turbine:1.2.1")
+    testImplementation("org.robolectric:robolectric:4.16.1")
+
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 
-    implementation(libs.timber)
-
     debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")
-    implementation("androidx.core:core-splashscreen:1.2.0")
-
-    // Unit Testing core
-    testImplementation("junit:junit:4.13.2")
-
-    // Coroutines testing (for runTest and StandardTestDispatcher)
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
-    // MockK for mocking Dao and Repository classes
-    testImplementation("io.mockk:mockk:1.14.9")
-
-    // Turbine for cleanly testing Kotlin StateFlow/SharedFlow
-    testImplementation("app.cash.turbine:turbine:1.2.1")
-
-    testImplementation("org.robolectric:robolectric:4.16.1")
-
 }
 
 tasks.dokkaHtml {
