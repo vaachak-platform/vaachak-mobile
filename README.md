@@ -3,7 +3,7 @@
 [![Android CI](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/android.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/android.yml)
 [![Lint & Static Analysis](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/lint.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/lint.yml)
 [![Build & Release APK](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/release.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/release.yml)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=vaachak-platform_vaachak-mobile&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=vaachak-platform_vaachak-mobile)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=vaachak-platform_vaachak-mobile&metric=alert_status&token=bf448a236755183677fee23761f1d4a4b69aa5fc)](https://sonarcloud.io/summary/new_code?id=vaachak-platform_vaachak-mobile)
 [![CodeQL Security Scan](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/codeql.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/codeql.yml)
 [![OWASP MobSF Scan](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/security-scan.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/security-scan.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
