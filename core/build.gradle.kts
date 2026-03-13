@@ -1,4 +1,7 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
+import org.gradle.testing.jacoco.tasks.JacocoReport
+
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
@@ -7,6 +10,7 @@ plugins {
     alias(libs.plugins.androidx.room)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.dagger.hilt.android)
+    jacoco
 }
 
 kotlin {
@@ -115,6 +119,12 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            all {
+                it.extensions.configure(JacocoTaskExtension::class.java) {
+                    isIncludeNoLocationClasses = true
+                    excludes = listOf("jdk.internal.*")
+                }
+            }
         }
     }
 }
@@ -135,4 +145,52 @@ dependencies {
 
 room {
     schemaDirectory("$projectDir/schemas")
+}
+tasks.register<JacocoReport>("jacocoDebugUnitTestReport") {
+    dependsOn("testDebugUnitTest")
+
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
+    }
+
+    val fileFilter = listOf(
+        "**/R.class",
+        "**/R$*.class",
+        "**/BuildConfig.*",
+        "**/Manifest*.*",
+        "**/*Test*.*",
+        "android/**/*.*",
+        "**/*_Factory*.*",
+        "**/*_HiltModules*.*",
+        "**/*Hilt*.*",
+        "**/*MembersInjector*.*",
+        "**/*_Provide*Factory*.*",
+        "**/*ComposableSingletons*.*"
+    )
+
+    val javaClasses = fileTree("${layout.buildDirectory.get().asFile}/intermediates/javac/debug/compileDebugJavaWithJavac/classes") {
+        exclude(fileFilter)
+    }
+
+    val kotlinClasses = fileTree("${layout.buildDirectory.get().asFile}/tmp/kotlin-classes/debug") {
+        exclude(fileFilter)
+    }
+
+    classDirectories.setFrom(files(javaClasses, kotlinClasses))
+    sourceDirectories.setFrom(
+        files(
+            "src/commonMain/kotlin",
+            "src/androidMain/kotlin"
+        )
+    )
+    executionData.setFrom(
+        fileTree(layout.buildDirectory.get().asFile) {
+            include(
+                "outputs/unit_test_code_coverage/debugUnitTest/testDebugUnitTest.exec",
+                "jacoco/testDebugUnitTest.exec"
+            )
+        }
+    )
 }

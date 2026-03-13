@@ -52,6 +52,7 @@ import org.vaachak.reader.core.data.repository.LibraryRepository
 import org.vaachak.reader.core.data.repository.OpdsRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.domain.model.OpdsEntity
+import org.vaachak.reader.core.utils.OpdsUrlUtils
 import timber.log.Timber
 import java.io.File
 import java.net.URL
@@ -461,7 +462,7 @@ class CatalogViewModel @Inject constructor(
 
     fun addCatalog(title: String, url: String, user: String?, pass: String?) {
         viewModelScope.launch {
-            val cleanUrl = cleanUrl(url)
+            val cleanUrl = OpdsUrlUtils.cleanCatalogUrl(url)
             val newFeed = OpdsEntity(
                 title = title.ifBlank { "Library" },
                 url = cleanUrl,
@@ -474,7 +475,7 @@ class CatalogViewModel @Inject constructor(
 
     fun updateCatalog(feed: OpdsEntity, title: String, url: String, user: String?, pass: String?) {
         viewModelScope.launch {
-            val cleanUrl = cleanUrl(url)
+            val cleanUrl = OpdsUrlUtils.cleanCatalogUrl(url)
             val updatedFeed = feed.copy(
                 title = title,
                 url = cleanUrl,
@@ -489,21 +490,4 @@ class CatalogViewModel @Inject constructor(
         viewModelScope.launch { opdsRepository.deleteFeed(feed) }
     }
 
-    private fun cleanUrl(url: String): String {
-        var clean = url.trim()
-        val isSpecific = clean.endsWith(".xml") || clean.endsWith(".opds") || clean.contains("/opds")
-        val isGutendex = clean.contains("/books")
-
-        if (!isSpecific && !isGutendex) {
-            clean = if (clean.endsWith("/")) "${clean}opds" else "${clean}/opds"
-        }
-
-        clean = when {
-            clean.startsWith("https://") -> clean
-            clean.startsWith("http://") -> clean.removePrefix("http://").let { "https://$it" }
-            else -> "https://$clean"
-        }
-
-        return clean
-    }
 }

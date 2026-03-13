@@ -22,6 +22,7 @@ import org.readium.r2.shared.util.Try.Failure
 import org.readium.r2.shared.util.Try.Success
 import org.vaachak.reader.core.data.local.OpdsDao
 import org.vaachak.reader.core.domain.model.OpdsEntity
+import org.vaachak.reader.core.utils.OpdsUrlUtils
 import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
@@ -114,17 +115,7 @@ class OpdsRepository @Inject constructor(
     }
 
     private fun normalizeHttpsUrl(urlStr: String): String {
-        val parsed = urlStr.trim().toHttpUrlOrNull()
-            ?: throw IllegalArgumentException("Invalid URL: $urlStr")
-
-        if (parsed.scheme != "https") {
-            throw IllegalArgumentException(
-                "Only HTTPS OPDS endpoints are supported. " +
-                        "Configure Calibre/Audiobookshelf behind HTTPS and use the HTTPS hostname."
-            )
-        }
-
-        return parsed.toString()
+        return OpdsUrlUtils.normalizeHttpsUrl(urlStr)
     }
 
     private suspend fun findEffectiveFeed(urlStr: String): OpdsEntity? {

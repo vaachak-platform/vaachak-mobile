@@ -38,23 +38,17 @@ jobs:
       - name: Stop Gradle daemons
         run: ./gradlew --stop || true
 
-      - name: Build, lint, test, and analyze
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: Build reports needed by Sonar
         run: |
           ./gradlew clean \
             :core:compileCommonMainKotlinMetadata \
             detekt \
+            :core:testDebugUnitTest \
+            :core:jacocoDebugUnitTestReport \
             :leisure:lintDebug \
             :leisure:testDebugUnitTest \
             :leisure:jacocoDebugUnitTestReport \
             :leisure:assembleDebug \
-            sonar \
-            -Dsonar.qualitygate.wait=true \
-            -Dsonar.qualitygate.timeout=300 \
-            -Dsonar.coverage.jacoco.xmlReportPaths=leisure/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml \
-            -Dsonar.kotlin.detekt.reportPaths=build/reports/detekt/detekt.xml \
             --stacktrace \
             --console=plain \
             --warning-mode=summary \
@@ -63,6 +57,32 @@ jobs:
             --no-build-cache \
             --no-configuration-cache \
             --rerun-tasks
+
+      - name: Verify Detekt and JaCoCo reports exist
+        run: |
+          echo "== Detekt reports =="
+          find . -path "*/build/reports/detekt/*.xml" -print || true
+          echo "== JaCoCo reports =="
+          find . -path "*/build/reports/jacoco/*/*.xml" -print || true
+
+      - name: Run SonarCloud analysis
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          ./gradlew sonar \
+            -Dsonar.qualitygate.wait=true \
+            -Dsonar.qualitygate.timeout=300 \
+            -Dsonar.coverage.jacoco.xmlReportPaths=core/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml,leisure/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml \
+            -Dsonar.kotlin.detekt.reportPaths=build/reports/detekt/detekt.xml,core/build/reports/detekt/detekt.xml,leisure/build/reports/detekt/detekt.xml \
+            -Dsonar.androidLint.reportPaths=leisure/build/reports/lint-results-debug.xml \
+            --stacktrace \
+            --console=plain \
+            --warning-mode=summary \
+            --no-problems-report \
+            --no-daemon \
+            --no-build-cache \
+            --no-configuration-cache
 
       - name: Upload sonar-related reports on failure
         if: failure()
