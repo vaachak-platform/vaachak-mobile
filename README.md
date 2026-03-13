@@ -81,6 +81,56 @@ It also supports a broader platform direction around **Indian language accessibi
 
 ---
 
+## Self-Hosted Calibre (Homelab)
+
+Leisure Vaachak supports connecting to a personal **Calibre Content Server** in a private homelab setup.
+
+Recommended architecture:
+
+- **Calibre Content Server** running locally on your server or Mac mini
+- **Caddy** as a reverse proxy with HTTPS
+- **Tailscale MagicDNS / `*.ts.net` hostname** for private access
+- **Leisure Vaachak** configured with your OPDS URL and login credentials
+
+Example OPDS URL:
+
+```text
+https://mycalibre.tailxxxxx.ts.net/calibre/opds
+```
+
+### Requirements
+
+- The Android device running Leisure Vaachak must also be connected to the **same Tailscale tailnet**
+- **MagicDNS** must be enabled in Tailscale
+- Calibre should be exposed through **HTTPS**
+- Save the Calibre username and password in the app when adding the catalog
+
+### Why this setup
+
+This approach keeps the client simple and secure:
+
+- **HTTPS only**
+- no insecure HTTP fallback
+- no trust-all TLS behavior
+- hostname-based access instead of raw local IPs
+- reverse proxy handles HTTPS while Calibre stays local behind it
+
+### Full setup guide
+
+See the full guide here:
+
+
+[docs/SELF_HOSTED_CALIBRE_WITH_CADDY.md](docs/SELF_HOSTED_CALIBRE_WITH_CADDY.md)
+
+
+That guide includes:
+
+- Calibre server startup example
+- Caddy reverse proxy configuration
+- Tailscale / MagicDNS notes
+- Android device requirements
+- troubleshooting for auth, DNS, and OPDS access
+
 ## Engineering highlights
 
 This repository is designed to demonstrate product thinking, mobile engineering depth, and platform-level architecture decisions.
@@ -134,7 +184,7 @@ Prebuilt APKs are available from GitHub Releases:
 
 Need help side-loading?
 
-📲 **[Installation Instructions](docs/Install_Instructions.md)**
+📲 **[Installation Instructions](docs/INSTALL_INSTRUCTIONS.md)**
 
 ---
 
@@ -173,7 +223,7 @@ Release builds require local signing configuration and keystore setup.
 
 ## Documentation
 
-- [User Guide](docs/user_guide.md)  
+- [User Guide](docs/USER_GUIDE.md)  
   Setup, reader configuration, AI configuration, and dictionary support
 
 - [Architecture](ARCHITECTURE.md)  

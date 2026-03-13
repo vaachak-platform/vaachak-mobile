@@ -157,9 +157,9 @@ fun CatalogManagerScreen(
                 onDismiss = { showDialog = false },
                 onSave = { title, url, user, pass, insecure ->
                     if (editingCatalog != null) {
-                        viewModel.updateCatalog(editingCatalog!!, title, url, user, pass, insecure)
+                        viewModel.updateCatalog(editingCatalog!!, title, url, user, pass)
                     } else {
-                        viewModel.addCatalog(title, url, user, pass, insecure)
+                        viewModel.addCatalog(title, url, user, pass)
                     }
                     showDialog = false
                 }

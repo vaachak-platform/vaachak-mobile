@@ -5,8 +5,8 @@ android-targetSdk = "36"
 android-minSdk = "30"
 
 # -- App Versioning --
-app-versionCode = "1"
-app-versionName = "1.0.0"
+app-versionCode = "2"
+app-versionName = "1.0.1"
 
 # -- Kotlin / Java --
 kotlin = "2.3.10"

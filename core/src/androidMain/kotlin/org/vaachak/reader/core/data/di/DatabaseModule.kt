@@ -1,30 +1,10 @@
-/*
- *  Copyright (c) 2026 Piyush Daiya
- *  *
- *  * Permission is hereby granted, free of charge, to any person obtaining a copy
- *  * of this software and associated documentation files (the "Software"), to deal
- *  * in the Software without restriction, including without limitation the rights
- *  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  * copies of the Software, and to permit persons to whom the Software is
- *  * furnished to do so, subject to the following conditions:
- *  *
- *  * The above copyright notice and this permission notice shall be included in all
- *  * copies or substantial portions of the Software.
- *  *
- *  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  * SOFTWARE.
- */
-
 package org.vaachak.reader.core.data.di
 
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import dagger.Module
 import dagger.Provides
@@ -45,17 +25,44 @@ import java.io.File
 import javax.inject.Qualifier
 import javax.inject.Singleton
 
+private val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS opds_feeds_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                title TEXT NOT NULL,
+                url TEXT NOT NULL,
+                username TEXT,
+                password TEXT,
+                isPredefined INTEGER NOT NULL DEFAULT 0
+            )
+            """.trimIndent()
+        )
+
+        db.execSQL(
+            """
+            INSERT INTO opds_feeds_new (id, title, url, username, password, isPredefined)
+            SELECT id, title, url, username, password, isPredefined
+            FROM opds_feeds
+            """.trimIndent()
+        )
+
+        db.execSQL("DROP TABLE opds_feeds")
+        db.execSQL("ALTER TABLE opds_feeds_new RENAME TO opds_feeds")
+    }
+}
+
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
 
-    // --- ROOM DATABASE SETUP ---
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
         return getDatabaseBuilder(context)
-            .setDriver(BundledSQLiteDriver()) // The KMP multiplatform driver
-            // .fallbackToDestructiveMigration() // Use this while iterating in Beta
+            .addMigrations(MIGRATION_2_3)
+            .setDriver(BundledSQLiteDriver())
             .build()
     }
 
@@ -64,36 +71,31 @@ object DatabaseModule {
         return database.highlightDao()
     }
 
-
-
-    // --- THIS IS THE MISSING PART CAUSING YOUR ERROR ---
     @Provides
-    fun provideOpdsDao(db: AppDatabase): OpdsDao = db.opdsDao()
-
-    // --- DATASTORE SETUP ---
-    // This creates the single source of truth for "user_settings".
-    // It replaces the 'Context.dataStore' extension property to prevents crashes.
+    fun provideOpdsDao(database: AppDatabase): OpdsDao {
+        return database.opdsDao()
+    }
 
     @Provides
     @Singleton
     fun provideCryptoManager(): CryptoManager {
         return CryptoManager()
     }
+
     @Provides
     fun provideSyncVaultDao(database: AppDatabase): SyncVaultDao {
         return database.syncVaultDao()
     }
+
     @Provides
     fun provideBookDao(database: AppDatabase): BookDao {
         return database.bookDao()
     }
 
-    // --- ADD THIS NEW BLOCK ---
     @Provides
     fun provideProfileDao(database: AppDatabase): ProfileDao {
         return database.profileDao()
     }
-
 }
 
 @Qualifier
@@ -106,11 +108,10 @@ object VaultModule {
 
     @Provides
     @Singleton
-    @VaultPreferences // --- 2. TAG THE DATASTORE CREATION ---
+    @VaultPreferences
     fun provideGlobalDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
         return createDataStore(
             producePath = {
-                // Generates standard Android path: /data/data/org.vaachak.../files/datastore/vault_prefs.preferences_pb
                 File(context.filesDir, "datastore/vault_prefs.preferences_pb").absolutePath
             }
         )
@@ -119,7 +120,7 @@ object VaultModule {
     @Provides
     @Singleton
     fun provideVaultRepository(
-        @VaultPreferences dataStore: DataStore<Preferences> // --- 3. TELL HILT EXACTLY WHICH ONE TO USE ---
+        @VaultPreferences dataStore: DataStore<Preferences>
     ): VaultRepository {
         return VaultRepository(dataStore)
     }

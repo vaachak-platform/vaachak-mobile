@@ -459,18 +459,28 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    fun addCatalog(title: String, url: String, user: String?, pass: String?, allowInsecure: Boolean) {
+    fun addCatalog(title: String, url: String, user: String?, pass: String?) {
         viewModelScope.launch {
             val cleanUrl = cleanUrl(url)
-            val newFeed = OpdsEntity(title = title.ifBlank { "Library" }, url = cleanUrl, username = user?.ifBlank{null}, password = pass?.ifBlank{null}, allowInsecure = allowInsecure)
+            val newFeed = OpdsEntity(
+                title = title.ifBlank { "Library" },
+                url = cleanUrl,
+                username = user?.ifBlank { null },
+                password = pass?.ifBlank { null }
+            )
             opdsRepository.insertFeed(newFeed)
         }
     }
 
-    fun updateCatalog(feed: OpdsEntity, title: String, url: String, user: String?, pass: String?, allowInsecure: Boolean) {
+    fun updateCatalog(feed: OpdsEntity, title: String, url: String, user: String?, pass: String?) {
         viewModelScope.launch {
             val cleanUrl = cleanUrl(url)
-            val updatedFeed = feed.copy(title = title, url = cleanUrl, username = user?.ifBlank{null}, password = pass?.ifBlank{null}, allowInsecure = allowInsecure)
+            val updatedFeed = feed.copy(
+                title = title,
+                url = cleanUrl,
+                username = user?.ifBlank { null },
+                password = pass?.ifBlank { null }
+            )
             opdsRepository.updateFeed(updatedFeed)
         }
     }
@@ -483,8 +493,17 @@ class CatalogViewModel @Inject constructor(
         var clean = url.trim()
         val isSpecific = clean.endsWith(".xml") || clean.endsWith(".opds") || clean.contains("/opds")
         val isGutendex = clean.contains("/books")
-        if (!isSpecific && !isGutendex) clean = if (clean.endsWith("/")) "${clean}opds" else "${clean}/opds"
-        if (!clean.startsWith("http")) clean = "http://$clean"
+
+        if (!isSpecific && !isGutendex) {
+            clean = if (clean.endsWith("/")) "${clean}opds" else "${clean}/opds"
+        }
+
+        clean = when {
+            clean.startsWith("https://") -> clean
+            clean.startsWith("http://") -> clean.removePrefix("http://").let { "https://$it" }
+            else -> "https://$clean"
+        }
+
         return clean
     }
 }

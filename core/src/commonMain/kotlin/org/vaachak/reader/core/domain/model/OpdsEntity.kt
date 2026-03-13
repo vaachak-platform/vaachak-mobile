@@ -47,6 +47,5 @@ data class OpdsEntity(
     val url: String,
     val username: String? = null,
     val password: String? = null,
-    val isPredefined: Boolean = false,
-    val allowInsecure: Boolean = false // New Field
+    val isPredefined: Boolean = false
 )

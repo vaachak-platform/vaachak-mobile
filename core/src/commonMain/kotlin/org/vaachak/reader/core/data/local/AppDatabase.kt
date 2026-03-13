@@ -18,7 +18,7 @@ import org.vaachak.reader.core.domain.model.SyncVaultEntity
         SyncVaultEntity::class,
         ProfileEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @ConstructedBy(AppDatabaseConstructor::class)
