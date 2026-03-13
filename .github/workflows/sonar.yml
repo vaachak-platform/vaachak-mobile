@@ -58,12 +58,17 @@ jobs:
             --no-configuration-cache \
             --rerun-tasks
 
-      - name: Verify Detekt and JaCoCo reports exist
+      - name: Verify reports exist
         run: |
-          echo "== Detekt reports =="
-          find . -path "*/build/reports/detekt/*.xml" -print || true
-          echo "== JaCoCo reports =="
-          find . -path "*/build/reports/jacoco/*/*.xml" -print || true
+          echo "== JaCoCo XMLs =="
+          ls -lah "$GITHUB_WORKSPACE/core/build/reports/jacoco/jacocoDebugUnitTestReport/" || true
+          ls -lah "$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/" || true
+
+          echo "== Android Lint XML =="
+          ls -lah "$GITHUB_WORKSPACE/leisure/build/reports/" || true
+
+          echo "== Detekt XML candidates =="
+          find "$GITHUB_WORKSPACE" -path "*/build/reports/detekt/*.xml" -print || true
 
       - name: Run SonarCloud analysis
         env:
@@ -73,9 +78,8 @@ jobs:
           ./gradlew sonar \
             -Dsonar.qualitygate.wait=true \
             -Dsonar.qualitygate.timeout=300 \
-            -Dsonar.coverage.jacoco.xmlReportPaths=core/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml,leisure/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml \
-            -Dsonar.kotlin.detekt.reportPaths=build/reports/detekt/detekt.xml,core/build/reports/detekt/detekt.xml,leisure/build/reports/detekt/detekt.xml \
-            -Dsonar.androidLint.reportPaths=leisure/build/reports/lint-results-debug.xml \
+            -Dsonar.coverage.jacoco.xmlReportPaths=$GITHUB_WORKSPACE/core/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml,$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml \
+            -Dsonar.androidLint.reportPaths=$GITHUB_WORKSPACE/leisure/build/reports/lint-results-debug.xml \
             --stacktrace \
             --console=plain \
             --warning-mode=summary \
