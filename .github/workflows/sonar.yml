@@ -4,6 +4,7 @@ on:
   push:
     branches: ["main"]
   pull_request:
+    branches: ["main"]
     types: [opened, synchronize, reopened]
 
 concurrency:
@@ -18,19 +19,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
           java-version: "21"
           cache: gradle
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -43,6 +44,7 @@ jobs:
           ./gradlew clean \
             :core:compileCommonMainKotlinMetadata \
             detekt \
+            :core:lintDebug \
             :core:testDebugUnitTest \
             :core:jacocoDebugUnitTestReport \
             :leisure:lintDebug \
@@ -60,15 +62,17 @@ jobs:
 
       - name: Verify reports exist
         run: |
-          echo "== JaCoCo XMLs =="
-          ls -lah "$GITHUB_WORKSPACE/core/build/reports/jacoco/jacocoDebugUnitTestReport/" || true
-          ls -lah "$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/" || true
+          echo "== Core lint =="
+          ls -lah "$GITHUB_WORKSPACE/core/build/reports/" || true
 
-          echo "== Android Lint XML =="
+          echo "== Leisure lint =="
           ls -lah "$GITHUB_WORKSPACE/leisure/build/reports/" || true
 
-          echo "== Detekt XML candidates =="
-          find "$GITHUB_WORKSPACE" -path "*/build/reports/detekt/*.xml" -print || true
+          echo "== Core JaCoCo =="
+          ls -lah "$GITHUB_WORKSPACE/core/build/reports/jacoco/jacocoDebugUnitTestReport/" || true
+
+          echo "== Leisure JaCoCo =="
+          ls -lah "$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/" || true
 
       - name: Run SonarCloud analysis
         env:
@@ -78,8 +82,8 @@ jobs:
           ./gradlew sonar \
             -Dsonar.qualitygate.wait=true \
             -Dsonar.qualitygate.timeout=300 \
-            -Dsonar.coverage.jacoco.xmlReportPaths=$GITHUB_WORKSPACE/core/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml,$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml \
-            -Dsonar.androidLint.reportPaths=$GITHUB_WORKSPACE/leisure/build/reports/lint-results-debug.xml \
+            -Dsonar.coverage.jacoco.xmlReportPaths="$GITHUB_WORKSPACE/core/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml,$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml" \
+            -Dsonar.androidLint.reportPaths="$GITHUB_WORKSPACE/core/build/reports/lint-results-debug.xml,$GITHUB_WORKSPACE/leisure/build/reports/lint-results-debug.xml" \
             --stacktrace \
             --console=plain \
             --warning-mode=summary \
@@ -90,7 +94,7 @@ jobs:
 
       - name: Upload sonar-related reports on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sonar-reports
           path: |

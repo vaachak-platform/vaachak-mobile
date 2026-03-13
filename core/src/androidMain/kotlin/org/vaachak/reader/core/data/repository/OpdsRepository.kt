@@ -40,8 +40,6 @@ class OpdsRepository @Inject constructor(
 
     private val cookieStore = HashMap<String, List<Cookie>>()
 
-    private val client: OkHttpClient = createClient()
-
     val catalogs: Flow<List<OpdsEntity>> = opdsDao.getAllFeeds()
         .onStart {
             val count = opdsDao.getFeedsCount()
@@ -60,6 +58,17 @@ class OpdsRepository @Inject constructor(
         }
 
     val allFeeds: Flow<List<OpdsEntity>> = opdsDao.getAllFeeds()
+
+    private var client: OkHttpClient = createClient()
+    private var absoluteUrlResolver: (String) -> AbsoluteUrl? = { AbsoluteUrl(it) }
+
+    internal fun setClientForTest(client: OkHttpClient) {
+        this.client = client
+    }
+
+    internal fun setAbsoluteUrlResolverForTest(resolver: (String) -> AbsoluteUrl?) {
+        absoluteUrlResolver = resolver
+    }
 
     private fun createClient(): OkHttpClient {
         return OkHttpClient.Builder()
@@ -162,7 +171,7 @@ class OpdsRepository @Inject constructor(
     suspend fun parseFeed(rawUrl: String): Try<ParseData, Exception> = withContext(Dispatchers.IO) {
         try {
             val cleanUrl = normalizeHttpsUrl(rawUrl)
-            val absoluteUrl = AbsoluteUrl(cleanUrl)
+            val absoluteUrl = absoluteUrlResolver(cleanUrl)
                 ?: return@withContext Failure(Exception("Invalid URL"))
 
             val response = try {

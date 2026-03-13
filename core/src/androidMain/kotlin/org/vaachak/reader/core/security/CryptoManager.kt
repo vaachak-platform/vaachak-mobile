@@ -1,6 +1,6 @@
 package org.vaachak.reader.core.security
 
-import android.util.Base64
+import java.util.Base64
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.SecretKey
@@ -41,8 +41,8 @@ actual class CryptoManager actual constructor() {
         val ciphertextBytes = cipher.doFinal(plainTextJson.toByteArray(Charsets.UTF_8))
 
         return EncryptedPayload(
-            ciphertext = Base64.encodeToString(ciphertextBytes, Base64.NO_WRAP),
-            iv = Base64.encodeToString(iv, Base64.NO_WRAP)
+            ciphertext = Base64.getEncoder().encodeToString(ciphertextBytes),
+            iv = Base64.getEncoder().encodeToString(iv)
         )
     }
 
@@ -50,12 +50,12 @@ actual class CryptoManager actual constructor() {
         val key = deriveKey(secretPass, usernameSalt)
         val cipher = Cipher.getInstance(ALGORITHM)
 
-        val ivBytes = Base64.decode(payload.iv, Base64.NO_WRAP)
+        val ivBytes = Base64.getDecoder().decode(payload.iv)
         val spec = GCMParameterSpec(TAG_LENGTH_BIT, ivBytes)
 
         cipher.init(Cipher.DECRYPT_MODE, key, spec)
 
-        val ciphertextBytes = Base64.decode(payload.ciphertext, Base64.NO_WRAP)
+        val ciphertextBytes = Base64.getDecoder().decode(payload.ciphertext)
         val decryptedBytes = cipher.doFinal(ciphertextBytes)
 
         return String(decryptedBytes, Charsets.UTF_8)
