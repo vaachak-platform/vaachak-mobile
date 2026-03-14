@@ -73,14 +73,7 @@ jobs:
 
           echo "== Leisure JaCoCo =="
           ls -lah "$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/" || true
-      - name: Check Sonar secret presence
-        run: |
-          if [ -z "${{ secrets.SONAR_TOKEN }}" ]; then
-            echo "SONAR_TOKEN is missing in this workflow context"
-            exit 1
-          else
-            echo "SONAR_TOKEN is present in this workflow context"
-          fi
+
       - name: Run SonarCloud analysis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
