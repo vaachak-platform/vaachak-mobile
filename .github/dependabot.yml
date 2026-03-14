@@ -1,4 +1,5 @@
 version: 2
+
 updates:
   - package-ecosystem: "gradle"
     directory: "/"
@@ -6,20 +7,23 @@ updates:
       interval: "weekly"
       day: "monday"
     open-pull-requests-limit: 10
-    groups:
-      androidx:
-        patterns: ["androidx.*"]
-      ktor:
-        patterns: ["io.ktor.*"]
-      compose:
-        patterns: ["org.jetbrains.compose.*"]
     labels:
       - "dependencies"
       - "automerge"
-    # NEW: Instructs Dependabot to never open PRs for major version bumps
+    groups:
+      androidx:
+        patterns:
+          - "androidx*"
+      ktor:
+        patterns:
+          - "io.ktor*"
+      compose:
+        patterns:
+          - "org.jetbrains.compose*"
     ignore:
       - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -29,8 +33,7 @@ updates:
       - "ci"
       - "dependencies"
       - "automerge"
-    # Optional but recommended: Also ignore major bumps for GitHub Actions
-    # (e.g., checkout@v4 to checkout@v5) as they often require manual syntax updates.
     ignore:
       - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+        update-types:
+          - "version-update:semver-major"git a
