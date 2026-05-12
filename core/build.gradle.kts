@@ -82,7 +82,7 @@ kotlin {
                 implementation("org.bouncycastle:bcprov-jdk15on:1.70")
 
                 implementation(libs.junit)
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
                 implementation("app.cash.turbine:turbine:1.2.1")
                 implementation(libs.mockk)
             }
