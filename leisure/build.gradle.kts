@@ -41,7 +41,11 @@ val isReleaseLikeTaskRequested = requestedTasks.any { task ->
     "release" in task || "bundle" in task || "publish" in task
 }
 
-val releaseKeystoreFile = file("vaachak-key.jks")
+val releaseKeystorePath =
+    System.getenv("ORG_GRADLE_PROJECT_VAACHAK_KEYSTORE_FILE")
+        ?: providers.gradleProperty("VAACHAK_KEYSTORE_FILE").orNull
+        ?: "vaachak-key.jks"
+val releaseKeystoreFile = file(releaseKeystorePath)
 val releaseStorePassword =
     System.getenv("ORG_GRADLE_PROJECT_VAACHAK_KEYSTORE_PASSWORD")
         ?: providers.gradleProperty("VAACHAK_KEYSTORE_PASSWORD").orNull
@@ -77,6 +81,7 @@ android {
             }
 
             storeFile = releaseKeystoreFile
+            storeType = if (releaseKeystoreFile.extension.lowercase() in setOf("p12", "pfx", "pkcs12")) "PKCS12" else "JKS"
             storePassword = requireSigningValue("VAACHAK_KEYSTORE_PASSWORD", releaseStorePassword)
             keyAlias = requireSigningValue("VAACHAK_KEY_ALIAS", releaseKeyAlias)
             keyPassword = requireSigningValue("VAACHAK_KEY_PASSWORD", releaseKeyPassword)
