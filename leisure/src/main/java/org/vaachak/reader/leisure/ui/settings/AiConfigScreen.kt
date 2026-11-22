@@ -42,8 +42,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +62,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import org.vaachak.reader.core.domain.model.ThemeMode
+import org.vaachak.reader.core.domain.model.AiTextProvider
+import org.vaachak.reader.core.data.remote.PrivateGatewayEndpoint
 import org.vaachak.reader.leisure.ui.reader.components.VaachakHeader
 import org.vaachak.reader.leisure.ui.testability.Tid
 import org.vaachak.reader.leisure.ui.testability.TidScreen
@@ -78,6 +82,20 @@ fun AiConfigScreen(
     var url by remember { mutableStateOf(state.aiConfig.cloudflareUrl) }
     var token by remember { mutableStateOf(state.aiConfig.authToken) }
     var autoSave by remember { mutableStateOf(state.aiConfig.autoSaveRecaps) }
+    var provider by remember { mutableStateOf(state.aiConfig.textProvider) }
+    var gatewayUrl by remember { mutableStateOf(state.aiConfig.gatewayUrl) }
+    var gatewayModel by remember { mutableStateOf(state.aiConfig.gatewayModel) }
+    var gatewayToken by remember { mutableStateOf("") }
+    var gatewayError by remember { mutableStateOf("") }
+    LaunchedEffect(state.aiConfig) {
+        key = state.aiConfig.geminiKey
+        url = state.aiConfig.cloudflareUrl
+        token = state.aiConfig.authToken
+        autoSave = state.aiConfig.autoSaveRecaps
+        provider = state.aiConfig.textProvider
+        gatewayUrl = state.aiConfig.gatewayUrl
+        gatewayModel = state.aiConfig.gatewayModel
+    }
 
     TidScreen(Tid.Screen.aiConfig) {
     Scaffold(
@@ -96,6 +114,36 @@ fun AiConfigScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp)
         ) {
+            Text("Text AI Provider", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = provider == AiTextProvider.GEMINI,
+                    onClick = { provider = AiTextProvider.GEMINI })
+                Text("Gemini", modifier = Modifier.padding(end = 16.dp))
+                RadioButton(selected = provider == AiTextProvider.PRIVATE_GATEWAY,
+                    onClick = { provider = AiTextProvider.PRIVATE_GATEWAY })
+                Text("Private ai-g732")
+            }
+            if (provider == AiTextProvider.PRIVATE_GATEWAY) {
+                Text("Text only. Requires Tailscale and a separate Vaachak key.",
+                    style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(value = gatewayUrl, onValueChange = { gatewayUrl = it },
+                    label = { Text("Gateway HTTPS API base (/v1)") },
+                    modifier = Modifier.fillMaxWidth().tid("ai_config_gateway_url"), singleLine = true)
+                OutlinedTextField(value = gatewayModel, onValueChange = { gatewayModel = it },
+                    label = { Text("Model alias") },
+                    modifier = Modifier.fillMaxWidth().tid("ai_config_gateway_model"), singleLine = true)
+                OutlinedTextField(value = gatewayToken, onValueChange = { gatewayToken = it },
+                    label = { Text("Vaachak gateway API key (blank keeps saved key)") },
+                    modifier = Modifier.fillMaxWidth().tid("ai_config_gateway_key"), singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
+                Button(onClick = { viewModel.clearPrivateGatewayToken() }) {
+                    Text("Remove saved Vaachak gateway key")
+                }
+            }
+            if (gatewayError.isNotBlank()) Text(gatewayError, color = MaterialTheme.colorScheme.error)
+            state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Spacer(modifier = Modifier.height(24.dp))
             Text("Gemini Integration", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
@@ -172,8 +220,18 @@ fun AiConfigScreen(
 
             Button(
                 onClick = {
-                    viewModel.saveAiConfig(key, url, token, autoSave)
-                    onBack() // Go back after saving
+                    if (provider == AiTextProvider.PRIVATE_GATEWAY) {
+                        val failure = runCatching {
+                            PrivateGatewayEndpoint.normalizedBase(gatewayUrl)
+                            PrivateGatewayEndpoint.validatedModel(gatewayModel)
+                        }.exceptionOrNull()
+                        if (failure != null) {
+                            gatewayError = failure.message ?: "Invalid gateway settings"
+                            return@Button
+                        }
+                    }
+                    viewModel.saveAiConfig(key, url, token, autoSave, provider,
+                        gatewayUrl, gatewayModel, gatewayToken, onSaved = onBack)
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp).tid("ai_config_save")
             ) {

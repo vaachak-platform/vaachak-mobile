@@ -22,6 +22,8 @@ import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
 import org.vaachak.reader.core.data.repository.VaultRepository
 import org.vaachak.reader.core.domain.model.AiConfig
+import org.vaachak.reader.core.domain.model.AiTextProvider
+import org.vaachak.reader.core.domain.model.ComicPreferences
 import org.vaachak.reader.core.domain.model.BookshelfPreferences
 import org.vaachak.reader.core.domain.model.CoverAspectRatio
 import org.vaachak.reader.core.domain.model.DitheringMode
@@ -221,6 +223,13 @@ class SettingsViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, AppCoroutineConfig.whileSubscribed, SettingsUiState())
 
+    val comicPreferences: StateFlow<ComicPreferences> = settingsRepo.comicPreferences
+        .stateIn(viewModelScope, AppCoroutineConfig.whileSubscribed, ComicPreferences())
+
+    fun saveComicPreferences(preferences: ComicPreferences) = viewModelScope.launch {
+        settingsRepo.saveComicPreferences(preferences)
+    }
+
     fun setSyncEnabled(enabled: Boolean) = viewModelScope.launch {
         settingsRepo.setSyncEnabled(enabled)
     }
@@ -273,30 +282,94 @@ class SettingsViewModel @Inject constructor(
         _errorMessage.value = null
     }
 
+    /**
+     * Clears the active vault's private gateway token. The token is never
+     * included in UI state or exception messages.
+     */
+    fun clearPrivateGatewayToken() {
+        viewModelScope.launch {
+            try {
+                settingsRepo.savePrivateGatewayToken("")
+                _errorMessage.value = null
+            } catch (_: Exception) {
+                _errorMessage.value = "Unable to clear the private gateway token."
+            }
+        }
+    }
+
+    /**
+     * Compatible with both the original four-field AI screen and the expanded
+     * private-gateway screen on the feature branch. The branch's AiConfigScreen
+     * wasn't part of the uploaded main archive, so avoid replacing it here.
+     *
+     * The extended positional arguments are a provider plus gateway URL,
+     * model and token. The provider may appear at any position.
+     * A blank new gateway token preserves the existing stored token; users
+     * must use clearPrivateGatewayToken() to deliberately remove it.
+     */
     fun saveAiConfig(
         gemini: String,
         cfUrl: String,
         token: String,
-        autoSave: Boolean
+        autoSave: Boolean,
+        vararg additionalAiSettings: Any?,
+        onSaved: () -> Unit = {}
     ) {
         viewModelScope.launch {
             try {
+                val gateway = if (additionalAiSettings.isEmpty()) {
+                    null
+                } else {
+                    // Require one provider and exactly three string fields.
+                    // Do not silently store fields in the wrong positions.
+                    if (additionalAiSettings.size != 4) {
+                        throw IllegalArgumentException("Unsupported AI settings configuration")
+                    }
+                    val providerPosition = additionalAiSettings.indexOfFirst { it is AiTextProvider }
+                    if (providerPosition == -1) {
+                        throw IllegalArgumentException("Unsupported AI provider configuration")
+                    }
+                    val provider = additionalAiSettings[providerPosition] as AiTextProvider
+                    val fields = additionalAiSettings.filterIndexed { index, _ -> index != providerPosition }
+                    if (fields.any { it !is String }) {
+                        throw IllegalArgumentException("Invalid gateway settings")
+                    }
+                    GatewayUpdate(provider, fields[0] as String, fields[1] as String, fields[2] as String)
+                }
+
                 val currentTheme = settingsRepo.themeMode.first()
-                val isEink = currentTheme == ThemeMode.E_INK
                 settingsRepo.saveSettings(
                     gemini = gemini,
                     cfUrl = cfUrl,
                     cfToken = token,
-                    isEnk = isEink
+                    isEnk = currentTheme == ThemeMode.E_INK
                 )
                 settingsRepo.setAutoSaveRecaps(autoSave)
+                if (gateway != null) {
+                    settingsRepo.setAiTextProvider(gateway.provider)
+                    // A blank password field does not erase an existing secret.
+                    val gatewayToken = gateway.token.ifBlank { settingsRepo.loadPrivateGatewayToken() }
+                    settingsRepo.savePrivateGatewaySettings(
+                        gateway.url, gateway.model, gatewayToken
+                    )
+                }
                 _activeEditSection.value = SettingsSection.NONE
                 _errorMessage.value = null
-            } catch (e: Exception) {
-                _errorMessage.value = "Failed to save settings: ${e.message}"
+                onSaved()
+            } catch (_: Exception) {
+                // Never include exception text: HTTP errors can contain URLs,
+                // credentials or request details.
+                _errorMessage.value = "Could not save AI settings. Check the values and try again."
             }
         }
     }
+
+    private data class GatewayUpdate(
+        val provider: AiTextProvider,
+        val url: String,
+        val model: String,
+        val token: String
+    )
 
     fun toggleOfflineMode(enabled: Boolean) {
         viewModelScope.launch {

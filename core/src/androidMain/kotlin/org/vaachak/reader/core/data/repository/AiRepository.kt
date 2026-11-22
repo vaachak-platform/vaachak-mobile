@@ -5,13 +5,16 @@ import android.util.Log
 import com.google.ai.client.generativeai.GenerativeModel
 import kotlinx.coroutines.flow.first
 import org.vaachak.reader.core.data.remote.CloudflareAiApi
+import org.vaachak.reader.core.data.remote.PrivateGatewayClient
+import org.vaachak.reader.core.domain.model.AiTextProvider
 import org.vaachak.reader.core.domain.model.AiImageRequest
 import java.net.SocketTimeoutException
 import javax.inject.Inject
 
 class AiRepository @Inject constructor(
     private val settingsRepo: SettingsRepository,
-    private val cloudflareApi: CloudflareAiApi // Injected from AiModule
+    private val cloudflareApi: CloudflareAiApi, // Injected from AiModule
+    private val privateGatewayClient: PrivateGatewayClient
 ) {
 
     // --- GEMINI SETUP ---
@@ -22,8 +25,22 @@ class AiRepository @Inject constructor(
         return GenerativeModel(modelName = "gemini-2.0-flash", apiKey = key)
     }
 
+    private suspend fun generateText(prompt: String): String {
+        if (settingsRepo.isOfflineModeEnabled.first()) return "Error: Offline Mode is enabled."
+        return when (settingsRepo.aiTextProvider.first()) {
+            AiTextProvider.GEMINI -> getGeminiModel().generateContent(prompt).text ?: "No answer."
+            AiTextProvider.PRIVATE_GATEWAY -> privateGatewayClient.chat(
+                settingsRepo.privateGatewayUrl.first(),
+                settingsRepo.privateGatewayModel.first(),
+                settingsRepo.loadPrivateGatewayToken(), prompt
+            )
+            else -> "Error: Unsupported AI text provider."
+        }
+    }
+
     // --- CLOUDFLARE IMAGE GENERATION ---
     suspend fun visualizeText(prompt: String): String {
+        if (settingsRepo.isOfflineModeEnabled.first()) return "Error: Offline Mode is enabled."
         return try {
             // 1. Get Dynamic URL & Token from Settings
             val url = settingsRepo.cfUrl.first().trim()
@@ -40,7 +57,7 @@ class AiRepository @Inject constructor(
                 token = "Bearer $token"
             )
 
-            Log.d("Visualize-Debug", "Prompt: $prompt, Code: ${response.code()}")
+            Log.d("Visualize-Debug", "HTTP status: ${response.code()}")
 
             // 3. Handle Raw Bytes -> Base64
             if (response.isSuccessful) {
@@ -67,14 +84,14 @@ class AiRepository @Inject constructor(
     suspend fun explainContext(selectedText: String): String {
         return try {
             val prompt = "Provide a simple, 2-sentence explanation for: $selectedText"
-            getGeminiModel().generateContent(prompt).text ?: "No explanation."
+            generateText(prompt)
         } catch (e: Exception) { "Error: ${e.localizedMessage}" }
     }
 
     suspend fun whoIsThis(selectedText: String, bookTitle: String, bookAuthor: String): String {
         return try {
             val prompt = "Reading '$bookTitle' by $bookAuthor. Identify character '$selectedText' without spoilers."
-            getGeminiModel().generateContent(prompt).text ?: "No identification."
+            generateText(prompt)
         } catch (e: Exception) { "Error: ${e.localizedMessage}" }
     }
 
@@ -86,7 +103,7 @@ class AiRepository @Inject constructor(
                 And current page: "$currentPageText"
                 Provide a quick 3-sentence recap and 'Who's Who' for this scene. Avoid future spoilers.
             """.trimIndent()
-            getGeminiModel().generateContent(prompt).text ?: "Unable to generate recap."
+            generateText(prompt)
         } catch (e: Exception) { "Error: ${e.localizedMessage}" }
     }
 
@@ -97,7 +114,7 @@ class AiRepository @Inject constructor(
                 Based on highlights: "$highlightsContext"
                 Provide a quick 3-sentence recap. Avoid future spoilers.
             """.trimIndent()
-            getGeminiModel().generateContent(prompt).text ?: "Unable to generate recap."
+            generateText(prompt)
         } catch (e: Exception) { "Error: ${e.localizedMessage}" }
     }
 }

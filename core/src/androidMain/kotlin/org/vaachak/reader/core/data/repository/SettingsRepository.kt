@@ -24,6 +24,11 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.vaachak.reader.core.domain.model.AiTextProvider
+import org.vaachak.reader.core.domain.model.ComicPreferences
+import org.vaachak.reader.core.domain.model.ComicReadingDirection
+import org.vaachak.reader.core.domain.model.ComicReadingMode
+import org.vaachak.reader.core.domain.model.ComicPageFit
 import org.vaachak.reader.core.domain.model.BookshelfPreferences
 import org.vaachak.reader.core.domain.model.CoverAspectRatio
 import org.vaachak.reader.core.domain.model.DitheringMode
@@ -47,6 +52,13 @@ class SettingsRepository @Inject constructor(
         val GEMINI_KEY = stringPreferencesKey("gemini_api_key")
         val CF_URL = stringPreferencesKey("cloudflare_url")
         val CF_TOKEN = stringPreferencesKey("cloudflare_token")
+
+        // AI provider routing (per-vault). These keys must coexist with the
+        // existing Gemini/Cloudflare settings and the comic preferences.
+        val AI_TEXT_PROVIDER = stringPreferencesKey("ai_text_provider")
+        val PRIVATE_GATEWAY_URL = stringPreferencesKey("private_gateway_url")
+        val PRIVATE_GATEWAY_MODEL = stringPreferencesKey("private_gateway_model")
+        val PRIVATE_GATEWAY_TOKEN = stringPreferencesKey("private_gateway_token")
         val IS_EINK_ENABLED = booleanPreferencesKey("is_eink_enabled")
         val AUTO_SAVE_RECAPS_KEY = booleanPreferencesKey("auto_save_recaps")
         val THEME_KEY = stringPreferencesKey("theme_mode")
@@ -64,6 +76,15 @@ class SettingsRepository @Inject constructor(
         val TTS_BACKGROUND_PLAYBACK = booleanPreferencesKey("tts_background_playback")
         val TTS_SLEEP_TIMER = intPreferencesKey("tts_sleep_timer")
         val TTS_VOICE = stringPreferencesKey("tts_voice")
+
+        // --- COMIC READER SETTINGS (PER-VAULT) ---
+        val COMIC_READING_DIRECTION = stringPreferencesKey("comic_reading_direction")
+        val COMIC_READING_MODE = stringPreferencesKey("comic_reading_mode")
+        val COMIC_PAGE_FIT = stringPreferencesKey("comic_page_fit")
+        val COMIC_TAP_TO_TURN = booleanPreferencesKey("comic_tap_to_turn")
+        val COMIC_VOLUME_KEYS = booleanPreferencesKey("comic_volume_keys")
+        val COMIC_PRELOAD_NEXT = booleanPreferencesKey("comic_preload_next")
+        val COMIC_REDUCE_MOTION = booleanPreferencesKey("comic_reduce_motion")
 
         // --- SYNC SETTINGS ---
         val IS_SYNC_ENABLED = booleanPreferencesKey("is_sync_enabled")
@@ -136,6 +157,26 @@ class SettingsRepository @Inject constructor(
     val geminiKey: Flow<String> = vaultPreferencesFlow.map { it[GEMINI_KEY] ?: "" }
     val cfUrl: Flow<String> = vaultPreferencesFlow.map { it[CF_URL] ?: "" }
     val cfToken: Flow<String> = vaultPreferencesFlow.map { it[CF_TOKEN] ?: "" }
+
+    // Interpret unknown/obsolete provider IDs as Gemini instead of crashing
+    // when a user's saved preferences are from another application version.
+    val aiTextProvider: Flow<AiTextProvider> = vaultPreferencesFlow.map { prefs ->
+        when (prefs[AI_TEXT_PROVIDER]) {
+            "PRIVATE_GATEWAY" -> AiTextProvider.PRIVATE_GATEWAY
+            else -> AiTextProvider.GEMINI
+        }
+    }
+    val privateGatewayUrl: Flow<String> = vaultPreferencesFlow.map {
+        it[PRIVATE_GATEWAY_URL] ?: ""
+    }
+    val privateGatewayModel: Flow<String> = vaultPreferencesFlow.map {
+        it[PRIVATE_GATEWAY_MODEL] ?: ""
+    }
+
+    // Kept as a suspend function for the existing AiRepository contract.
+    // Uses the current vault, just like the other AI settings.
+    suspend fun loadPrivateGatewayToken(): String =
+        vaultPreferencesFlow.first()[PRIVATE_GATEWAY_TOKEN] ?: ""
     val isEinkEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[IS_EINK_ENABLED] ?: false }
     val isAutoSaveRecapsEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[AUTO_SAVE_RECAPS_KEY] ?: true }
     val einkContrast: Flow<Float> = vaultPreferencesFlow.map { it[CONTRAST_KEY] ?: 0.5f }
@@ -213,6 +254,34 @@ class SettingsRepository @Inject constructor(
     suspend fun setTtsPitch(pitch: Float) { editCurrentVault { it[TTS_PITCH] = pitch } }
     suspend fun setTtsSleepTimer(minutes: Int) { editCurrentVault { it[TTS_SLEEP_TIMER] = minutes } }
 
+    // Comic preferences are scoped to the active local vault, like book settings.
+    val comicPreferences: Flow<ComicPreferences> = vaultPreferencesFlow.map { p ->
+        fun <T : Enum<T>> decode(raw: String?, values: Array<T>, fallback: T): T =
+            values.firstOrNull { it.name == raw } ?: fallback
+
+        ComicPreferences(
+            readingDirection = decode(p[COMIC_READING_DIRECTION], ComicReadingDirection.entries.toTypedArray(), ComicReadingDirection.LEFT_TO_RIGHT),
+            readingMode = decode(p[COMIC_READING_MODE], ComicReadingMode.entries.toTypedArray(), ComicReadingMode.SINGLE_PAGE),
+            pageFit = decode(p[COMIC_PAGE_FIT], ComicPageFit.entries.toTypedArray(), ComicPageFit.FIT_PAGE),
+            tapToTurn = p[COMIC_TAP_TO_TURN] ?: true,
+            useVolumeKeys = p[COMIC_VOLUME_KEYS] ?: false,
+            preloadNextPage = p[COMIC_PRELOAD_NEXT] ?: true,
+            reduceMotion = p[COMIC_REDUCE_MOTION] ?: true
+        )
+    }
+
+    suspend fun saveComicPreferences(settings: ComicPreferences) {
+        editCurrentVault { p ->
+            p[COMIC_READING_DIRECTION] = settings.readingDirection.name
+            p[COMIC_READING_MODE] = settings.readingMode.name
+            p[COMIC_PAGE_FIT] = settings.pageFit.name
+            p[COMIC_TAP_TO_TURN] = settings.tapToTurn
+            p[COMIC_VOLUME_KEYS] = settings.useVolumeKeys
+            p[COMIC_PRELOAD_NEXT] = settings.preloadNextPage
+            p[COMIC_REDUCE_MOTION] = settings.reduceMotion
+        }
+    }
+
     // --- SYNC ACTIONS ---
     suspend fun updateSyncProfile(user: String, pass: String, name: String) {
         editCurrentVault { prefs ->
@@ -259,6 +328,28 @@ class SettingsRepository @Inject constructor(
 
     // --- APP SETTINGS ACTIONS ---
     suspend fun setAiEnabled(enabled: Boolean) { editCurrentVault { it[IS_AI_ENABLED] = enabled } }
+
+    suspend fun setAiTextProvider(provider: AiTextProvider) {
+        editCurrentVault { prefs ->
+            prefs[AI_TEXT_PROVIDER] = if (provider == AiTextProvider.PRIVATE_GATEWAY) {
+                "PRIVATE_GATEWAY"
+            } else {
+                "GEMINI"
+            }
+        }
+    }
+
+    suspend fun savePrivateGatewaySettings(url: String, model: String, token: String) {
+        editCurrentVault { prefs ->
+            prefs[PRIVATE_GATEWAY_URL] = url.trim()
+            prefs[PRIVATE_GATEWAY_MODEL] = model.trim()
+            prefs[PRIVATE_GATEWAY_TOKEN] = token.trim()
+        }
+    }
+
+    suspend fun savePrivateGatewayToken(token: String) {
+        editCurrentVault { prefs -> prefs[PRIVATE_GATEWAY_TOKEN] = token.trim() }
+    }
 
     suspend fun saveSettings(gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean, isAiEnabled: Boolean? = null) {
         editCurrentVault { prefs ->
