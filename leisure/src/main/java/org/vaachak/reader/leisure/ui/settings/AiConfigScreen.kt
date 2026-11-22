@@ -230,8 +230,21 @@ fun AiConfigScreen(
                             return@Button
                         }
                     }
-                    viewModel.saveAiConfig(key, url, token, autoSave, provider,
-                        gatewayUrl, gatewayModel, gatewayToken, onSaved = onBack)
+                    viewModel.saveAiConfig(
+                        AiConfigSaveRequest(
+                            geminiKey = key,
+                            cloudflareUrl = url,
+                            cloudflareToken = token,
+                            autoSaveRecaps = autoSave,
+                            gateway = AiGatewayUpdate(
+                                provider = provider,
+                                url = gatewayUrl,
+                                model = gatewayModel,
+                                token = gatewayToken
+                            )
+                        ),
+                        onSaved = onBack
+                    )
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp).tid("ai_config_save")
             ) {

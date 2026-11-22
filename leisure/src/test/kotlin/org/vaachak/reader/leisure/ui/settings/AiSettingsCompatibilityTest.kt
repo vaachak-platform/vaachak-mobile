@@ -102,8 +102,14 @@ class AiSettingsCompatibilityTest {
         coEvery { settings.loadPrivateGatewayToken() } returns "previous-secret"
         var saves = 0
         viewModel.saveAiConfig(
-            "gemini-key", "https://worker.example", "cf-token", true,
-            AiTextProvider.PRIVATE_GATEWAY, "https://private.example", "model-id", "new-secret",
+            AiConfigSaveRequest(
+                geminiKey = "gemini-key", cloudflareUrl = "https://worker.example",
+                cloudflareToken = "cf-token", autoSaveRecaps = true,
+                gateway = AiGatewayUpdate(
+                    provider = AiTextProvider.PRIVATE_GATEWAY, url = "https://private.example",
+                    model = "model-id", token = "new-secret"
+                )
+            ),
             onSaved = { saves++ }
         )
         advanceUntilIdle()
@@ -119,9 +125,13 @@ class AiSettingsCompatibilityTest {
     fun `blank token keeps prior gateway token`() = runTest(dispatcherRule.dispatcher) {
         coEvery { settings.loadPrivateGatewayToken() } returns "retained-secret"
         viewModel.saveAiConfig(
-            "", "", "", false,
-            AiTextProvider.PRIVATE_GATEWAY, "https://private.example", "model", "",
-            onSaved = {}
+            AiConfigSaveRequest(
+                geminiKey = "", cloudflareUrl = "", cloudflareToken = "", autoSaveRecaps = false,
+                gateway = AiGatewayUpdate(
+                    provider = AiTextProvider.PRIVATE_GATEWAY, url = "https://private.example",
+                    model = "model", token = ""
+                )
+            )
         )
         advanceUntilIdle()
 
@@ -153,8 +163,14 @@ class AiSettingsCompatibilityTest {
             IllegalStateException("secret-do-not-show")
         var callbackInvoked = false
         viewModel.saveAiConfig(
-            "gemini-key", "https://worker.example", "cf-token", true,
-            AiTextProvider.PRIVATE_GATEWAY, "https://reader.tailnet.ts.net:8443/v1", "local-chat", "secret-do-not-show",
+            AiConfigSaveRequest(
+                geminiKey = "gemini-key", cloudflareUrl = "https://worker.example",
+                cloudflareToken = "cf-token", autoSaveRecaps = true,
+                gateway = AiGatewayUpdate(
+                    provider = AiTextProvider.PRIVATE_GATEWAY, url = "https://reader.tailnet.ts.net:8443/v1",
+                    model = "local-chat", token = "secret-do-not-show"
+                )
+            ),
             onSaved = { callbackInvoked = true }
         )
         advanceUntilIdle()

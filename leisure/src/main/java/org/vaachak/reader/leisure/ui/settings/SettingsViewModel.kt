@@ -36,6 +36,23 @@ import org.vaachak.reader.core.domain.model.UserProfile
 import org.vaachak.reader.leisure.utils.EinkHelper
 import javax.inject.Inject
 
+/** Gateway fields are kept together to prevent positional mix-ups. */
+data class AiGatewayUpdate(
+    val provider: AiTextProvider,
+    val url: String,
+    val model: String,
+    val token: String
+)
+
+/** Single AI configuration request; no long parameter list at the UI boundary. */
+data class AiConfigSaveRequest(
+    val geminiKey: String,
+    val cloudflareUrl: String,
+    val cloudflareToken: String,
+    val autoSaveRecaps: Boolean,
+    val gateway: AiGatewayUpdate
+)
+
 private data class AccountState(
     val username: String,
     val device: String,
@@ -322,21 +339,14 @@ class SettingsViewModel @Inject constructor(
         saveAiConfigInternal(gemini, cfUrl, token, autoSave, gateway = null, onSaved = {})
     }
 
-    /** Typed gateway configuration: avoids unverified positional vararg values. */
-    fun saveAiConfig(
-        gemini: String,
-        cfUrl: String,
-        token: String,
-        autoSave: Boolean,
-        provider: AiTextProvider,
-        gatewayUrl: String,
-        gatewayModel: String,
-        gatewayToken: String,
-        onSaved: () -> Unit = {}
-    ) {
+    /** Typed submission keeps legacy four-field callers working while avoiding long parameter lists. */
+    fun saveAiConfig(request: AiConfigSaveRequest, onSaved: () -> Unit = {}) {
         saveAiConfigInternal(
-            gemini, cfUrl, token, autoSave,
-            gateway = GatewayUpdate(provider, gatewayUrl, gatewayModel, gatewayToken),
+            gemini = request.geminiKey,
+            cfUrl = request.cloudflareUrl,
+            token = request.cloudflareToken,
+            autoSave = request.autoSaveRecaps,
+            gateway = request.gateway,
             onSaved = onSaved
         )
     }
@@ -346,7 +356,7 @@ class SettingsViewModel @Inject constructor(
         cfUrl: String,
         token: String,
         autoSave: Boolean,
-        gateway: GatewayUpdate?,
+        gateway: AiGatewayUpdate?,
         onSaved: () -> Unit
     ) = viewModelScope.launch {
         try {
@@ -368,19 +378,12 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private suspend fun saveGatewayUpdate(gateway: GatewayUpdate) {
+    private suspend fun saveGatewayUpdate(gateway: AiGatewayUpdate) {
         settingsRepo.setAiTextProvider(gateway.provider)
         // A blank field retains the prior token; removal is a separate explicit action.
         val savedToken = gateway.token.ifBlank { settingsRepo.loadPrivateGatewayToken() }
         settingsRepo.savePrivateGatewaySettings(gateway.url, gateway.model, savedToken)
     }
-
-    private data class GatewayUpdate(
-        val provider: AiTextProvider,
-        val url: String,
-        val model: String,
-        val token: String
-    )
 
     fun toggleOfflineMode(enabled: Boolean) {
         viewModelScope.launch {

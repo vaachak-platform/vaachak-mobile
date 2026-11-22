@@ -158,9 +158,13 @@ class SettingsViewModelTest {
     fun `private gateway settings save preserves the selected provider`() = runTest(testDispatcher) {
         var callbackCount = 0
         viewModel.saveAiConfig(
-            "", "", "", false,
-            AiTextProvider.PRIVATE_GATEWAY,
-            "https://private.example", "gateway-model", "new-token",
+            AiConfigSaveRequest(
+                geminiKey = "", cloudflareUrl = "", cloudflareToken = "", autoSaveRecaps = false,
+                gateway = AiGatewayUpdate(
+                    provider = AiTextProvider.PRIVATE_GATEWAY, url = "https://private.example",
+                    model = "gateway-model", token = "new-token"
+                )
+            ),
             onSaved = { callbackCount++ }
         )
         advanceUntilIdle()
@@ -177,10 +181,13 @@ class SettingsViewModelTest {
         coEvery { settingsRepo.loadPrivateGatewayToken() } returns "previous-token"
 
         viewModel.saveAiConfig(
-            "", "", "", false,
-            AiTextProvider.PRIVATE_GATEWAY,
-            "https://private.example", "gateway-model", "",
-            onSaved = {}
+            AiConfigSaveRequest(
+                geminiKey = "", cloudflareUrl = "", cloudflareToken = "", autoSaveRecaps = false,
+                gateway = AiGatewayUpdate(
+                    provider = AiTextProvider.PRIVATE_GATEWAY, url = "https://private.example",
+                    model = "gateway-model", token = ""
+                )
+            )
         )
         advanceUntilIdle()
 
