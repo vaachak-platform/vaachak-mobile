@@ -68,6 +68,10 @@ jobs:
 
       - name: Verify reports exist
         run: |
+          set -euo pipefail
+          # Missing reports can silently reduce Sonar new-code coverage.
+          test -s "$GITHUB_WORKSPACE/core/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml"
+          test -s "$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml"
           echo "== Core lint =="
           ls -lah "$GITHUB_WORKSPACE/core/build/reports/" || true
 

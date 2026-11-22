@@ -1,7 +1,7 @@
 package org.vaachak.reader.core.data.repository
 
 import android.util.Base64
-import android.util.Log
+import timber.log.Timber
 import com.google.ai.client.generativeai.GenerativeModel
 import kotlinx.coroutines.flow.first
 import org.vaachak.reader.core.data.remote.CloudflareAiApi
@@ -57,7 +57,7 @@ class AiRepository @Inject constructor(
                 token = "Bearer $token"
             )
 
-            Log.d("Visualize-Debug", "HTTP status: ${response.code()}")
+            Timber.d("Cloudflare image response status: %d", response.code())
 
             // 3. Handle Raw Bytes -> Base64
             if (response.isSuccessful) {

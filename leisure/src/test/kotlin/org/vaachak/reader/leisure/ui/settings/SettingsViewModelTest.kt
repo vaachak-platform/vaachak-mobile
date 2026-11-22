@@ -85,6 +85,9 @@ class SettingsViewModelTest {
         every { settingsRepo.cfUrl } returns flowOf("")
         every { settingsRepo.cfToken } returns flowOf("")
         every { settingsRepo.isAutoSaveRecapsEnabled } returns flowOf(false)
+        every { settingsRepo.aiTextProvider } returns flowOf(AiTextProvider.PRIVATE_GATEWAY)
+        every { settingsRepo.privateGatewayUrl } returns flowOf("https://reader.tailnet.ts.net:8443/v1")
+        every { settingsRepo.privateGatewayModel } returns flowOf("local-chat")
 
         every { settingsRepo.themeMode } returns flowOf(ThemeMode.LIGHT)
         every { settingsRepo.einkContrast } returns flowOf(1f)

@@ -1,6 +1,6 @@
 package org.vaachak.reader.core.data.remote
 
-import kotlinx.coroutines.Dispatchers
+import org.vaachak.reader.core.common.AppCoroutineConfig
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -46,7 +46,7 @@ class PrivateGatewayClient @Inject constructor(baseClient: OkHttpClient) {
         .build()
 
     suspend fun chat(base: String, modelId: String, bearer: String, prompt: String): String =
-        withContext(Dispatchers.IO) {
+        withContext(AppCoroutineConfig.io) {
             val url = PrivateGatewayEndpoint.normalizedBase(base)
             val model = PrivateGatewayEndpoint.validatedModel(modelId)
             require(bearer.isNotBlank()) { "Set the Vaachak gateway key in AI Settings" }
@@ -61,13 +61,13 @@ class PrivateGatewayClient @Inject constructor(baseClient: OkHttpClient) {
                 .post(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
             client.newCall(request).execute().use { response ->
-                if (response.code != 200) throw IllegalStateException("Private gateway HTTP ${response.code}")
+                check(response.code == 200) { "Private gateway HTTP ${response.code}" }
                 val body = response.peekBody(131_072L).string()
-                if (body.isBlank()) throw IllegalStateException("Empty gateway response")
+                check(body.isNotBlank()) { "Empty gateway response" }
                 val result = JSONObject(body).optJSONArray("choices")
                     ?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
                     ?.trim().orEmpty()
-                if (result.isEmpty()) throw IllegalStateException("Gateway returned no text")
+                check(result.isNotEmpty()) { "Gateway returned no text" }
                 result
             }
         }

@@ -47,7 +47,14 @@ private data class AiState(
     val gemini: String,
     val cfUrl: String,
     val token: String,
-    val autoSave: Boolean
+    val autoSave: Boolean,
+    val gateway: AiGatewayState
+)
+
+private data class AiGatewayState(
+    val provider: AiTextProvider,
+    val url: String,
+    val model: String
 )
 
 private data class ThemeState(
@@ -155,13 +162,22 @@ class SettingsViewModel @Inject constructor(
         AccountState(username, device, lastSync, offline)
     }.distinctUntilChanged()
 
+    private val aiGatewayFlow = combine(
+        settingsRepo.aiTextProvider,
+        settingsRepo.privateGatewayUrl,
+        settingsRepo.privateGatewayModel
+    ) { provider, url, model ->
+        AiGatewayState(provider, url, model)
+    }
+
     private val aiFlow = combine(
         settingsRepo.geminiKey,
         settingsRepo.cfUrl,
         settingsRepo.cfToken,
-        settingsRepo.isAutoSaveRecapsEnabled
-    ) { gemini, cfUrl, token, autoSave ->
-        AiState(gemini, cfUrl, token, autoSave)
+        settingsRepo.isAutoSaveRecapsEnabled,
+        aiGatewayFlow
+    ) { gemini, cfUrl, token, autoSave, gateway ->
+        AiState(gemini, cfUrl, token, autoSave, gateway)
     }.distinctUntilChanged()
 
     private val themeFlow = combine(
@@ -207,11 +223,15 @@ class SettingsViewModel @Inject constructor(
             isOfflineMode = acc.offline,
             catalogs = content.feeds,
             aiConfig = AiConfig(
-                isEnabled = ai.gemini.isNotBlank(),
+                isEnabled = ai.gemini.isNotBlank() ||
+                    (ai.gateway.provider == AiTextProvider.PRIVATE_GATEWAY && ai.gateway.url.isNotBlank()),
                 geminiKey = ai.gemini,
                 cloudflareUrl = ai.cfUrl,
                 authToken = ai.token,
-                autoSaveRecaps = ai.autoSave
+                autoSaveRecaps = ai.autoSave,
+                textProvider = ai.gateway.provider,
+                gatewayUrl = ai.gateway.url,
+                gatewayModel = ai.gateway.model.ifBlank { "local-chat" }
             ),
             activeEditSection = view.editSec,
             isAiMasked = view.masked,
@@ -297,71 +317,62 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Compatible with both the original four-field AI screen and the expanded
-     * private-gateway screen on the feature branch. The branch's AiConfigScreen
-     * wasn't part of the uploaded main archive, so avoid replacing it here.
-     *
-     * The extended positional arguments are a provider plus gateway URL,
-     * model and token. The provider may appear at any position.
-     * A blank new gateway token preserves the existing stored token; users
-     * must use clearPrivateGatewayToken() to deliberately remove it.
-     */
+    /** Keep the original four-field API available for existing settings screens. */
+    fun saveAiConfig(gemini: String, cfUrl: String, token: String, autoSave: Boolean) {
+        saveAiConfigInternal(gemini, cfUrl, token, autoSave, gateway = null, onSaved = {})
+    }
+
+    /** Typed gateway configuration: avoids unverified positional vararg values. */
     fun saveAiConfig(
         gemini: String,
         cfUrl: String,
         token: String,
         autoSave: Boolean,
-        vararg additionalAiSettings: Any?,
+        provider: AiTextProvider,
+        gatewayUrl: String,
+        gatewayModel: String,
+        gatewayToken: String,
         onSaved: () -> Unit = {}
     ) {
-        viewModelScope.launch {
-            try {
-                val gateway = if (additionalAiSettings.isEmpty()) {
-                    null
-                } else {
-                    // Require one provider and exactly three string fields.
-                    // Do not silently store fields in the wrong positions.
-                    if (additionalAiSettings.size != 4) {
-                        throw IllegalArgumentException("Unsupported AI settings configuration")
-                    }
-                    val providerPosition = additionalAiSettings.indexOfFirst { it is AiTextProvider }
-                    if (providerPosition == -1) {
-                        throw IllegalArgumentException("Unsupported AI provider configuration")
-                    }
-                    val provider = additionalAiSettings[providerPosition] as AiTextProvider
-                    val fields = additionalAiSettings.filterIndexed { index, _ -> index != providerPosition }
-                    if (fields.any { it !is String }) {
-                        throw IllegalArgumentException("Invalid gateway settings")
-                    }
-                    GatewayUpdate(provider, fields[0] as String, fields[1] as String, fields[2] as String)
-                }
+        saveAiConfigInternal(
+            gemini, cfUrl, token, autoSave,
+            gateway = GatewayUpdate(provider, gatewayUrl, gatewayModel, gatewayToken),
+            onSaved = onSaved
+        )
+    }
 
-                val currentTheme = settingsRepo.themeMode.first()
-                settingsRepo.saveSettings(
-                    gemini = gemini,
-                    cfUrl = cfUrl,
-                    cfToken = token,
-                    isEnk = currentTheme == ThemeMode.E_INK
-                )
-                settingsRepo.setAutoSaveRecaps(autoSave)
-                if (gateway != null) {
-                    settingsRepo.setAiTextProvider(gateway.provider)
-                    // A blank password field does not erase an existing secret.
-                    val gatewayToken = gateway.token.ifBlank { settingsRepo.loadPrivateGatewayToken() }
-                    settingsRepo.savePrivateGatewaySettings(
-                        gateway.url, gateway.model, gatewayToken
-                    )
-                }
-                _activeEditSection.value = SettingsSection.NONE
-                _errorMessage.value = null
-                onSaved()
-            } catch (_: Exception) {
-                // Never include exception text: HTTP errors can contain URLs,
-                // credentials or request details.
-                _errorMessage.value = "Could not save AI settings. Check the values and try again."
-            }
+    private fun saveAiConfigInternal(
+        gemini: String,
+        cfUrl: String,
+        token: String,
+        autoSave: Boolean,
+        gateway: GatewayUpdate?,
+        onSaved: () -> Unit
+    ) = viewModelScope.launch {
+        try {
+            val currentTheme = settingsRepo.themeMode.first()
+            settingsRepo.saveSettings(
+                gemini = gemini,
+                cfUrl = cfUrl,
+                cfToken = token,
+                isEnk = currentTheme == ThemeMode.E_INK
+            )
+            settingsRepo.setAutoSaveRecaps(autoSave)
+            if (gateway != null) saveGatewayUpdate(gateway)
+            _activeEditSection.value = SettingsSection.NONE
+            _errorMessage.value = null
+            onSaved()
+        } catch (_: Exception) {
+            // Credentials and network endpoints must not appear in user-visible errors.
+            _errorMessage.value = "Could not save AI settings. Check the values and try again."
         }
+    }
+
+    private suspend fun saveGatewayUpdate(gateway: GatewayUpdate) {
+        settingsRepo.setAiTextProvider(gateway.provider)
+        // A blank field retains the prior token; removal is a separate explicit action.
+        val savedToken = gateway.token.ifBlank { settingsRepo.loadPrivateGatewayToken() }
+        settingsRepo.savePrivateGatewaySettings(gateway.url, gateway.model, savedToken)
     }
 
     private data class GatewayUpdate(

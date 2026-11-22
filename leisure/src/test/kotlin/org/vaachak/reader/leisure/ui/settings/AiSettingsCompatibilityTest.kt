@@ -12,6 +12,8 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -65,6 +67,9 @@ class AiSettingsCompatibilityTest {
         every { settings.cfUrl } returns flowOf("")
         every { settings.cfToken } returns flowOf("")
         every { settings.isAutoSaveRecapsEnabled } returns flowOf(false)
+        every { settings.aiTextProvider } returns flowOf(AiTextProvider.PRIVATE_GATEWAY)
+        every { settings.privateGatewayUrl } returns flowOf("https://reader.tailnet.ts.net:8443/v1")
+        every { settings.privateGatewayModel } returns flowOf("local-chat")
         every { settings.themeMode } returns flowOf(ThemeMode.LIGHT)
         every { settings.einkContrast } returns flowOf(1f)
         every { settings.bookshelfPreferences } returns flowOf(BookshelfPreferences())
@@ -130,5 +135,39 @@ class AiSettingsCompatibilityTest {
         viewModel.clearPrivateGatewayToken()
         advanceUntilIdle()
         coVerify(exactly = 1) { settings.savePrivateGatewayToken("") }
+    }
+
+    @Test
+    fun `selected gateway configuration is visible in Settings UI state`() = runTest(dispatcherRule.dispatcher) {
+        advanceUntilIdle()
+        val config = viewModel.uiState.value.aiConfig
+        assertEquals(AiTextProvider.PRIVATE_GATEWAY, config.textProvider)
+        assertTrue(config.isEnabled)
+        assertEquals("https://reader.tailnet.ts.net:8443/v1", config.gatewayUrl)
+        assertEquals("local-chat", config.gatewayModel)
+    }
+
+    @Test
+    fun `failed gateway save does not invoke callback or expose credentials`() = runTest(dispatcherRule.dispatcher) {
+        coEvery { settings.savePrivateGatewaySettings(any(), any(), any()) } throws
+            IllegalStateException("secret-do-not-show")
+        var callbackInvoked = false
+        viewModel.saveAiConfig(
+            "gemini-key", "https://worker.example", "cf-token", true,
+            AiTextProvider.PRIVATE_GATEWAY, "https://reader.tailnet.ts.net:8443/v1", "local-chat", "secret-do-not-show",
+            onSaved = { callbackInvoked = true }
+        )
+        advanceUntilIdle()
+        assertFalse(callbackInvoked)
+        assertTrue(viewModel.uiState.value.errorMessage.orEmpty().contains("Could not save"))
+        assertFalse(viewModel.uiState.value.errorMessage.orEmpty().contains("secret-do-not-show"))
+    }
+
+    @Test
+    fun `legacy save does not change gateway provider`() = runTest(dispatcherRule.dispatcher) {
+        viewModel.saveAiConfig("gemini-key", "", "", false)
+        advanceUntilIdle()
+        coVerify(exactly = 0) { settings.setAiTextProvider(any()) }
+        coVerify(exactly = 0) { settings.savePrivateGatewaySettings(any(), any(), any()) }
     }
 }

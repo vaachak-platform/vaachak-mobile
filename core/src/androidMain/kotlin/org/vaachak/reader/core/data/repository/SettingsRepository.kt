@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import org.vaachak.reader.core.common.AppCoroutineConfig
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.vaachak.reader.core.domain.model.AiTextProvider
@@ -43,7 +45,8 @@ import javax.inject.Singleton
 @Singleton
 class SettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val vaultRepository: VaultRepository
+    private val vaultRepository: VaultRepository,
+    private val privateGatewaySecrets: PrivateGatewaySecrets
 ) {
 
     companion object {
@@ -130,6 +133,7 @@ class SettingsRepository @Inject constructor(
     // --- 1. THE THREAD-SAFE VAULT CACHE ---
     private val activeVaults = mutableMapOf<String, DataStore<Preferences>>()
     private val vaultMutex = Mutex()
+    private val gatewayMigrationMutex = Mutex()
 
     private suspend fun getVaultDataStore(vaultId: String): DataStore<Preferences> {
         vaultMutex.withLock {
@@ -173,10 +177,24 @@ class SettingsRepository @Inject constructor(
         it[PRIVATE_GATEWAY_MODEL] ?: ""
     }
 
-    // Kept as a suspend function for the existing AiRepository contract.
-    // Uses the current vault, just like the other AI settings.
-    suspend fun loadPrivateGatewayToken(): String =
-        vaultPreferencesFlow.first()[PRIVATE_GATEWAY_TOKEN] ?: ""
+    /**
+     * Migrate pre-existing plaintext DataStore credentials into no-backup encrypted storage.
+     * If encryption fails the old value is left intact, so a failed upgrade never loses
+     * the credential. The vault ID is captured once to avoid crossing profiles mid-call.
+     */
+    suspend fun loadPrivateGatewayToken(): String = withContext(AppCoroutineConfig.io) {
+        gatewayMigrationMutex.withLock {
+            val vaultId = vaultRepository.activeVaultId.first()
+            val dataStore = getVaultDataStore(vaultId)
+            val legacy = dataStore.data.first()[PRIVATE_GATEWAY_TOKEN]
+            if (legacy != null) {
+                if (legacy.isNotEmpty()) privateGatewaySecrets.write(vaultId, legacy)
+                dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
+                if (legacy.isEmpty()) return@withLock ""
+            }
+            privateGatewaySecrets.read(vaultId)
+        }
+    }
     val isEinkEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[IS_EINK_ENABLED] ?: false }
     val isAutoSaveRecapsEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[AUTO_SAVE_RECAPS_KEY] ?: true }
     val einkContrast: Flow<Float> = vaultPreferencesFlow.map { it[CONTRAST_KEY] ?: 0.5f }
@@ -339,16 +357,39 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    suspend fun savePrivateGatewaySettings(url: String, model: String, token: String) {
-        editCurrentVault { prefs ->
-            prefs[PRIVATE_GATEWAY_URL] = url.trim()
-            prefs[PRIVATE_GATEWAY_MODEL] = model.trim()
-            prefs[PRIVATE_GATEWAY_TOKEN] = token.trim()
+    suspend fun savePrivateGatewaySettings(url: String, model: String, token: String) =
+        withContext(AppCoroutineConfig.io) {
+            gatewayMigrationMutex.withLock {
+                val vaultId = vaultRepository.activeVaultId.first()
+                val dataStore = getVaultDataStore(vaultId)
+                // Never persist the gateway credential as plaintext in a preferences file.
+                if (token.isBlank()) {
+                    dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
+                    privateGatewaySecrets.clear(vaultId)
+                } else {
+                    privateGatewaySecrets.write(vaultId, token.trim())
+                }
+                dataStore.edit { prefs ->
+                    prefs[PRIVATE_GATEWAY_URL] = url.trim()
+                    prefs[PRIVATE_GATEWAY_MODEL] = model.trim()
+                    prefs.remove(PRIVATE_GATEWAY_TOKEN)
+                }
+            }
         }
-    }
 
-    suspend fun savePrivateGatewayToken(token: String) {
-        editCurrentVault { prefs -> prefs[PRIVATE_GATEWAY_TOKEN] = token.trim() }
+    suspend fun savePrivateGatewayToken(token: String) = withContext(AppCoroutineConfig.io) {
+        gatewayMigrationMutex.withLock {
+            val vaultId = vaultRepository.activeVaultId.first()
+            val dataStore = getVaultDataStore(vaultId)
+            if (token.isBlank()) {
+                // Remove the legacy plaintext copy first so it cannot be re-migrated.
+                dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
+                privateGatewaySecrets.clear(vaultId)
+            } else {
+                privateGatewaySecrets.write(vaultId, token.trim())
+                dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
+            }
+        }
     }
 
     suspend fun saveSettings(gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean, isAiEnabled: Boolean? = null) {
