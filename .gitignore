@@ -28,4 +28,6 @@ secrets.properties
 
 # Local-only config/examples that should not be committed
 AppConfig.kt
-AppConfig.example.kt
+AppConfig.example.kt*.p12
+*.pfx
+*.pkcs12
