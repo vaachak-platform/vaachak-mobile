@@ -14,7 +14,7 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
 
     id("io.gitlab.arturbosch.detekt") version "1.23.8"
-    id("org.sonarqube") version "7.2.3.7755"
+    id("org.sonarqube") version "7.6.0.18749"
 }
 
 val libs = extensions.getByType(VersionCatalogsExtension::class.java).named("libs")
