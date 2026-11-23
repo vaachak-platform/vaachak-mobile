@@ -76,10 +76,10 @@ jobs:
           ram-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          # Emulator Runner processes each script input line as a separate shell command.
-          # Keep diagnostics + Gradle on ONE physical line (no continuation backslashes).
-          # Display metrics help diagnose any future device-dependent Compose failures.
-          script: adb shell wm size && adb shell wm density && ./gradlew :core:createDebugAndroidTestCoverageReport :leisure:createDebugAndroidTestCoverageReport --stacktrace --console=plain --warning-mode=summary --no-problems-report --no-daemon --no-configuration-cache
+          # The runner executes ONE shell command, not a multiline Bash block.
+          # Our script compiles both APKs, provisions a temporary CI-only PIN,
+          # unlocks the actual keyguard, then runs instrumented JaCoCo coverage.
+          script: bash tools/ci/run-sonar-instrumented-coverage.sh
 
       - name: Verify unit and instrumented JaCoCo XML, fail if missing
         shell: bash

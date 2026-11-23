@@ -35,8 +35,12 @@ class GatewayCredentialUnavailableException(message: String, cause: Throwable? =
  * may still hold unmigrated VAG1 files.
  */
 class PrivateGatewaySecrets @Inject constructor(
-    @ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context
 ) {
+    private companion object {
+        const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
+    }
+
     private val legacyAlias = "vaachak.private.ai.gateway.key.v1"
     private val authenticatedAlias = "vaachak.private.ai.gateway.key.v2"
     private val currentMagic = "VAG2".toByteArray(Charsets.US_ASCII)
@@ -95,7 +99,7 @@ class PrivateGatewaySecrets @Inject constructor(
     /** Prove recent device authorization before touching historical non-authenticated keys. */
     private fun requireFreshAuthentication() {
         withDeviceAuthentication {
-            Cipher.getInstance("AES/GCM/NoPadding").init(Cipher.ENCRYPT_MODE, authenticatedKey())
+            Cipher.getInstance(AES_GCM_TRANSFORMATION).init(Cipher.ENCRYPT_MODE, authenticatedKey())
         }
     }
 
@@ -108,7 +112,7 @@ class PrivateGatewaySecrets @Inject constructor(
         val magic = bytes.copyOfRange(0, 4)
         val token = when {
             magic.contentEquals(currentMagic) -> withDeviceAuthentication {
-                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
                 cipher.init(Cipher.DECRYPT_MODE, authenticatedKey(), GCMParameterSpec(128, bytes.copyOfRange(4, 16)))
                 cipher.updateAAD(vaultId.toByteArray(Charsets.UTF_8))
                 String(cipher.doFinal(bytes.copyOfRange(16, bytes.size)), Charsets.UTF_8)
@@ -120,7 +124,7 @@ class PrivateGatewaySecrets @Inject constructor(
                     ?: throw GatewayCredentialUnavailableException(
                         "An older private gateway key is no longer available. Re-enter the key in Settings."
                     )
-                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
                 cipher.init(Cipher.DECRYPT_MODE, oldKey, GCMParameterSpec(128, bytes.copyOfRange(4, 16)))
                 val plaintext = String(cipher.doFinal(bytes.copyOfRange(16, bytes.size)), Charsets.UTF_8)
                 // Atomic overwrite happens only after authenticated encryption succeeds.
@@ -136,7 +140,7 @@ class PrivateGatewaySecrets @Inject constructor(
     fun write(vaultId: String, token: String) {
         require(token.length in 1..512 && token.none(Char::isWhitespace)) { "Invalid gateway key" }
         val encrypted = withDeviceAuthentication {
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
             cipher.init(Cipher.ENCRYPT_MODE, authenticatedKey())
             cipher.updateAAD(vaultId.toByteArray(Charsets.UTF_8))
             currentMagic + cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))

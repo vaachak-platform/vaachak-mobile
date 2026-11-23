@@ -1,9 +1,9 @@
 package org.vaachak.reader.leisure.testing
 
 import android.os.Bundle
-import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import timber.log.Timber
 
 /**
  * Debug-only, isolated host for Compose instrumentation tests.
@@ -22,22 +22,22 @@ class ComposeTestHostActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        Log.d(TAG, "onCreate; test host keeps its visible screen awake")
+        Timber.tag(TAG).d("onCreate; test host keeps its visible screen awake")
     }
 
     override fun onResume() {
         super.onResume()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        Log.d(TAG, "onResume")
+        Timber.tag(TAG).d("onResume")
     }
 
     override fun onPause() {
-        Log.d(TAG, "onPause; finishing=$isFinishing, changingConfig=$isChangingConfigurations")
+        Timber.tag(TAG).d("onPause; finishing=$isFinishing, changingConfig=$isChangingConfigurations")
         super.onPause()
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "onDestroy; finishing=$isFinishing, changingConfig=$isChangingConfigurations")
+        Timber.tag(TAG).d("onDestroy; finishing=$isFinishing, changingConfig=$isChangingConfigurations")
         super.onDestroy()
     }
 
