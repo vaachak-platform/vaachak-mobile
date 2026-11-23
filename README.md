@@ -2,7 +2,7 @@
 
 [![Android CI](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/android.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/android.yml)
 [![Lint & Static Analysis](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/lint.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/lint.yml)
-[![Build & Release APK](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/release.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/release.yml)
+[![Releases](https://img.shields.io/github/v/release/vaachak-platform/vaachak-mobile?label=Releases)](https://github.com/vaachak-platform/vaachak-mobile/releases)
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=vaachak-platform_vaachak-mobile&metric=alert_status&token=bf448a236755183677fee23761f1d4a4b69aa5fc)](https://sonarcloud.io/summary/new_code?id=vaachak-platform_vaachak-mobile)
 [![CodeQL Security Scan](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/codeql.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/codeql.yml)
 [![OWASP MobSF Scan](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/security-scan.yml/badge.svg)](https://github.com/vaachak-platform/vaachak-mobile/actions/workflows/security-scan.yml)
@@ -157,7 +157,7 @@ This repository is designed to demonstrate product thinking, mobile engineering 
 - SonarCloud quality gate
 - CodeQL security scanning
 - OWASP MobSF workflow
-- GitHub Actions-based APK release pipeline
+- locally signed release APKs, verified and manually published through GitHub Releases
 
 👉 **[Read the full architecture document](ARCHITECTURE.md)**
 
@@ -212,8 +212,8 @@ Need help side-loading?
    ./gradlew :leisure:assembleDebug
    ```
 
-### Release build
-Release builds require local signing configuration and keystore setup.
+### Release build and publication
+Production release APKs are signed **only on a maintainer's local machine**, using an existing protected signing keystore. No release-signing key or password is supplied to GitHub Actions, and signed APKs are uploaded manually to GitHub Releases. See the [local signing and manual release guide](docs/RELEASE_SIGNING.md) for setup, certificate checks and publishing instructions.
 
 ```bash
 ./gradlew :leisure:assembleRelease
@@ -228,6 +228,9 @@ Release builds require local signing configuration and keystore setup.
 
 - [Architecture](ARCHITECTURE.md)  
   Module structure, sync model, and system design
+
+- [Local release signing](docs/RELEASE_SIGNING.md)  
+  Maintainer-owned signing keys, APK verification, and manual GitHub Release uploads
 
 ---
 
