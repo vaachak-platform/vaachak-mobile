@@ -99,8 +99,10 @@ class SettingsRepositoryCoverageUnitTest {
 
         assertEquals("", repository.loadPrivateGatewayToken())
         assertNull(store.data.first()[SettingsRepository.PRIVATE_GATEWAY_TOKEN])
+        // Direct-provider flows can inspect their own secure slots during setup.
+        // Only the legacy Gateway slot must remain untouched in this case.
         verify(exactly = 0) { secrets.write(any(), any()) }
-        verify(exactly = 0) { secrets.read(any()) }
+        verify(exactly = 0) { secrets.read(vaultId.value) }
     }
 
     @Test

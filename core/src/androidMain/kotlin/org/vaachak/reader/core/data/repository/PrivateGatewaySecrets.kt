@@ -43,6 +43,9 @@ class PrivateGatewaySecrets @Inject constructor(
 
     private val legacyAlias = "vaachak.private.ai.gateway.key.v1"
     private val authenticatedAlias = "vaachak.private.ai.gateway.key.v2"
+    // Background sync needs a distinct device-bound key that remains usable without
+    // a recent screen unlock. The strict Gateway/AI keys are never downgraded.
+    private val backgroundSyncAlias = "vaachak.background.sync.key.v1"
     private val currentMagic = "VAG2".toByteArray(Charsets.US_ASCII)
     private val legacyMagic = "VAG1".toByteArray(Charsets.US_ASCII)
 
@@ -85,12 +88,40 @@ class PrivateGatewaySecrets @Inject constructor(
             .generateKey()
     }
 
+    /** Device-bound AES-GCM for unattended synchronization; never used for AI tokens. */
+    private fun backgroundSyncKey(): SecretKey {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (store.getKey(backgroundSyncAlias, null) as? SecretKey)?.let { return it }
+        val parameters = KeyGenParameterSpec.Builder(
+            backgroundSyncAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setKeySize(256)
+            .setUserAuthenticationRequired(false)
+            .build()
+        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            .apply { init(parameters) }.generateKey()
+    }
+
+    private fun keyForVault(vaultId: String): SecretKey =
+        if (vaultId.startsWith("vaachak_credential_v1:SYNC_PASSWORD:")) {
+            backgroundSyncKey()
+        } else {
+            authenticatedKey()
+        }
+
     private fun <T> withDeviceAuthentication(block: () -> T): T {
         return try {
             block()
         } catch (exception: UserNotAuthenticatedException) {
             throw GatewayCredentialUnavailableException(
                 "Unlock this device with its PIN, pattern or password and retry within 60 seconds.",
+                exception
+            )
+        } catch (exception: java.security.GeneralSecurityException) {
+            throw GatewayCredentialUnavailableException(
+                "Secure credentials are unavailable. Unlock or reconfigure this device and retry.",
                 exception
             )
         }
@@ -113,7 +144,7 @@ class PrivateGatewaySecrets @Inject constructor(
         val token = when {
             magic.contentEquals(currentMagic) -> withDeviceAuthentication {
                 val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
-                cipher.init(Cipher.DECRYPT_MODE, authenticatedKey(), GCMParameterSpec(128, bytes.copyOfRange(4, 16)))
+                cipher.init(Cipher.DECRYPT_MODE, keyForVault(vaultId), GCMParameterSpec(128, bytes.copyOfRange(4, 16)))
                 cipher.updateAAD(vaultId.toByteArray(Charsets.UTF_8))
                 String(cipher.doFinal(bytes.copyOfRange(16, bytes.size)), Charsets.UTF_8)
             }
@@ -138,10 +169,21 @@ class PrivateGatewaySecrets @Inject constructor(
 
     @Synchronized
     fun write(vaultId: String, token: String) {
-        require(token.length in 1..512 && token.none(Char::isWhitespace)) { "Invalid gateway key" }
+        // Separate internal namespace for Gemini/Cloudflare and sync secrets. These may
+        // legitimately contain whitespace; the Gateway token policy stays strict.
+        val scoped = vaultId.startsWith("vaachak_credential_v1:")
+        if (scoped) {
+            require(token.isNotEmpty() && token.toByteArray(Charsets.UTF_8).size <= 4096) {
+                "Invalid credential length"
+            }
+        } else {
+            require(token.length in 1..512 && token.none(Char::isWhitespace)) {
+                "Invalid gateway key"
+            }
+        }
         val encrypted = withDeviceAuthentication {
             val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, authenticatedKey())
+            cipher.init(Cipher.ENCRYPT_MODE, keyForVault(vaultId))
             cipher.updateAAD(vaultId.toByteArray(Charsets.UTF_8))
             currentMagic + cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
         }
