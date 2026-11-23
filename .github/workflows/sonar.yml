@@ -76,12 +76,9 @@ jobs:
           ram-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: |
-            ./gradlew \
-              :core:createDebugAndroidTestCoverageReport \
-              :leisure:createDebugAndroidTestCoverageReport \
-              --stacktrace --console=plain --warning-mode=summary \
-              --no-problems-report --no-daemon --no-configuration-cache
+          # Emulator Runner splits `script` on newlines into separate sh -c calls.
+          # Keep the entire Gradle invocation on ONE physical line (no backslashes).
+          script: ./gradlew :core:createDebugAndroidTestCoverageReport :leisure:createDebugAndroidTestCoverageReport --stacktrace --console=plain --warning-mode=summary --no-problems-report --no-daemon --no-configuration-cache
 
       - name: Verify unit and instrumented JaCoCo XML, fail if missing
         shell: bash
