@@ -1,0 +1,25 @@
+id,priority,area,acceptance,verification,status
+P0-01,P0,Migration,Existing Gemini direct keys and all text tasks preserved,Automated + device,PENDING
+P0-02,P0,Migration,Cloudflare direct Visualize and tile routing preserved,Automated + device,PENDING
+P0-03,P0,Gateway,Private gateway optional; no private endpoints or tokens shipped,Static + APK inspection,PENDING
+P0-04,P0,Gateway,Existing R7.1 private Gateway text works with Tailscale on primary Android profile,Device,PENDING
+P0-05,P0,Routing,Text provider per-vault persists; switching does not erase other keys,Unit + device,PENDING
+P0-06,P0,Routing,No default cross-provider fallback or silent data transfer,Unit + fake HTTP,PENDING
+P0-07,P0,Offline,Offline Mode blocks all network AI but not books/comics/audio/TTS,Unit + device,PENDING
+P0-08,P0,Security,"Secrets securely stored, migrated and absent logs/backups/diagnostics",Security tests,PENDING
+P0-09,P0,Security,"No trust-all TLS, cleartext fallback or prompt logs",Static + runtime,PENDING
+P0-10,P0,Settings,"Back, save, rotations, screen overflow, old tiles and routes work",Compose UI + device,PENDING
+P0-11,P0,Comics,"CBZ/folder import, hostile archive protection, five reading modes/fit defaults",Unit + device,PENDING
+P0-12,P0,Audiobooks,"Local import, speed and skip defaults, background/offline playback",Unit + device,PENDING
+P0-13,P0,TTS,TTS voice/language/settings and EPUB state unaffected,Device,PENDING
+P1-01,P1,Comics,Per-title mode/fit overrides and reset; progress and orientation preserved,Device,PENDING
+P1-02,P1,Audiobooks,"Per-title settings, seek/chapter/resume, audio focus and MediaSession",Device,PENDING
+P1-03,P1,Gateway diagnostics,Test Connection respects configured auth and does not send reading excerpts,Fake server + device,PENDING
+P1-04,P1,Errors,Distinct offline/DNS/TLS/401/403/429/timeout/model errors,Unit + UI,PENDING
+P1-05,P1,UI,"Comics/audiobook and AI settings reachable with semantic IDs, e-ink/large text",Maestro/Compose,PENDING
+P1-06,P1,Security,"Archive limits, storage URI grants/relink, per-vault isolation",Unit + device,PENDING
+P2-01,P2,State,Cancellation and bounded timeout when reader closes,Unit,PENDING
+P2-02,P2,State,"Honest provider connection and active label, retry not misleading",UI + fake HTTP,PENDING
+P2-03,P2,Media,"M4B long seeks, rotation, low memory, Bluetooth and headphone interruption",Device,PENDING
+P3-01,P3,Future gateway,Versioned task contracts and central provider routing only when qualified,Separate release gate,PENDING
+P3-02,P3,Future media AI,OCR/vision/audio transcription opt-in only after explicit design approval,Separate release gate,PENDING
