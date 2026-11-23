@@ -142,9 +142,6 @@ internal fun SettingsScreenContent(
     modifier: Modifier = Modifier
 ) {
     val state = model.settings
-    val activeVaultId = model.activeVaultId
-    val isMultiUserMode = model.isMultiUserMode
-    val comicPreferences = model.comics
     val eink = state.themeMode == ThemeMode.E_INK
     var selectedName by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = SettingsCategory.entries.firstOrNull { it.name == selectedName }

@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import androidx.navigation.compose.rememberNavController
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -31,6 +32,7 @@ import org.vaachak.reader.core.domain.model.ComicPreferences
 import org.vaachak.reader.core.domain.model.ComicReadingDirection
 import org.vaachak.reader.core.domain.model.ComicReadingMode
 import org.vaachak.reader.core.domain.model.ThemeMode
+import org.vaachak.reader.core.domain.model.UserProfile
 
 /** Instrument the actual production Settings screen; callbacks replace Hilt and persistent storage. */
 @RunWith(AndroidJUnit4::class)
@@ -57,12 +59,16 @@ class SettingsComposeInstrumentedTest {
         compose.onNodeWithText("Fit page width").performScrollTo().performClick()
         compose.onNodeWithText("Use volume keys for page turns").performScrollTo().performClick()
         compose.onNodeWithText("Reduce motion for e-ink").performScrollTo().performClick()
+        compose.onNodeWithText("Tap edges to turn pages").performScrollTo().performClick()
+        compose.onNodeWithText("Preload next page").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(ComicReadingDirection.RIGHT_TO_LEFT, current.readingDirection)
             assertEquals(ComicReadingMode.VERTICAL_SCROLL, current.readingMode)
             assertEquals(ComicPageFit.FIT_WIDTH, current.pageFit)
             assertTrue(current.useVolumeKeys)
             assertFalse(current.reduceMotion)
+            assertFalse(current.tapToTurn)
+            assertFalse(current.preloadNextPage)
         }
         // Exercise reverse choices and preserve the explicit user setting.
         compose.onNodeWithText("Left to right").performScrollTo().performClick()
@@ -95,6 +101,57 @@ class SettingsComposeInstrumentedTest {
         compose.onNodeWithContentDescription("Active Profile, Test_profile").performClick()
         compose.onNodeWithText("Switch").performClick()
         compose.runOnIdle { assertEquals("", switchedTo) }
+    }
+
+    @Test fun cloudAccountMustLogOutBeforeSwitchingLocalProfile() {
+        var switchedTo = ""
+        render(
+            state = { SettingsUiState(userProfile = UserProfile(username = "reader", isAuthenticated = true)) },
+            isMultiUser = true,
+            activeVault = "test_profile",
+            onSwitchVault = { switchedTo = it }
+        )
+        selectCategory("General")
+        compose.onNodeWithContentDescription("Active Profile, Test_profile").performClick()
+        compose.onNodeWithText("Cloud Account Active").assertIsDisplayed()
+        compose.onNodeWithText("To switch local profiles safely, please log out of your current cloud account first to prevent mixing sync data.").assertExists()
+        compose.onNodeWithText("OK").performClick()
+        compose.runOnIdle { assertEquals("", switchedTo) }
+    }
+
+    @Test fun localProfileDialogAcceptsNonblankName() {
+        var switchedTo = ""
+        render(isMultiUser = true, activeVault = "test_profile", onSwitchVault = { switchedTo = it })
+        selectCategory("General")
+        compose.onNodeWithContentDescription("Active Profile, Test_profile").performClick()
+        compose.onNodeWithText("Profile Name").performTextInput("Evening Reader")
+        compose.onNodeWithText("Switch").performClick()
+        compose.runOnIdle { assertEquals("Evening Reader", switchedTo) }
+    }
+
+    @Test fun multiUserToggleRevealsAndHidesLocalProfileControls() {
+        var multiUser by mutableStateOf(false)
+        render(
+            multiUserState = { multiUser },
+            onMultiUser = { multiUser = it }
+        )
+        selectCategory("General")
+        compose.onNodeWithContentDescription("Active Profile, Default").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Local Multi-User Mode, Isolate libraries for different offline readers").performClick()
+        compose.runOnIdle { assertTrue(multiUser) }
+        compose.onNodeWithContentDescription("Active Profile, Default").assertExists()
+        compose.onNodeWithContentDescription("Local Multi-User Mode, Isolate libraries for different offline readers").performClick()
+        compose.runOnIdle { assertFalse(multiUser) }
+        compose.onNodeWithContentDescription("Active Profile, Default").assertDoesNotExist()
+    }
+
+    @Test fun lcdThemeKeepsSettingsCategoriesFunctional() {
+        render(SettingsUiState(themeMode = ThemeMode.LIGHT))
+        selectCategory("Books & reading")
+        compose.onNodeWithText("READING EXPERIENCE").assertExists()
+        compose.onNodeWithContentDescription("All settings").performClick()
+        selectCategory("Library & content")
+        compose.onNodeWithText("SOURCES").assertExists()
     }
 
     @Test fun intelligenceShowsOfflineMessageAndOnlineConfiguration() {
@@ -158,8 +215,10 @@ class SettingsComposeInstrumentedTest {
         state: () -> SettingsUiState = { initialState },
         comics: () -> ComicPreferences = { ComicPreferences() },
         isMultiUser: Boolean = false,
+        multiUserState: () -> Boolean = { isMultiUser },
         activeVault: String = "default",
         onComics: (ComicPreferences) -> Unit = {},
+        onMultiUser: (Boolean) -> Unit = {},
         onOffline: (Boolean) -> Unit = {},
         onSwitchVault: (String) -> Unit = {},
         wide: Boolean = false
@@ -181,13 +240,13 @@ class SettingsComposeInstrumentedTest {
                         model = SettingsContentState(
                             settings = state(),
                             activeVaultId = activeVault,
-                            isMultiUserMode = isMultiUser,
+                            isMultiUserMode = multiUserState(),
                             comics = comics()
                         ),
                         navController = rememberNavController(),
                         actions = SettingsUiActions(
                             saveComicPreferences = onComics,
-                            setMultiUserMode = {},
+                            setMultiUserMode = onMultiUser,
                             switchVault = onSwitchVault,
                             toggleOfflineMode = onOffline
                         ),
