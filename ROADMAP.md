@@ -100,6 +100,18 @@ These tracks remain on the roadmap and should not be accidentally displaced by t
 
 See the complete definitions and verification methods in [ACCEPTANCE_MATRIX.csv](docs/product/ACCEPTANCE_MATRIX.csv). Maintain **that CSV as the single source of truth for case-by-case verification status**; this roadmap tracks priorities and dependencies, not duplicate pass/fail cells.
 
+## Release signing and distribution policy (maintainer-controlled)
+
+**Decision (2026-11-23):** Production APK signing takes place **only on the maintainer's local computer**. The project must not store an app-signing keystore, decoded key, signing password or release-signing secret in GitHub Actions, repository files or CI artifacts. Signed APKs and their SHA-256 checksums are uploaded **manually** to a draft GitHub Release after local validation. CI remains responsible for source builds, tests, analysis and security checks, not production signing or publishing.
+
+- Retire the historical tag-triggered `.github/workflows/release.yml` rather than allowing it to decode `KEYSTORE_BASE64` and build/publish releases automatically. No release workflow should consume `VAACHAK_KEYSTORE_PASSWORD`, `VAACHAK_KEY_ALIAS` or `VAACHAK_KEY_PASSWORD` from GitHub Secrets.
+- Use the existing release-signing support in `leisure/build.gradle.kts` with a locally held JKS or PKCS#12 key and private configuration in `~/.gradle/gradle.properties` (or local environment variables). Keep keys out of source control and CI.
+- Verify each APK locally with Android SDK `apksigner`, compare the signing certificate to the previously published production certificate, test an in-place upgrade, and publish checksum and release notes alongside the binary.
+- Preserve the existing production signing identity for upgrades. Switching to a different key can prevent Android from installing an update over existing releases unless an explicitly supported signing-key-rotation scheme is in place.
+- Once the retired workflow is removed from `main`, manually delete the now-unused repository/organization/environment Actions secrets. Never remove GitHub's automatically provisioned `GITHUB_TOKEN`; it is not an app-signing secret.
+
+Detailed procedure: [Local release signing and manual publication](docs/RELEASE_SIGNING.md). This operational policy does not change the 24 feature acceptance IDs.
+
 ## Roadmap maintenance protocol
 
 1. Update `ROADMAP.md` for changes to scope, sequencing and product decisions. Use a PR, with review for changes to P0 security/privacy or provider behavior.
