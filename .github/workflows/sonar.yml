@@ -76,9 +76,10 @@ jobs:
           ram-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          # Emulator Runner splits `script` on newlines into separate sh -c calls.
-          # Keep the entire Gradle invocation on ONE physical line (no backslashes).
-          script: ./gradlew :core:createDebugAndroidTestCoverageReport :leisure:createDebugAndroidTestCoverageReport --stacktrace --console=plain --warning-mode=summary --no-problems-report --no-daemon --no-configuration-cache
+          # Emulator Runner processes each script input line as a separate shell command.
+          # Keep diagnostics + Gradle on ONE physical line (no continuation backslashes).
+          # Display metrics help diagnose any future device-dependent Compose failures.
+          script: adb shell wm size && adb shell wm density && ./gradlew :core:createDebugAndroidTestCoverageReport :leisure:createDebugAndroidTestCoverageReport --stacktrace --console=plain --warning-mode=summary --no-problems-report --no-daemon --no-configuration-cache
 
       - name: Verify unit and instrumented JaCoCo XML, fail if missing
         shell: bash

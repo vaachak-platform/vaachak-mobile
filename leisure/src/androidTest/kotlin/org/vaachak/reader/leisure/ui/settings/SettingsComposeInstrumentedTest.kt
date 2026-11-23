@@ -114,14 +114,15 @@ class SettingsComposeInstrumentedTest {
             state = { SettingsUiState(themeMode = ThemeMode.E_INK) },
             wide = true
         )
-        // In two-pane mode, the category chooser and General detail are both visible.
-        compose.onNodeWithTag(Tid.Settings.tabGlobal).assertExists()
-        compose.onNodeWithContentDescription("Offline Mode, Default: On. Cloud features disabled.")
-            .assertExists()
-        // Switching details must keep the category chooser mounted.
+        // Both must be visible *without choosing a category*: this distinguishes
+        // the real two-pane layout from compact mode on a narrow CI emulator.
+        compose.onNodeWithTag(Tid.Settings.tabGlobal).assertIsDisplayed()
+        compose.onNodeWithText("ACCOUNT & PROFILES").assertIsDisplayed()
+        // Changing the detail pane must leave the navigation pane visible.
         compose.onNodeWithTag("settings_category_comics").performClick()
-        compose.onNodeWithTag(Tid.Settings.tabGlobal).assertExists()
+        compose.onNodeWithTag(Tid.Settings.tabGlobal).assertIsDisplayed()
         compose.onNodeWithTag("settings_category_comics").assertExists()
+        compose.onNodeWithText("READING DIRECTION").assertIsDisplayed()
         compose.onNodeWithText("Right to left (manga)").assertExists()
     }
 
@@ -163,6 +164,16 @@ class SettingsComposeInstrumentedTest {
         onSwitchVault: (String) -> Unit = {},
         wide: Boolean = false
     ) {
+        // Device hardware profiles differ between Samsung, BOOX and the generic
+        // GitHub Actions AVD. Translate the actual screen width into a stable
+        // ~1200 dp Compose viewport only for the wide-layout test. The regular
+        // tests keep the device's real density and screen constraints.
+        val wideTestDensity = if (wide) {
+            compose.activity.resources.displayMetrics.widthPixels
+                .coerceAtLeast(1).toFloat() / 1200f
+        } else {
+            1f
+        }
         compose.setContent {
             MaterialTheme {
                 val screen: @androidx.compose.runtime.Composable () -> Unit = {
@@ -184,8 +195,11 @@ class SettingsComposeInstrumentedTest {
                     )
                 }
                 if (wide) {
-                    // Simulate a high-density large e-reader viewport without changing device state.
-                    CompositionLocalProvider(LocalDensity provides Density(0.75f, 1f)) { screen() }
+                    // Only this test synthesizes a wide DP viewport; the host
+                    // Activity, AVD display and production layout remain unchanged.
+                    CompositionLocalProvider(
+                        LocalDensity provides Density(wideTestDensity, 1f)
+                    ) { screen() }
                 } else {
                     screen()
                 }
