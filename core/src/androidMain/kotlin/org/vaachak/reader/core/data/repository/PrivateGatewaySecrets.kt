@@ -43,11 +43,16 @@ class PrivateGatewaySecrets @Inject constructor(
 
     private val legacyAlias = "vaachak.private.ai.gateway.key.v1"
     private val authenticatedAlias = "vaachak.private.ai.gateway.key.v2"
-    // Background sync needs a distinct device-bound key that remains usable without
-    // a recent screen unlock. The strict Gateway/AI keys are never downgraded.
-    private val backgroundSyncAlias = "vaachak.background.sync.key.v1"
+    // Existing installs may contain SYNC_PASSWORD files written under the older
+    // non-authenticated v1 alias. Keep that alias read-only for a one-way migration;
+    // NEVER create a new key under it or delete it while another vault may need it.
+    private val legacySyncAlias = "vaachak.background.sync.key.v1"
     private val currentMagic = "VAG2".toByteArray(Charsets.US_ASCII)
+    private val authenticatedSyncMagic = "VAS2".toByteArray(Charsets.US_ASCII)
     private val legacyMagic = "VAG1".toByteArray(Charsets.US_ASCII)
+
+    private fun isSyncCredential(vaultId: String): Boolean =
+        vaultId.startsWith("vaachak_credential_v1:SYNC_PASSWORD:")
 
     private fun vaultFile(id: String): File {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -88,28 +93,24 @@ class PrivateGatewaySecrets @Inject constructor(
             .generateKey()
     }
 
-    /** Device-bound AES-GCM for unattended synchronization; never used for AI tokens. */
-    private fun backgroundSyncKey(): SecretKey {
-        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(backgroundSyncAlias, null) as? SecretKey)?.let { return it }
-        val parameters = KeyGenParameterSpec.Builder(
-            backgroundSyncAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+    /**
+     * All NEW credentials (including sync) use the already authenticated v2 key:
+     * setUserAuthenticationRequired(true), and 60-second AUTH_DEVICE_CREDENTIAL
+     * on Android 11+. This implements SonarCloud kotlin:S6288 without weakening
+     * Gemini, Cloudflare or Gateway policy.
+     *
+     * Consequence: unattended sync cannot retrieve its password after expiry of
+     * device-credential authorization. It must defer until the user authenticates.
+     */
+    private fun decryptAead(vaultId: String, bytes: ByteArray, key: SecretKey): String {
+        val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
+        cipher.init(
+            Cipher.DECRYPT_MODE, key,
+            GCMParameterSpec(128, bytes.copyOfRange(4, 16))
         )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .setUserAuthenticationRequired(false)
-            .build()
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-            .apply { init(parameters) }.generateKey()
+        cipher.updateAAD(vaultId.toByteArray(Charsets.UTF_8))
+        return String(cipher.doFinal(bytes.copyOfRange(16, bytes.size)), Charsets.UTF_8)
     }
-
-    private fun keyForVault(vaultId: String): SecretKey =
-        if (vaultId.startsWith("vaachak_credential_v1:SYNC_PASSWORD:")) {
-            backgroundSyncKey()
-        } else {
-            authenticatedKey()
-        }
 
     private fun <T> withDeviceAuthentication(block: () -> T): T {
         return try {
@@ -142,13 +143,32 @@ class PrivateGatewaySecrets @Inject constructor(
         require(bytes.size in 32..8192) { "Stored gateway key is invalid; replace it in Settings" }
         val magic = bytes.copyOfRange(0, 4)
         val token = when {
-            magic.contentEquals(currentMagic) -> withDeviceAuthentication {
-                val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
-                cipher.init(Cipher.DECRYPT_MODE, keyForVault(vaultId), GCMParameterSpec(128, bytes.copyOfRange(4, 16)))
-                cipher.updateAAD(vaultId.toByteArray(Charsets.UTF_8))
-                String(cipher.doFinal(bytes.copyOfRange(16, bytes.size)), Charsets.UTF_8)
+            // New sync ciphertext is unambiguously distinguished from the old
+            // VAG2/non-authenticated format; we never guess which key encrypted it.
+            magic.contentEquals(authenticatedSyncMagic) && isSyncCredential(vaultId) ->
+                withDeviceAuthentication { decryptAead(vaultId, bytes, authenticatedKey()) }
+            magic.contentEquals(currentMagic) && isSyncCredential(vaultId) -> {
+                // One-way, fail-closed migration from the old device-bound v1 sync key.
+                // Require RECENT authorization BEFORE decrypting the legacy key.
+                requireFreshAuthentication()
+                val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                val oldKey = store.getKey(legacySyncAlias, null) as? SecretKey
+                    ?: throw GatewayCredentialUnavailableException(
+                        "An older sync key is unavailable. Re-enter the sync password in Settings."
+                    )
+                val plaintext = withDeviceAuthentication {
+                    decryptAead(vaultId, bytes, oldKey)
+                }
+                // write() atomically replaces VAG2 with authenticated VAS2 only
+                // AFTER encryption succeeds. The legacy file remains on failure.
+                write(vaultId, plaintext)
+                plaintext
             }
-            magic.contentEquals(legacyMagic) -> {
+            magic.contentEquals(currentMagic) -> withDeviceAuthentication {
+                decryptAead(vaultId, bytes, authenticatedKey())
+            }
+            magic.contentEquals(legacyMagic) &&
+                !vaultId.startsWith("vaachak_credential_v1:") -> {
                 requireFreshAuthentication()
                 val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
                 val oldKey = store.getKey(legacyAlias, null) as? SecretKey
@@ -183,9 +203,10 @@ class PrivateGatewaySecrets @Inject constructor(
         }
         val encrypted = withDeviceAuthentication {
             val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, keyForVault(vaultId))
+            cipher.init(Cipher.ENCRYPT_MODE, authenticatedKey())
             cipher.updateAAD(vaultId.toByteArray(Charsets.UTF_8))
-            currentMagic + cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
+            val magic = if (isSyncCredential(vaultId)) authenticatedSyncMagic else currentMagic
+            magic + cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
         }
         val dest = vaultFile(vaultId)
         val temporary = File.createTempFile(".private_ai_", ".tmp", context.noBackupFilesDir)
