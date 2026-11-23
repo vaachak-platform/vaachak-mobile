@@ -88,6 +88,74 @@ class AiConfigComposeInstrumentedTest {
         compose.runOnIdle { assertEquals(1, cleared) }
     }
 
+    @Test fun invalidGatewayModelIsBlockedWithAReadableError() {
+        var saves = 0
+        render(onSave = { saves++ })
+        compose.onNodeWithTag("ai_config_provider_gateway").performClick()
+        compose.onNodeWithTag("ai_config_gateway_url")
+            .performTextReplacement("https://reader.demo.ts.net:8443/v1")
+        compose.onNodeWithTag("ai_config_gateway_model").performTextReplacement("invalid model with spaces")
+        compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
+        compose.onNodeWithText("Invalid model alias").assertExists()
+        compose.runOnIdle { assertEquals(0, saves) }
+    }
+
+    @Test fun switchingBackToGeminiBypassesRejectedGatewayInput() {
+        var submitted: AiConfigSaveRequest? = null
+        render(onSave = { submitted = it })
+        compose.onNodeWithTag("ai_config_provider_gateway").performClick()
+        compose.onNodeWithTag("ai_config_gateway_url")
+            .performTextReplacement("http://invalid.example/v1")
+        compose.onNodeWithTag("ai_config_provider_gemini").performClick()
+        compose.onNodeWithTag("ai_config_gateway_url").assertDoesNotExist()
+        compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(AiTextProvider.GEMINI, submitted?.gateway?.provider) }
+    }
+
+    @Test fun existingGatewaySettingsCanBeSavedWithoutReplacingStoredCredential() {
+        var submitted: AiConfigSaveRequest? = null
+        render(
+            state = { SettingsUiState(aiConfig = org.vaachak.reader.core.domain.model.AiConfig(
+                textProvider = AiTextProvider.PRIVATE_GATEWAY,
+                gatewayUrl = "https://reader.demo.ts.net:8443/v1",
+                gatewayModel = "local-chat"
+            )) },
+            onSave = { submitted = it }
+        )
+        compose.onNodeWithTag("ai_config_gateway_key").assertExists()
+        compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(AiTextProvider.PRIVATE_GATEWAY, submitted?.gateway?.provider)
+            assertEquals("https://reader.demo.ts.net:8443/v1", submitted?.gateway?.url)
+            assertEquals("local-chat", submitted?.gateway?.model)
+            assertEquals("", submitted?.gateway?.token)
+        }
+    }
+
+    @Test fun autosaveCanBeTurnedOffWithoutChangingOtherAiFields() {
+        var submitted: AiConfigSaveRequest? = null
+        render(
+            state = { SettingsUiState(aiConfig = org.vaachak.reader.core.domain.model.AiConfig(
+                geminiKey = "example-nonsecret-key", autoSaveRecaps = true
+            )) },
+            onSave = { submitted = it }
+        )
+        compose.onNodeWithTag("ai_config_auto_save").performScrollTo().performClick()
+        compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
+        compose.runOnIdle {
+            assertFalse(submitted?.autoSaveRecaps ?: true)
+            assertEquals("example-nonsecret-key", submitted?.geminiKey)
+        }
+    }
+
+    @Test fun serverErrorIsVisibleUntilStateClearsIt() {
+        var error by mutableStateOf<String?>("Could not save AI configuration")
+        render(state = { SettingsUiState(errorMessage = error) })
+        compose.onNodeWithText("Could not save AI configuration").assertExists()
+        compose.runOnIdle { error = null }
+        compose.onNodeWithText("Could not save AI configuration").assertDoesNotExist()
+    }
+
     private fun render(
         state: () -> SettingsUiState = { SettingsUiState() },
         onSave: (AiConfigSaveRequest) -> Unit = {},
