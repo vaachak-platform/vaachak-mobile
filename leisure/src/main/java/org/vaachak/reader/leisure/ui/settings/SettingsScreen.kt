@@ -96,6 +96,22 @@ private enum class SettingsCategory(
     INTELLIGENCE("Intelligence", "Gemini and online AI options", Tid.Settings.tabIntelligence, Icons.Default.AutoAwesome)
 }
 
+/** Data-only inputs let instrumented UI tests render real Settings without Hilt or storage. */
+internal data class SettingsContentState(
+    val settings: SettingsUiState,
+    val activeVaultId: String,
+    val isMultiUserMode: Boolean,
+    val comics: ComicPreferences
+)
+
+/** Production and tests use the same UI callbacks. Secrets never enter UI state. */
+internal data class SettingsUiActions(
+    val saveComicPreferences: (ComicPreferences) -> Unit,
+    val setMultiUserMode: (Boolean) -> Unit,
+    val switchVault: (String) -> Unit,
+    val toggleOfflineMode: (Boolean) -> Unit
+)
+
 @Composable
 fun SettingsScreen(
     navController: NavController,
@@ -105,12 +121,36 @@ fun SettingsScreen(
     val activeVaultId by viewModel.activeVaultId.collectAsState()
     val isMultiUserMode by viewModel.isMultiUserMode.collectAsState()
     val comicPreferences by viewModel.comicPreferences.collectAsState()
+    SettingsScreenContent(
+        model = SettingsContentState(state, activeVaultId, isMultiUserMode, comicPreferences),
+        navController = navController,
+        actions = SettingsUiActions(
+            saveComicPreferences = { viewModel.saveComicPreferences(it) },
+            setMultiUserMode = viewModel::setMultiUserMode,
+            switchVault = viewModel::switchVault,
+            toggleOfflineMode = viewModel::toggleOfflineMode
+        )
+    )
+}
+
+/** The exact production screen, parameterized only by already-present state and actions. */
+@Composable
+internal fun SettingsScreenContent(
+    model: SettingsContentState,
+    navController: NavController,
+    actions: SettingsUiActions,
+    modifier: Modifier = Modifier
+) {
+    val state = model.settings
+    val activeVaultId = model.activeVaultId
+    val isMultiUserMode = model.isMultiUserMode
+    val comicPreferences = model.comics
     val eink = state.themeMode == ThemeMode.E_INK
     var selectedName by rememberSaveable { mutableStateOf<String?>(null) }
     val selected = SettingsCategory.entries.firstOrNull { it.name == selectedName }
 
     TidScreen(Tid.Screen.settings) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier.fillMaxSize()) {
             val scale = LocalDensity.current.fontScale
             val twoPane = SettingsLayoutPolicy.useTwoPane(maxWidth.value, scale)
             BackHandler(enabled = !twoPane && selected != null) { selectedName = null }
@@ -133,11 +173,8 @@ fun SettingsScreen(
                     Box(Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                         SettingsDetail(
                             category = selected ?: SettingsCategory.GENERAL,
-                            state = state,
-                            activeVaultId = activeVaultId,
-                            isMultiUserMode = isMultiUserMode,
-                            comics = comicPreferences,
-                            viewModel = viewModel,
+                            model = model,
+                            actions = actions,
                             navController = navController,
                             modifier = Modifier.widthIn(max = 800.dp).fillMaxWidth()
                         )
@@ -165,11 +202,8 @@ fun SettingsScreen(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                         SettingsDetail(
                             category = selected,
-                            state = state,
-                            activeVaultId = activeVaultId,
-                            isMultiUserMode = isMultiUserMode,
-                            comics = comicPreferences,
-                            viewModel = viewModel,
+                            model = model,
+                            actions = actions,
                             navController = navController,
                             modifier = Modifier.widthIn(max = 800.dp).fillMaxWidth(),
                             showHeading = false
@@ -237,11 +271,8 @@ private fun SettingsCategoryChooser(
 @Composable
 private fun SettingsDetail(
     category: SettingsCategory,
-    state: SettingsUiState,
-    activeVaultId: String,
-    isMultiUserMode: Boolean,
-    comics: ComicPreferences,
-    viewModel: SettingsViewModel,
+    model: SettingsContentState,
+    actions: SettingsUiActions,
     navController: NavController,
     modifier: Modifier = Modifier,
     showHeading: Boolean = true
@@ -256,12 +287,12 @@ private fun SettingsDetail(
                 Text(category.label, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             }
             when (category) {
-                SettingsCategory.GENERAL -> GlobalSettingsTab(state, activeVaultId, isMultiUserMode, viewModel, navController)
+                SettingsCategory.GENERAL -> GlobalSettingsBody(model.settings, model.activeVaultId, model.isMultiUserMode, actions, navController)
                 SettingsCategory.BOOKS -> BookSettingsTab(navController)
-                SettingsCategory.COMICS -> ComicsSettingsTab(comics, onChange = viewModel::saveComicPreferences)
+                SettingsCategory.COMICS -> ComicsSettingsTab(model.comics, onChange = actions.saveComicPreferences)
                 SettingsCategory.AUDIO -> AudioSettingsTab(navController)
                 SettingsCategory.CONTENT -> ContentSettingsTab(navController)
-                SettingsCategory.INTELLIGENCE -> IntelligenceSettingsTab(state, navController)
+                SettingsCategory.INTELLIGENCE -> IntelligenceSettingsTab(model.settings, navController)
             }
             Spacer(Modifier.height(32.dp))
         }
@@ -367,6 +398,25 @@ fun GlobalSettingsTab(
     viewModel: SettingsViewModel,
     navController: NavController
 ) {
+    GlobalSettingsBody(
+        state, activeVaultId, isMultiUserMode,
+        SettingsUiActions(
+            saveComicPreferences = { viewModel.saveComicPreferences(it) },
+            setMultiUserMode = viewModel::setMultiUserMode,
+            switchVault = viewModel::switchVault,
+            toggleOfflineMode = viewModel::toggleOfflineMode
+        ), navController
+    )
+}
+
+@Composable
+private fun GlobalSettingsBody(
+    state: SettingsUiState,
+    activeVaultId: String,
+    isMultiUserMode: Boolean,
+    actions: SettingsUiActions,
+    navController: NavController
+) {
     var showVaultDialog by remember { mutableStateOf(false) }
 
     SettingsGroup(title = "Account & Profiles") {
@@ -377,8 +427,8 @@ fun GlobalSettingsTab(
 
         SettingsTile(
             icon = Icons.Default.Group, title = "Local Multi-User Mode", subtitle = "Isolate libraries for different offline readers",
-            onClick = { viewModel.setMultiUserMode(!isMultiUserMode) },
-            trailing = { Switch(checked = isMultiUserMode, onCheckedChange = { viewModel.setMultiUserMode(it) }) }
+            onClick = { actions.setMultiUserMode(!isMultiUserMode) },
+            trailing = { Switch(checked = isMultiUserMode, onCheckedChange = { actions.setMultiUserMode(it) }) }
         )
 
         if (isMultiUserMode) {
@@ -398,8 +448,8 @@ fun GlobalSettingsTab(
         SettingsTile(
             icon = if (state.isOfflineMode) Icons.Outlined.CloudOff else Icons.Default.CloudQueue,
             title = "Offline Mode", subtitle = "Default: On. Cloud features disabled.",
-            onClick = { viewModel.toggleOfflineMode(!state.isOfflineMode) },
-            trailing = { Switch(checked = state.isOfflineMode, onCheckedChange = { viewModel.toggleOfflineMode(it) }) }
+            onClick = { actions.toggleOfflineMode(!state.isOfflineMode) },
+            trailing = { Switch(checked = state.isOfflineMode, onCheckedChange = { actions.toggleOfflineMode(it) }) }
         )
         SettingsTile(
             icon = Icons.Default.Contrast, title = "App-wide Theme", subtitle = "E-ink vs LCD, Sharpness",
@@ -436,7 +486,7 @@ fun GlobalSettingsTab(
                 confirmButton = {
                     TextButton(onClick = {
                         if (newVaultName.isNotBlank()) {
-                            viewModel.switchVault(newVaultName)
+                            actions.switchVault(newVaultName)
                         }
                         showVaultDialog = false
                     }) { Text("Switch") } // Maestro sees "Switch"

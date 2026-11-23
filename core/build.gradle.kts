@@ -101,6 +101,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Instrument Android Keystore tests for JaCoCo in SonarCloud.
+            enableAndroidTestCoverage = true
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

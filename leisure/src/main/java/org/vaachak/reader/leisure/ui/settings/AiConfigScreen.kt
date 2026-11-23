@@ -75,8 +75,25 @@ fun AiConfigScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-    val isEink = state.themeMode == ThemeMode.E_INK
+    AiConfigForm(
+        state = state,
+        onBack = onBack,
+        onMaskChange = viewModel::setAiMasked,
+        onClearGatewayKey = viewModel::clearPrivateGatewayToken,
+        onSave = { request -> viewModel.saveAiConfig(request, onSaved = onBack) }
+    )
+}
 
+/** Production AI form accepts callbacks to make credential validation testable on an emulator. */
+@Composable
+internal fun AiConfigForm(
+    state: SettingsUiState,
+    onBack: () -> Unit,
+    onMaskChange: (Boolean) -> Unit,
+    onClearGatewayKey: () -> Unit,
+    onSave: (AiConfigSaveRequest) -> Unit
+) {
+    val isEink = state.themeMode == ThemeMode.E_INK
     // Local state for the form
     var key by remember { mutableStateOf(state.aiConfig.geminiKey) }
     var url by remember { mutableStateOf(state.aiConfig.cloudflareUrl) }
@@ -117,10 +134,12 @@ fun AiConfigScreen(
             Text("Text AI Provider", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(selected = provider == AiTextProvider.GEMINI,
-                    onClick = { provider = AiTextProvider.GEMINI })
+                    onClick = { provider = AiTextProvider.GEMINI },
+                    modifier = Modifier.tid("ai_config_provider_gemini"))
                 Text("Gemini", modifier = Modifier.padding(end = 16.dp))
                 RadioButton(selected = provider == AiTextProvider.PRIVATE_GATEWAY,
-                    onClick = { provider = AiTextProvider.PRIVATE_GATEWAY })
+                    onClick = { provider = AiTextProvider.PRIVATE_GATEWAY },
+                    modifier = Modifier.tid("ai_config_provider_gateway"))
                 Text("Private ai-g732")
             }
             if (provider == AiTextProvider.PRIVATE_GATEWAY) {
@@ -137,7 +156,7 @@ fun AiConfigScreen(
                     modifier = Modifier.fillMaxWidth().tid("ai_config_gateway_key"), singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
-                Button(onClick = { viewModel.clearPrivateGatewayToken() }) {
+                Button(onClick = { onClearGatewayKey() }) {
                     Text("Remove saved Vaachak gateway key")
                 }
             }
@@ -159,7 +178,7 @@ fun AiConfigScreen(
                 ),
                 trailingIcon = {
                     IconButton(
-                        onClick = { viewModel.setAiMasked(!state.isAiMasked) },
+                        onClick = { onMaskChange(!state.isAiMasked) },
                         modifier = Modifier.tid("ai_config_toggle_mask")
                     ) {
                         Icon(
@@ -230,7 +249,7 @@ fun AiConfigScreen(
                             return@Button
                         }
                     }
-                    viewModel.saveAiConfig(
+                    onSave(
                         AiConfigSaveRequest(
                             geminiKey = key,
                             cloudflareUrl = url,
@@ -242,8 +261,7 @@ fun AiConfigScreen(
                                 model = gatewayModel,
                                 token = gatewayToken
                             )
-                        ),
-                        onSaved = onBack
+                        )
                     )
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp).tid("ai_config_save")

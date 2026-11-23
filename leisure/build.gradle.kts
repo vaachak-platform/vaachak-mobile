@@ -92,6 +92,8 @@ android {
 
     buildTypes {
         debug {
+            // AGP instruments the debug APK for on-emulator Compose coverage.
+            enableAndroidTestCoverage = true
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
             buildConfigField("boolean", "SHOW_GIT_INFO", "true")
@@ -227,6 +229,9 @@ dependencies {
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 
     debugImplementation(libs.leakcanary.android)
 }

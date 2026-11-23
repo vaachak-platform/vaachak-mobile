@@ -31,6 +31,12 @@
             android:fullBackupContent="false"
             android:usesCleartextTraffic="true"
             tools:replace="android:allowBackup,android:fullBackupContent">
+        <!-- Instrumented Compose UI host. Exists only in the debug APK, never release. -->
+        <activity
+                android:name="org.vaachak.reader.leisure.testing.ComposeTestHostActivity"
+                android:exported="false"
+                android:hardwareAccelerated="true"
+                android:theme="@style/Theme.LeisureVaachak" />
     </application>
 
 </manifest>
