@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import org.vaachak.reader.core.common.AppCoroutineConfig
 import org.vaachak.reader.core.data.local.ProfileDao
 import org.vaachak.reader.core.data.repository.OpdsRepository
+import org.vaachak.reader.core.data.repository.GatewayCredentialUnavailableException
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
 import org.vaachak.reader.core.data.repository.VaultRepository
@@ -372,6 +373,9 @@ class SettingsViewModel @Inject constructor(
             _activeEditSection.value = SettingsSection.NONE
             _errorMessage.value = null
             onSaved()
+        } catch (error: GatewayCredentialUnavailableException) {
+            // Only the safe, static Keystore guidance is exposed; never a key or endpoint.
+            _errorMessage.value = error.message
         } catch (_: Exception) {
             // Credentials and network endpoints must not appear in user-visible errors.
             _errorMessage.value = "Could not save AI settings. Check the values and try again."
