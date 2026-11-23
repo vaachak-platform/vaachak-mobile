@@ -88,12 +88,12 @@ private enum class SettingsCategory(
     val tag: String,
     val icon: ImageVector
 ) {
-    GENERAL("General", "Profiles, appearance, network and sync", Tid.Settings.tabGlobal, Icons.Default.Person),
-    BOOKS("Books & reading", "Book appearance, library and dictionary", Tid.Settings.tabBook, Icons.Default.Book),
-    COMICS("Comics", "Layout, direction, navigation and e-ink", "settings_category_comics", Icons.Default.Image),
-    AUDIO("Audio", "Speech and narration", "settings_category_audio", Icons.Default.Audiotrack),
-    CONTENT("Library & content", "Catalog sources and imports", Tid.Settings.tabContent, Icons.AutoMirrored.Filled.List),
-    INTELLIGENCE("Intelligence", "Gemini and online AI options", Tid.Settings.tabIntelligence, Icons.Default.AutoAwesome)
+    GENERAL("General", "Profiles, appearance and offline controls", Tid.Settings.tabGlobal, Icons.Default.Person),
+    CONTENT("Library & Sync", "Library appearance, catalogs and synchronization", Tid.Settings.tabContent, Icons.AutoMirrored.Filled.List),
+    BOOKS("Reading & TTS", "Reading appearance, dictionaries and narration", Tid.Settings.tabBook, Icons.Default.Book),
+    COMICS("Comics", "Page layout, reading direction and e-ink", "settings_category_comics", Icons.Default.Image),
+    AUDIO("Audiobooks", "Local audio and playback settings", "settings_category_audio", Icons.Default.Audiotrack),
+    INTELLIGENCE("AI & Providers", "Gemini, Cloudflare and private text gateway", Tid.Settings.tabIntelligence, Icons.Default.AutoAwesome)
 }
 
 /** Data-only inputs let instrumented UI tests render real Settings without Hilt or storage. */
@@ -372,6 +372,7 @@ private fun ComicSwitch(title: String, checked: Boolean, onChange: (Boolean) -> 
 
 @Composable
 private fun AudioSettingsTab(navController: NavController) {
+    // TTS remains reachable here for existing users; audio files will use a separate engine.
     SettingsGroup(title = "Speech & narration") {
         SettingsTile(
             icon = Icons.Default.RecordVoiceOver,
@@ -380,11 +381,18 @@ private fun AudioSettingsTab(navController: NavController) {
             onClick = { navController.navigate(Screen.TTS.route) }
         )
     }
-    Text(
-        "Audiobook playback settings will be added with the audiobook engine.",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+    SettingsGroup(title = "Audiobooks") {
+        Text(
+            "Audiobook playback settings will be added with the audiobook engine.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "Local audiobook playback will be independent of text-to-speech settings.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 @Composable
@@ -523,10 +531,24 @@ fun BookSettingsTab(navController: NavController) {
 
 @Composable
 fun ContentSettingsTab(navController: NavController) {
+    SettingsGroup(title = "Library & Sync") {
+        SettingsTile(
+            icon = Icons.AutoMirrored.Filled.LibraryBooks,
+            title = "Library Settings (Visuals)",
+            subtitle = "E-ink optimization, Cover Styles, Smart Stacks",
+            onClick = { navController.navigate(Screen.Bookshelf.route) }
+        )
+        SettingsTile(
+            icon = Icons.Default.Sync,
+            title = "Sync Configuration",
+            subtitle = "Manage end-to-end encrypted vaults",
+            onClick = { navController.navigate(Screen.SyncSettings.route) }
+        )
+    }
     SettingsGroup(title = "Sources") {
         SettingsTile(
             icon = Icons.AutoMirrored.Filled.List, title = "Manage Catalogs", subtitle = "Add or remove OPDS feeds",
-            onClick = { navController.navigate("catalog_manage") }
+            onClick = { navController.navigate(Screen.CatalogManage.route) }
         )
     }
 }
@@ -537,26 +559,42 @@ fun IntelligenceSettingsTab(state: SettingsUiState, navController: NavController
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                // --- MAESTRO FIX 3: Semantic merging for error cards ---
+                // Preserve this accessibility string for existing automation clients.
                 .semantics(mergeDescendants = true) {
                     contentDescription = "Intelligence features are disabled while Offline Mode is active."
                 },
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
         ) {
-            Text("Intelligence features are disabled while Offline Mode is active.", modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onErrorContainer)
-        }
-    } else {
-        SettingsGroup(title = "AI Configuration") {
-            SettingsTile(
-                icon = Icons.Default.AutoAwesome, title = "Gemini Integration", subtitle = "Manage API keys for Global Recall and Smart Summaries",
-                onClick = { navController.navigate(Screen.AiConfig.route) }
-            )
             Text(
-                "Cloudflare image configuration will be reviewed in a separate integration update.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(16.dp)
+                "Intelligence features are disabled while Offline Mode is active.",
+                modifier = Modifier.padding(16.dp),
+                color = MaterialTheme.colorScheme.onErrorContainer
             )
         }
+    }
+
+    // Configuration stays reachable while offline; only network operations are blocked.
+    // All three entries share the existing settings destination, without adding
+    // provider switching, silent fallbacks or any embedded private infrastructure.
+    SettingsGroup(title = "AI Configuration") {
+        SettingsTile(
+            icon = Icons.Default.AutoAwesome,
+            title = "Gemini Integration",
+            subtitle = "Manage API keys for Global Recall and Smart Summaries",
+            onClick = { navController.navigate(Screen.AiConfig.route) }
+        )
+        SettingsTile(
+            icon = Icons.Default.Image,
+            title = "Cloudflare Visualize",
+            subtitle = "Configure the direct image provider",
+            onClick = { navController.navigate(Screen.AiConfig.route) }
+        )
+        SettingsTile(
+            icon = Icons.Default.CloudQueue,
+            title = "Private Text Gateway",
+            subtitle = "Optional self-hosted text provider settings",
+            onClick = { navController.navigate(Screen.AiConfig.route) }
+        )
     }
 }
 
