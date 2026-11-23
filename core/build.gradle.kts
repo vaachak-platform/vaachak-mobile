@@ -52,7 +52,7 @@ kotlin {
 
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.androidx.datastore.preferences.core)
-            implementation("com.squareup.okio:okio:3.16.4")
+            implementation("com.squareup.okio:okio:3.18.2")
         }
 
         androidMain.dependencies {
