@@ -12,6 +12,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -79,6 +80,75 @@ class SettingsComposeInstrumentedTest {
             assertEquals(ComicReadingMode.SINGLE_PAGE, current.readingMode)
             assertEquals(ComicPageFit.FIT_PAGE, current.pageFit)
         }
+    }
+
+    @Test fun comicSwitchesRoundTripToOriginalValues() {
+        var current by mutableStateOf(ComicPreferences())
+        val original = current
+        render(comics = { current }, onComics = { current = it })
+        selectCategory("Comics")
+        val labels = listOf(
+            "Tap edges to turn pages",
+            "Use volume keys for page turns",
+            "Preload next page",
+            "Reduce motion for e-ink"
+        )
+        labels.forEach { title ->
+            compose.onNodeWithText(title).performScrollTo().performClick()
+        }
+        compose.runOnIdle { assertTrue(current != original) }
+        labels.forEach { title ->
+            compose.onNodeWithText(title).performScrollTo().performClick()
+        }
+        compose.runOnIdle { assertEquals(original, current) }
+    }
+
+    @Test fun widePaneKeepsCategoryChooserVisibleAcrossEverySection() {
+        render(wide = true)
+        compose.onNodeWithText("ACCOUNT & PROFILES").assertExists()
+        val sections = listOf(
+            Tid.Settings.tabBook to "READING EXPERIENCE",
+            "settings_category_comics" to "READING DIRECTION",
+            "settings_category_audio" to "SPEECH & NARRATION",
+            Tid.Settings.tabContent to "SOURCES",
+            Tid.Settings.tabIntelligence to "AI CONFIGURATION",
+            Tid.Settings.tabGlobal to "ACCOUNT & PROFILES"
+        )
+        sections.forEach { (tag, expectedHeading) ->
+            compose.onNodeWithTag(tag).performScrollTo().performClick()
+            compose.onNodeWithText(expectedHeading).assertExists()
+            compose.onNodeWithTag(Tid.Settings.tabGlobal).assertExists()
+        }
+    }
+
+    @Test fun wideGeneralOfflineModeCanBeTurnedOnAndBackOff() {
+        var offline by mutableStateOf(false)
+        render(
+            state = { SettingsUiState(isOfflineMode = offline) },
+            wide = true,
+            onOffline = { offline = it }
+        )
+        val description = "Offline Mode, Default: On. Cloud features disabled."
+        compose.onNodeWithContentDescription(description).performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(offline) }
+        compose.onNodeWithContentDescription(description).performScrollTo().performClick()
+        compose.runOnIdle { assertFalse(offline) }
+        compose.onNodeWithTag(Tid.Settings.tabGlobal).assertExists()
+    }
+
+    @Test fun whitespaceOnlyProfileNameDoesNotSwitchVault() {
+        var switchedTo = ""
+        render(
+            isMultiUser = true,
+            activeVault = "test_profile",
+            onSwitchVault = { switchedTo = it }
+        )
+        selectCategory("General")
+        compose.onNodeWithContentDescription("Active Profile, Test_profile").performClick()
+        compose.onNodeWithText("Profile Name").performTextInput("   ")
+        compose.onNodeWithText("Switch").performClick()
+        compose.runOnIdle { assertEquals("", switchedTo) }
+        compose.onNodeWithText("Switch Local Profile").assertDoesNotExist()
     }
 
     @Test fun generalSettingsSupportOfflineModeAndLocalProfileDialog() {
@@ -263,6 +333,17 @@ class SettingsComposeInstrumentedTest {
                     screen()
                 }
             }
+        }
+
+        // The host Activity can reach RESUMED before a Compose root is attached
+        // on a busy device. Synchronize to the *real production Settings root*
+        // once per test instead of racing the first SemanticsNodeInteraction.
+        // atLeastOneRootRequired=false lets this bounded wait handle a root that
+        // has not been attached yet, but still fails if the UI never appears.
+        compose.waitUntil(timeoutMillis = 10_000L) {
+            compose.onAllNodesWithTag(Tid.Screen.settings, useUnmergedTree = true)
+                .fetchSemanticsNodes(atLeastOneRootRequired = false)
+                .isNotEmpty()
         }
     }
 }
