@@ -249,6 +249,8 @@ Current platform repositories:
 
 ## Roadmap
 
+See the [repository roadmap](ROADMAP.md) for the maintained feature priorities, delivery phases, and acceptance criteria.
+
 Near-term priorities:
 - strengthen EPUB experience
 - add PDF support
@@ -267,15 +269,6 @@ See [LICENSE](LICENSE).
 
 ---
 
-## Author
-
-Built by [Piyush Daiya](https://www.linkedin.com/in/piyush-daiya)
-
-If you are a recruiter, hiring manager, or engineer evaluating this project, the best starting points are:
-- the product framing above
-- the [architecture document](ARCHITECTURE.md)
-- the release pipeline and security workflows
-- the modular `core` + `leisure` structure
-### Adaptive settings and e-ink readers
+## Adaptive settings and e-ink readers
 
 Settings uses a category list on narrow app windows and a two-pane list/detail layout on wider e-reader and tablet windows, with a wider breakpoint for large accessibility fonts. Comic reading preferences are saved per local profile in DataStore. See [Adaptive Settings and E-Ink Testing](docs/ADAPTIVE_SETTINGS.md) for implementation details, test matrix, and feature status.
