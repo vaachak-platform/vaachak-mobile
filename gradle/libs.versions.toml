@@ -54,7 +54,7 @@ robolectric = "4.16.1"
 mockk = "1.14.9"
 turbine = "1.2.1"
 coroutinesTest = "1.10.2"
-jacoco = "0.8.12"
+jacoco = "0.8.16"
 
 # -- Utilities --
 timber = "5.0.1"

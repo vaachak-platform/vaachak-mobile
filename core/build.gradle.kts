@@ -13,6 +13,11 @@ plugins {
     jacoco
 }
 
+// Align JVM JaCoCo with Android instrumentation reports.
+jacoco {
+    toolVersion = libs.versions.jacoco.get()
+}
+
 kotlin {
     androidTarget {
         compilerOptions {
@@ -91,6 +96,10 @@ kotlin {
 }
 
 android {
+    testCoverage {
+        jacocoVersion = libs.versions.jacoco.get()
+    }
+
     namespace = "org.vaachak.reader.core"
     compileSdk = 36
 

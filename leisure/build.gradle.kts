@@ -57,6 +57,10 @@ val releaseKeyPassword =
         ?: providers.gradleProperty("VAACHAK_KEY_PASSWORD").orNull
 
 android {
+    testCoverage {
+        jacocoVersion = libs.versions.jacoco.get()
+    }
+
     namespace = "org.vaachak.reader.leisure"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
 
