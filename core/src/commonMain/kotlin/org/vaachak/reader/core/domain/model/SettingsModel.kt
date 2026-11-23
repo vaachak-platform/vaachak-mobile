@@ -48,8 +48,13 @@ data class AiConfig(
     val geminiKey: String = "",
     val cloudflareUrl: String = "",
     val authToken: String = "",
-    val autoSaveRecaps: Boolean = false
+    val autoSaveRecaps: Boolean = false,
+    val textProvider: AiTextProvider = AiTextProvider.GEMINI,
+    val gatewayUrl: String = "",
+    val gatewayModel: String = "local-chat"
 )
+
+enum class AiTextProvider { GEMINI, PRIVATE_GATEWAY }
 
 /**
  * Defines which "Edit Mode" is currently active in the Hub & Spoke UI.

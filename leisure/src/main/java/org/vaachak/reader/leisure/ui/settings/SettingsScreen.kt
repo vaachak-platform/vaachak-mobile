@@ -1,20 +1,29 @@
 package org.vaachak.reader.leisure.ui.settings
 
-// --- MAESTRO FIX 1: Import semantics ---
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -29,97 +38,173 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.SwitchAccount
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
+import org.vaachak.reader.core.domain.model.ComicPreferences
+import org.vaachak.reader.core.domain.model.ComicPageFit
+import org.vaachak.reader.core.domain.model.ComicReadingDirection
+import org.vaachak.reader.core.domain.model.ComicReadingMode
+import org.vaachak.reader.core.domain.model.ThemeMode
 import org.vaachak.reader.leisure.navigation.Screen
 import org.vaachak.reader.leisure.ui.testability.Tid
 import org.vaachak.reader.leisure.ui.testability.TidScreen
 import org.vaachak.reader.leisure.ui.testability.tid
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** No fixed tab widths: independent navigation and content panes work on e-ink tablets. */
+private enum class SettingsCategory(
+    val label: String,
+    val description: String,
+    val tag: String,
+    val icon: ImageVector
+) {
+    GENERAL("General", "Profiles, appearance, network and sync", Tid.Settings.tabGlobal, Icons.Default.Person),
+    BOOKS("Books & reading", "Book appearance, library and dictionary", Tid.Settings.tabBook, Icons.Default.Book),
+    COMICS("Comics", "Layout, direction, navigation and e-ink", "settings_category_comics", Icons.Default.Image),
+    AUDIO("Audio", "Speech and narration", "settings_category_audio", Icons.Default.Audiotrack),
+    CONTENT("Library & content", "Catalog sources and imports", Tid.Settings.tabContent, Icons.AutoMirrored.Filled.List),
+    INTELLIGENCE("Intelligence", "Gemini and online AI options", Tid.Settings.tabIntelligence, Icons.Default.AutoAwesome)
+}
+
+/** Data-only inputs let instrumented UI tests render real Settings without Hilt or storage. */
+internal data class SettingsContentState(
+    val settings: SettingsUiState,
+    val activeVaultId: String,
+    val isMultiUserMode: Boolean,
+    val comics: ComicPreferences
+)
+
+/** Production and tests use the same UI callbacks. Secrets never enter UI state. */
+internal data class SettingsUiActions(
+    val saveComicPreferences: (ComicPreferences) -> Unit,
+    val setMultiUserMode: (Boolean) -> Unit,
+    val switchVault: (String) -> Unit,
+    val toggleOfflineMode: (Boolean) -> Unit
+)
+
 @Composable
 fun SettingsScreen(
     navController: NavController,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
-
-    // NEW: Collect Vault State
     val activeVaultId by viewModel.activeVaultId.collectAsState()
     val isMultiUserMode by viewModel.isMultiUserMode.collectAsState()
+    val comicPreferences by viewModel.comicPreferences.collectAsState()
+    SettingsScreenContent(
+        model = SettingsContentState(state, activeVaultId, isMultiUserMode, comicPreferences),
+        navController = navController,
+        actions = SettingsUiActions(
+            saveComicPreferences = { viewModel.saveComicPreferences(it) },
+            setMultiUserMode = viewModel::setMultiUserMode,
+            switchVault = viewModel::switchVault,
+            toggleOfflineMode = viewModel::toggleOfflineMode
+        )
+    )
+}
 
-    val scrollState = rememberScrollState()
-
-    val settingsTabs = listOf("Global", "Book", "Content", "Intelligence")
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+/** The exact production screen, parameterized only by already-present state and actions. */
+@Composable
+internal fun SettingsScreenContent(
+    model: SettingsContentState,
+    navController: NavController,
+    actions: SettingsUiActions,
+    modifier: Modifier = Modifier
+) {
+    val state = model.settings
+    val eink = state.themeMode == ThemeMode.E_INK
+    var selectedName by rememberSaveable { mutableStateOf<String?>(null) }
+    val selected = SettingsCategory.entries.firstOrNull { it.name == selectedName }
 
     TidScreen(Tid.Screen.settings) {
-        Scaffold { paddingValues ->
-            Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-                PrimaryTabRow(selectedTabIndex = selectedTab) {
-                    settingsTabs.forEachIndexed { index, title ->
-                        val tabTid = when (index) {
-                            0 -> Tid.Settings.tabGlobal
-                            1 -> Tid.Settings.tabBook
-                            2 -> Tid.Settings.tabContent
-                            3 -> Tid.Settings.tabIntelligence
-                            else -> return@forEachIndexed
-                        }
-                        Tab(
-                            selected = selectedTab == index,
-                            onClick = { selectedTab = index },
-                            modifier = Modifier
-                                .tid(tabTid)
-                                // --- MAESTRO FIX 2: Explicit semantics for Tabs ---
-                                .semantics(mergeDescendants = true) {
-                                    contentDescription = "Settings Tab: $title"
-                                },
-                            text = { Text(title, fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal) }
+        BoxWithConstraints(modifier.fillMaxSize()) {
+            val scale = LocalDensity.current.fontScale
+            val twoPane = SettingsLayoutPolicy.useTwoPane(maxWidth.value, scale)
+            BackHandler(enabled = !twoPane && selected != null) { selectedName = null }
+
+            if (twoPane) {
+                Row(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    SettingsCategoryChooser(
+                        selected = selected ?: SettingsCategory.GENERAL,
+                        onSelect = { selectedName = it.name },
+                        eink = eink,
+                        modifier = Modifier.width(288.dp).fillMaxHeight()
+                    )
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .width(1.dp)
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.outline)
+                    )
+                    Box(Modifier.weight(1f).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                        SettingsDetail(
+                            category = selected ?: SettingsCategory.GENERAL,
+                            model = model,
+                            actions = actions,
+                            navController = navController,
+                            modifier = Modifier.widthIn(max = 800.dp).fillMaxWidth()
                         )
                     }
                 }
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(scrollState)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    when (selectedTab) {
-                        0 -> GlobalSettingsTab(state, activeVaultId, isMultiUserMode, viewModel, navController)
-                        1 -> BookSettingsTab(navController)
-                        2 -> ContentSettingsTab(navController)
-                        3 -> IntelligenceSettingsTab(state, navController)
+            } else if (selected == null) {
+                SettingsCategoryChooser(
+                    selected = null,
+                    onSelect = { selectedName = it.name },
+                    eink = eink,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { selectedName = null }, modifier = Modifier.size(56.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "All settings")
+                        }
+                        Text(selected.label, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    }
+                    HorizontalDivider()
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                        SettingsDetail(
+                            category = selected,
+                            model = model,
+                            actions = actions,
+                            navController = navController,
+                            modifier = Modifier.widthIn(max = 800.dp).fillMaxWidth(),
+                            showHeading = false
+                        )
                     }
                 }
             }
@@ -128,11 +213,205 @@ fun SettingsScreen(
 }
 
 @Composable
+private fun SettingsCategoryChooser(
+    selected: SettingsCategory?,
+    onSelect: (SettingsCategory) -> Unit,
+    eink: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Choose a category. Preferences are stored for the active reader profile.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(16.dp))
+        SettingsCategory.entries.forEach { item ->
+            val active = item == selected
+            val shape = RoundedCornerShape(if (eink) 2.dp else 12.dp)
+            val tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            val background = if (active) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 3.dp)
+                    .clip(shape)
+                    .background(background)
+                    .border(
+                        width = if (active) 2.dp else 1.dp,
+                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                        shape = shape
+                    )
+                    .clickable(role = Role.Button) { onSelect(item) }
+                    .tid(item.tag)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Settings: ${item.label}${if (active) ", selected" else ""}"
+                    }
+                    .heightIn(min = 72.dp)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(item.icon, contentDescription = null, tint = tint)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(item.label, style = MaterialTheme.typography.titleMedium, color = tint)
+                    Text(item.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (!active) Icon(Icons.Default.ChevronRight, contentDescription = null)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsDetail(
+    category: SettingsCategory,
+    model: SettingsContentState,
+    actions: SettingsUiActions,
+    navController: NavController,
+    modifier: Modifier = Modifier,
+    showHeading: Boolean = true
+) {
+    // Category-specific scroll state resets when a reader switches sections.
+    androidx.compose.runtime.key(category) {
+        Column(
+            modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (showHeading) {
+                Text(category.label, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            }
+            when (category) {
+                SettingsCategory.GENERAL -> GlobalSettingsBody(model.settings, model.activeVaultId, model.isMultiUserMode, actions, navController)
+                SettingsCategory.BOOKS -> BookSettingsTab(navController)
+                SettingsCategory.COMICS -> ComicsSettingsTab(model.comics, onChange = actions.saveComicPreferences)
+                SettingsCategory.AUDIO -> AudioSettingsTab(navController)
+                SettingsCategory.CONTENT -> ContentSettingsTab(navController)
+                SettingsCategory.INTELLIGENCE -> IntelligenceSettingsTab(model.settings, navController)
+            }
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun ComicsSettingsTab(preferences: ComicPreferences, onChange: (ComicPreferences) -> Unit) {
+    Text(
+        "Comic reading preferences are saved now. They will be applied by the upcoming CBZ/CBR reader.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    SettingsGroup(title = "Reading direction") {
+        ComicChoice("Left to right", preferences.readingDirection == ComicReadingDirection.LEFT_TO_RIGHT) {
+            onChange(preferences.copy(readingDirection = ComicReadingDirection.LEFT_TO_RIGHT))
+        }
+        ComicChoice("Right to left (manga)", preferences.readingDirection == ComicReadingDirection.RIGHT_TO_LEFT) {
+            onChange(preferences.copy(readingDirection = ComicReadingDirection.RIGHT_TO_LEFT))
+        }
+    }
+    SettingsGroup(title = "Reading mode") {
+        ComicChoice("One page at a time", preferences.readingMode == ComicReadingMode.SINGLE_PAGE) {
+            onChange(preferences.copy(readingMode = ComicReadingMode.SINGLE_PAGE))
+        }
+        ComicChoice("Continuous vertical scroll", preferences.readingMode == ComicReadingMode.VERTICAL_SCROLL) {
+            onChange(preferences.copy(readingMode = ComicReadingMode.VERTICAL_SCROLL))
+        }
+    }
+    SettingsGroup(title = "Page scaling") {
+        ComicChoice("Fit whole page", preferences.pageFit == ComicPageFit.FIT_PAGE) {
+            onChange(preferences.copy(pageFit = ComicPageFit.FIT_PAGE))
+        }
+        ComicChoice("Fit page width", preferences.pageFit == ComicPageFit.FIT_WIDTH) {
+            onChange(preferences.copy(pageFit = ComicPageFit.FIT_WIDTH))
+        }
+    }
+    SettingsGroup(title = "Navigation & e-ink") {
+        ComicSwitch("Tap edges to turn pages", preferences.tapToTurn) {
+            onChange(preferences.copy(tapToTurn = it))
+        }
+        ComicSwitch("Use volume keys for page turns", preferences.useVolumeKeys) {
+            onChange(preferences.copy(useVolumeKeys = it))
+        }
+        ComicSwitch("Preload next page", preferences.preloadNextPage) {
+            onChange(preferences.copy(preloadNextPage = it))
+        }
+        ComicSwitch("Reduce motion for e-ink", preferences.reduceMotion) {
+            onChange(preferences.copy(reduceMotion = it))
+        }
+    }
+}
+
+@Composable
+private fun ComicChoice(title: String, checked: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = checked, onClick = null)
+        Spacer(Modifier.width(12.dp))
+        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun ComicSwitch(title: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp)
+            .clickable(role = Role.Switch) { onChange(!checked) }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = null)
+    }
+}
+
+@Composable
+private fun AudioSettingsTab(navController: NavController) {
+    SettingsGroup(title = "Speech & narration") {
+        SettingsTile(
+            icon = Icons.Default.RecordVoiceOver,
+            title = "Text-to-speech preferences",
+            subtitle = "Voice, reading speed, pitch and sleep timer",
+            onClick = { navController.navigate(Screen.TTS.route) }
+        )
+    }
+    Text(
+        "Audiobook playback settings will be added with the audiobook engine.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+}
+
+@Composable
 fun GlobalSettingsTab(
     state: SettingsUiState,
     activeVaultId: String,
     isMultiUserMode: Boolean,
     viewModel: SettingsViewModel,
+    navController: NavController
+) {
+    GlobalSettingsBody(
+        state, activeVaultId, isMultiUserMode,
+        SettingsUiActions(
+            saveComicPreferences = { viewModel.saveComicPreferences(it) },
+            setMultiUserMode = viewModel::setMultiUserMode,
+            switchVault = viewModel::switchVault,
+            toggleOfflineMode = viewModel::toggleOfflineMode
+        ), navController
+    )
+}
+
+@Composable
+private fun GlobalSettingsBody(
+    state: SettingsUiState,
+    activeVaultId: String,
+    isMultiUserMode: Boolean,
+    actions: SettingsUiActions,
     navController: NavController
 ) {
     var showVaultDialog by remember { mutableStateOf(false) }
@@ -145,8 +424,8 @@ fun GlobalSettingsTab(
 
         SettingsTile(
             icon = Icons.Default.Group, title = "Local Multi-User Mode", subtitle = "Isolate libraries for different offline readers",
-            onClick = { viewModel.setMultiUserMode(!isMultiUserMode) },
-            trailing = { Switch(checked = isMultiUserMode, onCheckedChange = { viewModel.setMultiUserMode(it) }) }
+            onClick = { actions.setMultiUserMode(!isMultiUserMode) },
+            trailing = { Switch(checked = isMultiUserMode, onCheckedChange = { actions.setMultiUserMode(it) }) }
         )
 
         if (isMultiUserMode) {
@@ -166,8 +445,8 @@ fun GlobalSettingsTab(
         SettingsTile(
             icon = if (state.isOfflineMode) Icons.Outlined.CloudOff else Icons.Default.CloudQueue,
             title = "Offline Mode", subtitle = "Default: On. Cloud features disabled.",
-            onClick = { viewModel.toggleOfflineMode(!state.isOfflineMode) },
-            trailing = { Switch(checked = state.isOfflineMode, onCheckedChange = { viewModel.toggleOfflineMode(it) }) }
+            onClick = { actions.toggleOfflineMode(!state.isOfflineMode) },
+            trailing = { Switch(checked = state.isOfflineMode, onCheckedChange = { actions.toggleOfflineMode(it) }) }
         )
         SettingsTile(
             icon = Icons.Default.Contrast, title = "App-wide Theme", subtitle = "E-ink vs LCD, Sharpness",
@@ -204,7 +483,7 @@ fun GlobalSettingsTab(
                 confirmButton = {
                     TextButton(onClick = {
                         if (newVaultName.isNotBlank()) {
-                            viewModel.switchVault(newVaultName)
+                            actions.switchVault(newVaultName)
                         }
                         showVaultDialog = false
                     }) { Text("Switch") } // Maestro sees "Switch"
@@ -272,57 +551,28 @@ fun IntelligenceSettingsTab(state: SettingsUiState, navController: NavController
                 icon = Icons.Default.AutoAwesome, title = "Gemini Integration", subtitle = "Manage API keys for Global Recall and Smart Summaries",
                 onClick = { navController.navigate(Screen.AiConfig.route) }
             )
-            SettingsTile(
-                icon = Icons.Default.Image, title = "Cloudflare Works", subtitle = "Image generation settings",
-                onClick = { /* Navigate to Cloudflare Config */ }
+            Text(
+                "Cloudflare image configuration will be reviewed in a separate integration update.",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(16.dp)
             )
         }
     }
 }
 
+
+@androidx.compose.ui.tooling.preview.Preview(name = "Phone · compact", widthDp = 393, heightDp = 850)
 @Composable
-fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            // --- MAESTRO FIX 4: Add clear semantics for Groups ---
-            .semantics(mergeDescendants = false) {
-                contentDescription = "Settings Group: $title"
-            }
-    ) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 8.dp))
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-            Column(modifier = Modifier.padding(8.dp)) { content() }
-        }
+private fun CompactSettingsPreview() {
+    MaterialTheme {
+        SettingsCategoryChooser(selected = null, onSelect = {}, eink = false)
     }
 }
 
+@androidx.compose.ui.tooling.preview.Preview(name = "BOOX · e-ink categories", widthDp = 288, heightDp = 760)
 @Composable
-fun SettingsTile(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit,
-    trailing: @Composable (() -> Unit)? = null
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            // --- MAESTRO FIX 5: Merge the Settings Tile ---
-            .semantics(mergeDescendants = true) {
-                contentDescription = "$title setting. $subtitle"
-            }
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        // --- MAESTRO FIX 6: Provide content descriptions for trailing icons ---
-        if (trailing != null) trailing() else Icon(Icons.Default.ChevronRight, contentDescription = "Open $title", tint = Color.Gray)
+private fun EinkSettingsCategoriesPreview() {
+    MaterialTheme {
+        SettingsCategoryChooser(selected = SettingsCategory.COMICS, onSelect = {}, eink = true)
     }
 }

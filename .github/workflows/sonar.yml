@@ -3,8 +3,14 @@ name: SonarCloud Analysis
 on:
   push:
     branches: ["main"]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
   pull_request:
     branches: ["main"]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
     types: [opened, synchronize, reopened]
 
 concurrency:
@@ -13,9 +19,12 @@ concurrency:
 
 jobs:
   build:
-    name: Build and analyze
+    name: Build, test, instrument and analyze
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      pull-requests: read
 
     steps:
       - name: Checkout repository
@@ -36,10 +45,7 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Stop Gradle daemons
-        run: ./gradlew --stop || true
-
-      - name: Build reports needed by Sonar
+      - name: Build lint, static analysis and JVM coverage
         run: |
           ./gradlew clean \
             :core:compileCommonMainKotlinMetadata \
@@ -51,30 +57,54 @@ jobs:
             :leisure:testDebugUnitTest \
             :leisure:jacocoDebugUnitTestReport \
             :leisure:assembleDebug \
-            --stacktrace \
-            --console=plain \
-            --warning-mode=summary \
-            --no-problems-report \
-            --no-daemon \
-            --no-build-cache \
-            --no-configuration-cache \
-            --rerun-tasks
+            --stacktrace --console=plain --warning-mode=summary \
+            --no-problems-report --no-daemon --no-configuration-cache
 
-      - name: Verify reports exist
+      # Official emulator-runner Linux setup: KVM is needed for fast CI execution.
+      - name: Enable KVM for the Android emulator
         run: |
-          echo "== Core lint =="
-          ls -lah "$GITHUB_WORKSPACE/core/build/reports/" || true
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
 
-          echo "== Leisure lint =="
-          ls -lah "$GITHUB_WORKSPACE/leisure/build/reports/" || true
+      - name: Android instrumentation and JaCoCo coverage (API 35)
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # The runner executes ONE shell command, not a multiline Bash block.
+          # Our script compiles both APKs, provisions a temporary CI-only PIN,
+          # unlocks the actual keyguard, then runs instrumented JaCoCo coverage.
+          script: bash tools/ci/run-sonar-instrumented-coverage.sh
 
-          echo "== Core JaCoCo =="
-          ls -lah "$GITHUB_WORKSPACE/core/build/reports/jacoco/jacocoDebugUnitTestReport/" || true
+      - name: Verify unit and instrumented JaCoCo XML, fail if missing
+        shell: bash
+        run: |
+          set -euo pipefail
+          reports=()
+          for module in core leisure; do
+            unit="$GITHUB_WORKSPACE/$module/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml"
+            test -s "$unit"
+            grep -q '<report ' "$unit"
+            reports+=("$unit")
+            instrumented_dir="$GITHUB_WORKSPACE/$module/build/reports/coverage/androidTest/debug/connected"
+            test -d "$instrumented_dir"
+            instrumented="$(find "$instrumented_dir" -type f -name '*.xml' | sort | head -n 1)"
+            test -n "$instrumented" && test -s "$instrumented"
+            grep -q '<report ' "$instrumented"
+            reports+=("$instrumented")
+            echo "$module unit XML: $unit"
+            echo "$module AndroidTest XML: $instrumented"
+          done
+          # Exact paths are sent to Sonar. A green emulator test without imported XML is a failure.
+          joined="$(IFS=,; echo "${reports[*]}")"
+          echo "VAACHAK_SONAR_COVERAGE_REPORTS=$joined" >> "$GITHUB_ENV"
 
-          echo "== Leisure JaCoCo =="
-          ls -lah "$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/" || true
-
-      - name: Run SonarCloud analysis
+      - name: Run SonarCloud analysis and quality gate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -82,22 +112,24 @@ jobs:
           ./gradlew sonar \
             -Dsonar.qualitygate.wait=true \
             -Dsonar.qualitygate.timeout=300 \
-            -Dsonar.coverage.jacoco.xmlReportPaths="$GITHUB_WORKSPACE/core/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml,$GITHUB_WORKSPACE/leisure/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml" \
+            -Dsonar.coverage.jacoco.xmlReportPaths="$VAACHAK_SONAR_COVERAGE_REPORTS" \
             -Dsonar.androidLint.reportPaths="$GITHUB_WORKSPACE/core/build/reports/lint-results-debug.xml,$GITHUB_WORKSPACE/leisure/build/reports/lint-results-debug.xml" \
-            --stacktrace \
-            --console=plain \
-            --warning-mode=summary \
-            --no-problems-report \
-            --no-daemon \
-            --no-build-cache \
-            --no-configuration-cache
+            --stacktrace --console=plain --warning-mode=summary \
+            --no-problems-report --no-daemon --no-configuration-cache
 
-      - name: Upload sonar-related reports on failure
-        if: failure()
+      - name: Upload coverage and test reports
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sonar-reports
+          if-no-files-found: warn
+          retention-days: 7
           path: |
-            **/build/reports/**
+            core/build/reports/coverage/**
+            leisure/build/reports/coverage/**
+            core/build/reports/jacoco/**
+            leisure/build/reports/jacoco/**
+            core/build/reports/lint-*.xml
+            leisure/build/reports/lint-*.xml
             **/build/test-results/**
-            **/build/outputs/**
+            **/build/outputs/androidTest-results/**

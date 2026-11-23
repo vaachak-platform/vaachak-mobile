@@ -276,3 +276,6 @@ If you are a recruiter, hiring manager, or engineer evaluating this project, the
 - the [architecture document](ARCHITECTURE.md)
 - the release pipeline and security workflows
 - the modular `core` + `leisure` structure
+### Adaptive settings and e-ink readers
+
+Settings uses a category list on narrow app windows and a two-pane list/detail layout on wider e-reader and tablet windows, with a wider breakpoint for large accessibility fonts. Comic reading preferences are saved per local profile in DataStore. See [Adaptive Settings and E-Ink Testing](docs/ADAPTIVE_SETTINGS.md) for implementation details, test matrix, and feature status.

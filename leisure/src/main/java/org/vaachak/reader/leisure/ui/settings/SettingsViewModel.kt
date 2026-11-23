@@ -18,10 +18,13 @@ import kotlinx.coroutines.withContext
 import org.vaachak.reader.core.common.AppCoroutineConfig
 import org.vaachak.reader.core.data.local.ProfileDao
 import org.vaachak.reader.core.data.repository.OpdsRepository
+import org.vaachak.reader.core.data.repository.GatewayCredentialUnavailableException
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
 import org.vaachak.reader.core.data.repository.VaultRepository
 import org.vaachak.reader.core.domain.model.AiConfig
+import org.vaachak.reader.core.domain.model.AiTextProvider
+import org.vaachak.reader.core.domain.model.ComicPreferences
 import org.vaachak.reader.core.domain.model.BookshelfPreferences
 import org.vaachak.reader.core.domain.model.CoverAspectRatio
 import org.vaachak.reader.core.domain.model.DitheringMode
@@ -34,6 +37,23 @@ import org.vaachak.reader.core.domain.model.UserProfile
 import org.vaachak.reader.leisure.utils.EinkHelper
 import javax.inject.Inject
 
+/** Gateway fields are kept together to prevent positional mix-ups. */
+data class AiGatewayUpdate(
+    val provider: AiTextProvider,
+    val url: String,
+    val model: String,
+    val token: String
+)
+
+/** Single AI configuration request; no long parameter list at the UI boundary. */
+data class AiConfigSaveRequest(
+    val geminiKey: String,
+    val cloudflareUrl: String,
+    val cloudflareToken: String,
+    val autoSaveRecaps: Boolean,
+    val gateway: AiGatewayUpdate
+)
+
 private data class AccountState(
     val username: String,
     val device: String,
@@ -45,7 +65,14 @@ private data class AiState(
     val gemini: String,
     val cfUrl: String,
     val token: String,
-    val autoSave: Boolean
+    val autoSave: Boolean,
+    val gateway: AiGatewayState
+)
+
+private data class AiGatewayState(
+    val provider: AiTextProvider,
+    val url: String,
+    val model: String
 )
 
 private data class ThemeState(
@@ -153,13 +180,22 @@ class SettingsViewModel @Inject constructor(
         AccountState(username, device, lastSync, offline)
     }.distinctUntilChanged()
 
+    private val aiGatewayFlow = combine(
+        settingsRepo.aiTextProvider,
+        settingsRepo.privateGatewayUrl,
+        settingsRepo.privateGatewayModel
+    ) { provider, url, model ->
+        AiGatewayState(provider, url, model)
+    }
+
     private val aiFlow = combine(
         settingsRepo.geminiKey,
         settingsRepo.cfUrl,
         settingsRepo.cfToken,
-        settingsRepo.isAutoSaveRecapsEnabled
-    ) { gemini, cfUrl, token, autoSave ->
-        AiState(gemini, cfUrl, token, autoSave)
+        settingsRepo.isAutoSaveRecapsEnabled,
+        aiGatewayFlow
+    ) { gemini, cfUrl, token, autoSave, gateway ->
+        AiState(gemini, cfUrl, token, autoSave, gateway)
     }.distinctUntilChanged()
 
     private val themeFlow = combine(
@@ -205,11 +241,15 @@ class SettingsViewModel @Inject constructor(
             isOfflineMode = acc.offline,
             catalogs = content.feeds,
             aiConfig = AiConfig(
-                isEnabled = ai.gemini.isNotBlank(),
+                isEnabled = ai.gemini.isNotBlank() ||
+                    (ai.gateway.provider == AiTextProvider.PRIVATE_GATEWAY && ai.gateway.url.isNotBlank()),
                 geminiKey = ai.gemini,
                 cloudflareUrl = ai.cfUrl,
                 authToken = ai.token,
-                autoSaveRecaps = ai.autoSave
+                autoSaveRecaps = ai.autoSave,
+                textProvider = ai.gateway.provider,
+                gatewayUrl = ai.gateway.url,
+                gatewayModel = ai.gateway.model.ifBlank { "local-chat" }
             ),
             activeEditSection = view.editSec,
             isAiMasked = view.masked,
@@ -220,6 +260,13 @@ class SettingsViewModel @Inject constructor(
             ttsSettings = content.tts
         )
     }.stateIn(viewModelScope, AppCoroutineConfig.whileSubscribed, SettingsUiState())
+
+    val comicPreferences: StateFlow<ComicPreferences> = settingsRepo.comicPreferences
+        .stateIn(viewModelScope, AppCoroutineConfig.whileSubscribed, ComicPreferences())
+
+    fun saveComicPreferences(preferences: ComicPreferences) = viewModelScope.launch {
+        settingsRepo.saveComicPreferences(preferences)
+    }
 
     fun setSyncEnabled(enabled: Boolean) = viewModelScope.launch {
         settingsRepo.setSyncEnabled(enabled)
@@ -273,29 +320,73 @@ class SettingsViewModel @Inject constructor(
         _errorMessage.value = null
     }
 
-    fun saveAiConfig(
+    /**
+     * Clears the active vault's private gateway token. The token is never
+     * included in UI state or exception messages.
+     */
+    fun clearPrivateGatewayToken() {
+        viewModelScope.launch {
+            try {
+                settingsRepo.savePrivateGatewayToken("")
+                _errorMessage.value = null
+            } catch (_: Exception) {
+                _errorMessage.value = "Unable to clear the private gateway token."
+            }
+        }
+    }
+
+    /** Keep the original four-field API available for existing settings screens. */
+    fun saveAiConfig(gemini: String, cfUrl: String, token: String, autoSave: Boolean) {
+        saveAiConfigInternal(gemini, cfUrl, token, autoSave, gateway = null, onSaved = {})
+    }
+
+    /** Typed submission keeps legacy four-field callers working while avoiding long parameter lists. */
+    fun saveAiConfig(request: AiConfigSaveRequest, onSaved: () -> Unit = {}) {
+        saveAiConfigInternal(
+            gemini = request.geminiKey,
+            cfUrl = request.cloudflareUrl,
+            token = request.cloudflareToken,
+            autoSave = request.autoSaveRecaps,
+            gateway = request.gateway,
+            onSaved = onSaved
+        )
+    }
+
+    private fun saveAiConfigInternal(
         gemini: String,
         cfUrl: String,
         token: String,
-        autoSave: Boolean
-    ) {
-        viewModelScope.launch {
-            try {
-                val currentTheme = settingsRepo.themeMode.first()
-                val isEink = currentTheme == ThemeMode.E_INK
-                settingsRepo.saveSettings(
-                    gemini = gemini,
-                    cfUrl = cfUrl,
-                    cfToken = token,
-                    isEnk = isEink
-                )
-                settingsRepo.setAutoSaveRecaps(autoSave)
-                _activeEditSection.value = SettingsSection.NONE
-                _errorMessage.value = null
-            } catch (e: Exception) {
-                _errorMessage.value = "Failed to save settings: ${e.message}"
-            }
+        autoSave: Boolean,
+        gateway: AiGatewayUpdate?,
+        onSaved: () -> Unit
+    ) = viewModelScope.launch {
+        try {
+            val currentTheme = settingsRepo.themeMode.first()
+            settingsRepo.saveSettings(
+                gemini = gemini,
+                cfUrl = cfUrl,
+                cfToken = token,
+                isEnk = currentTheme == ThemeMode.E_INK
+            )
+            settingsRepo.setAutoSaveRecaps(autoSave)
+            if (gateway != null) saveGatewayUpdate(gateway)
+            _activeEditSection.value = SettingsSection.NONE
+            _errorMessage.value = null
+            onSaved()
+        } catch (error: GatewayCredentialUnavailableException) {
+            // Only the safe, static Keystore guidance is exposed; never a key or endpoint.
+            _errorMessage.value = error.message
+        } catch (_: Exception) {
+            // Credentials and network endpoints must not appear in user-visible errors.
+            _errorMessage.value = "Could not save AI settings. Check the values and try again."
         }
+    }
+
+    private suspend fun saveGatewayUpdate(gateway: AiGatewayUpdate) {
+        settingsRepo.setAiTextProvider(gateway.provider)
+        // A blank field retains the prior token; removal is a separate explicit action.
+        val savedToken = gateway.token.ifBlank { settingsRepo.loadPrivateGatewayToken() }
+        settingsRepo.savePrivateGatewaySettings(gateway.url, gateway.model, savedToken)
     }
 
     fun toggleOfflineMode(enabled: Boolean) {
