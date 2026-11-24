@@ -74,6 +74,10 @@ interface OpdsDao {
     @Query("SELECT * FROM opds_feeds WHERE url = :url LIMIT 1")
     suspend fun getFeedByUrl(url: String): OpdsEntity?
 
+    /** Stable identity for a selected catalog; URL is not a unique key. */
+    @Query("SELECT * FROM opds_feeds WHERE id = :id")
+    suspend fun getFeedById(id: Long): OpdsEntity?
+
     /**
      * Updates an existing OPDS feed in the database.
      *
