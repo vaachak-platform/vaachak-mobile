@@ -47,5 +47,7 @@ data class OpdsEntity(
     val url: String,
     val username: String? = null,
     val password: String? = null,
-    val isPredefined: Boolean = false
+    val isPredefined: Boolean = false,
+    /** Non-secret pointer; null for legacy or anonymous catalogs. */
+    val credentialGeneration: String? = null
 )

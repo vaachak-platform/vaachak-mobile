@@ -16,9 +16,10 @@ import org.vaachak.reader.core.domain.model.SyncVaultEntity
         HighlightEntity::class,
         OpdsEntity::class,
         SyncVaultEntity::class,
-        ProfileEntity::class
+        ProfileEntity::class,
+        OpdsCredentialJournalEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @ConstructedBy(AppDatabaseConstructor::class)
@@ -26,6 +27,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bookDao(): BookDao
     abstract fun highlightDao(): HighlightDao
     abstract fun opdsDao(): OpdsDao
+    abstract fun opdsCredentialJournalDao(): OpdsCredentialJournalDao
     abstract fun syncVaultDao(): SyncVaultDao
     abstract fun profileDao(): ProfileDao
 
