@@ -30,16 +30,19 @@ class OpdsCredentialLifecycleInstrumentedTest {
         val dir = File(context.cacheDir, "opds-fixture-${UUID.randomUUID()}").apply { check(mkdirs()) }
         val file = File(dir, "fixture.db")
         val secrets = PrivateGatewaySecrets(context)
-        val storage = AndroidOpdsCredentialStorage(secrets).storage
+        val androidStorage = AndroidOpdsCredentialStorage(secrets)
+        val storage = androidStorage.storage
         val db = Room.databaseBuilder<AppDatabase>(context, file.absolutePath).setDriver(BundledSQLiteDriver()).build()
         val dao = db.opdsCredentialJournalDao()
-        val lifecycle = OpdsCredentialLifecycle(dao, storage, RoomOpdsCredentialJournal(db))
+        val owner = AndroidOpdsCredentialLifecycle(db, androidStorage, RoomOpdsCredentialJournal(db))
+        val lifecycle = owner.lifecycle
+        val repository = OpdsRepository(db.opdsDao(), owner, CatalogDispatcherModule.provideCatalogIoDispatcher())
         val legacy = OpdsEntity(id = 42, title = "Synthetic", url = url, username = "fixture-user", password = "fixture-password")
         try {
             // No production database is touched; only the historical fixture uses this raw DAO.
             db.opdsDao().insertFeed(legacy)
             check(runCatching { lifecycle.readForRequest(OpdsCatalogSession(legacy), url) }.isFailure)
-            val result = lifecycle.migrateAll()
+            val result = repository.migrateLegacyCredentials().getOrThrow()
             if (!secureLock) {
                 check(!strictCi) { "CI must provision and unlock the disposable PIN device" }
                 check(result == OpdsMigrationReport(0, 1) && dao.load(42) == legacy)
@@ -64,10 +67,10 @@ class OpdsCredentialLifecycleInstrumentedTest {
             val ciphertext = File(context.noBackupFilesDir, "private_ai_$hash.enc")
             check(ciphertext.isFile && ciphertext.readBytes().take(4).toByteArray().contentEquals("VAG2".toByteArray(Charsets.US_ASCII)))
             check(!ciphertext.readText(Charsets.ISO_8859_1).contains("fixture-password"))
-            lifecycle.update(OpdsCatalogSession(active), "Renamed", url, OpdsCredentialEdit.Keep)
+            check(repository.saveCatalog(active, "Renamed", url, CatalogCredentialAction.KEEP).isSuccess)
             val kept = checkNotNull(dao.load(42))
             check(kept.credentialGeneration == ref.generation)
-            lifecycle.update(OpdsCatalogSession(kept), "Anonymous", url, OpdsCredentialEdit.Remove)
+            check(repository.saveCatalog(kept, "Anonymous", url, CatalogCredentialAction.REMOVE).isSuccess)
             check(dao.entry(42, ref.generation)?.state == "RETIRED")
             check(lifecycle.readForRequest(OpdsCatalogSession(checkNotNull(dao.load(42))), url) == null)
             check(ciphertext.isFile) // Production intentionally defers physical retirement.

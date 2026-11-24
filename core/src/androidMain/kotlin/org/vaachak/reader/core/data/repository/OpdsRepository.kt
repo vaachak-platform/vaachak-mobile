@@ -1,7 +1,7 @@
 package org.vaachak.reader.core.data.repository
 
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
@@ -33,10 +33,13 @@ import javax.inject.Singleton
 @Singleton
 class OpdsRepository internal constructor(
     private val opdsDao: OpdsDao,
-    private val lifecycle: OpdsCredentialLifecycle
+    private val lifecycle: OpdsCredentialLifecycle,
+    private val ioDispatcher: CoroutineDispatcher
 ) {
-    @Inject internal constructor(opdsDao: OpdsDao, owner: AndroidOpdsCredentialLifecycle) :
-        this(opdsDao, owner.lifecycle)
+    @Inject internal constructor(
+        opdsDao: OpdsDao, owner: AndroidOpdsCredentialLifecycle,
+        @CatalogIoDispatcher ioDispatcher: CoroutineDispatcher
+    ) : this(opdsDao, owner.lifecycle, ioDispatcher)
     private val uaChrome =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     private val uaCalibre = "Stanza/3.2 iPhone/5.1"
@@ -140,89 +143,74 @@ class OpdsRepository internal constructor(
     }
 
     suspend fun parseFeed(rawUrl: String, session: OpdsCatalogSession? = null): Try<ParseData, Exception> =
-        withContext(Dispatchers.IO) {
-        try {
-            val cleanUrl = normalizeHttpsUrl(rawUrl)
-            val absoluteUrl = absoluteUrlResolver(cleanUrl)
-                ?: return@withContext Failure(Exception("Invalid URL"))
-
-            val response = try {
-                executeRequest(cleanUrl, session)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                return@withContext Failure(Exception("Catalog unavailable; unlock the device, migrate saved credentials if needed, or reopen the catalog"))
-            }
-
-            if (!response.isSuccessful) {
-                val message = "HTTP ${response.code}"
-                Timber.e(message)
-                response.close()
-                return@withContext Failure(Exception(message))
-            }
-
-            val bodyBytes = response.use { it.body?.bytes() }
-
-            val nonNullBodyBytes = bodyBytes
-                ?: return@withContext Failure(Exception("Empty response"))
-
-            if (nonNullBodyBytes.isEmpty()) {
-                return@withContext Failure(Exception("Empty response"))
-            }
-
-            val contentStr = nonNullBodyBytes.toString(Charsets.UTF_8).trim()
-            if (
-                contentStr.contains("<!DOCTYPE html", ignoreCase = true) ||
-                contentStr.contains("<html", ignoreCase = true)
-            ) {
-                return@withContext Failure(
-                    Exception("Server returned HTML (login page or block page).")
-                )
-            }
-
-            val safeBytes = sanitizeXml(nonNullBodyBytes)
-
+        withContext(ioDispatcher) {
             try {
-                val opds2 = OPDS2Parser.parse(safeBytes, absoluteUrl)
-                return@withContext Success(opds2)
+                val cleanUrl = normalizeHttpsUrl(rawUrl)
+                val absoluteUrl = absoluteUrlResolver(cleanUrl)
+                    ?: return@withContext Failure(Exception("Invalid URL"))
+                fetchAndParse(cleanUrl, absoluteUrl, session)
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
-                // Fall through to OPDS 1.x parsing.
+            } catch (e: Exception) {
+                Failure(Exception(if (e is IllegalArgumentException) "Invalid URL or non-HTTPS OPDS endpoint" else "Catalog unavailable; unlock the device or reopen the catalog"))
             }
+        }
 
-            try {
-                val cleanBytes = if (
-                    safeBytes.size >= 3 &&
-                    safeBytes[0] == 0xEF.toByte() &&
-                    safeBytes[1] == 0xBB.toByte() &&
-                    safeBytes[2] == 0xBF.toByte()
-                ) {
-                    safeBytes.copyOfRange(3, safeBytes.size)
-                } else {
-                    safeBytes
-                }
-
-                val opds1 = OPDS1Parser.parse(cleanBytes, absoluteUrl)
-                return@withContext Success(opds1)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                return@withContext Failure(Exception("Invalid OPDS response"))
-            }
+    private suspend fun fetchAndParse(url: String, absoluteUrl: AbsoluteUrl, session: OpdsCatalogSession?): Try<ParseData, Exception> {
+        val response = try {
+            executeRequest(url, session)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (e: Exception) {
-            return@withContext Failure(Exception(if (e is IllegalArgumentException) "Invalid URL or non-HTTPS OPDS endpoint" else "Catalog unavailable; unlock the device or reopen the catalog"))
+        } catch (_: Exception) {
+            return Failure(Exception("Catalog unavailable; unlock the device, migrate saved credentials if needed, or reopen the catalog"))
+        }
+        return parseResponse(response, absoluteUrl)
+    }
+
+    private suspend fun parseResponse(response: Response, absoluteUrl: AbsoluteUrl): Try<ParseData, Exception> {
+        if (!response.isSuccessful) {
+            val message = "HTTP ${response.code}"
+            Timber.e(message)
+            response.close()
+            return Failure(Exception(message))
+        }
+        val bytes = response.use { it.body?.bytes() } ?: return Failure(Exception("Empty response"))
+        if (bytes.isEmpty()) return Failure(Exception("Empty response"))
+        val text = bytes.toString(Charsets.UTF_8).trim()
+        if (text.contains("<!DOCTYPE html", ignoreCase = true) || text.contains("<html", ignoreCase = true)) {
+            return Failure(Exception("Server returned HTML (login page or block page)."))
+        }
+        return parseDocument(sanitizeXml(bytes), absoluteUrl)
+    }
+
+    private suspend fun parseDocument(bytes: ByteArray, absoluteUrl: AbsoluteUrl): Try<ParseData, Exception> {
+        try {
+            return Success(OPDS2Parser.parse(bytes, absoluteUrl))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Fall through to OPDS 1.x parsing.
+        }
+        return try {
+            Success(OPDS1Parser.parse(withoutUtf8Bom(bytes), absoluteUrl))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Failure(Exception("Invalid OPDS response"))
         }
     }
+
+    private fun withoutUtf8Bom(bytes: ByteArray): ByteArray =
+        if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
+            bytes.copyOfRange(3, bytes.size)
+        } else bytes
 
     suspend fun downloadPublication(
         downloadUrl: String,
         destinationFile: File,
         originalFeedUrl: String?,
         session: OpdsCatalogSession? = null
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): Boolean = withContext(ioDispatcher) {
         try {
             val secureDownloadUrl = normalizeHttpsUrl(downloadUrl)
             if (session == null && originalFeedUrl != null) normalizeHttpsUrl(originalFeedUrl)
@@ -268,7 +256,7 @@ class OpdsRepository internal constructor(
     suspend fun saveCatalog(
         existing: OpdsEntity?, title: String, url: String, action: CatalogCredentialAction,
         username: String? = null, password: String? = null
-    ): Result<String> = withContext(Dispatchers.IO) {
+    ): Result<String> = withContext(ioDispatcher) {
         try {
             val normalizedUrl = normalizeHttpsUrl(url)
             val edit = when (action) {
@@ -287,7 +275,7 @@ class OpdsRepository internal constructor(
         }
     }
 
-    suspend fun deleteFeed(feed: OpdsEntity): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun deleteFeed(feed: OpdsEntity): Result<String> = withContext(ioDispatcher) {
         try {
             lifecycle.delete(OpdsCatalogSession(feed))
             Result.success("Catalog has been deleted")
@@ -298,7 +286,7 @@ class OpdsRepository internal constructor(
         }
     }
 
-    suspend fun migrateLegacyCredentials(): Result<OpdsMigrationReport> = withContext(Dispatchers.IO) {
+    suspend fun migrateLegacyCredentials(): Result<OpdsMigrationReport> = withContext(ioDispatcher) {
         try { Result.success(lifecycle.migrateAll()) }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { Result.failure(OpdsLifecycleException()) }

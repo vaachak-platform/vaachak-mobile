@@ -68,8 +68,9 @@ internal class OpdsCredentialLifecycle(
             throw cancelled
         } catch (_: Exception) {
             // An exception after a successful commit is not a failed save.
-            if (dao.load(id) == pending && dao.entry(id, generation)?.state == "ACTIVE") true
-            else throw OpdsLifecycleException()
+            val committed = dao.load(id) == pending && dao.entry(id, generation)?.state == "ACTIVE"
+            if (!committed) throw OpdsLifecycleException()
+            committed
         }
         if (!published) {
             dao.discardPending(id, generation)
@@ -113,8 +114,9 @@ internal class OpdsCredentialLifecycle(
             val after = row.copy(title = title, url = url, username = null,
                 password = null, credentialGeneration = ref.generation)
             val previousRetired = row.credentialGeneration?.let { dao.entry(row.id, it)?.state == "RETIRED" } ?: true
-            if (dao.load(row.id) == after && dao.entry(row.id, ref.generation)?.state == "ACTIVE" && previousRetired) true
-            else throw OpdsLifecycleException()
+            val committed = dao.load(row.id) == after && dao.entry(row.id, ref.generation)?.state == "ACTIVE" && previousRetired
+            if (!committed) throw OpdsLifecycleException()
+            committed
         }
         if (!published) dao.abandon(row.id, ref.generation)
         return published
