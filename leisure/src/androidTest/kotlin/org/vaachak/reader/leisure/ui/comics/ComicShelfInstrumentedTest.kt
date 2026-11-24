@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -120,5 +121,96 @@ class ComicShelfInstrumentedTest {
         }
         compose.onNodeWithContentDescription("Import CBZ or CBR comic").assertIsNotEnabled()
         compose.onNodeWithText("Importing…").assertExists()
+    }
+
+    @Test fun anEmptyRecentShelfExplainsThatNothingHasBeenOpened() {
+        compose.setContent {
+            MaterialTheme {
+                ComicShelfContent(comics = listOf(
+                    ComicShelfStore.Comic("unread", "Never Opened", "content://test/unread", 3, 0)
+                ), isEink = false, busy = false, message = null,
+                    onImport = {}, onOpen = {}, onRemove = {})
+            }
+        }
+        compose.onNodeWithContentDescription("Recently read comics").performClick()
+        compose.onNodeWithText("No recently read comics.").assertExists()
+        compose.onNodeWithText("Recent Reading: 0").assertExists()
+        compose.onNodeWithContentDescription("All comics").performClick()
+        compose.onNodeWithContentDescription("Open comic Never Opened").assertExists()
+    }
+
+    @Test fun shelfSearchFiltersTitlesShowsNoResultsAndClearsSafely() {
+        compose.setContent {
+            MaterialTheme {
+                ComicShelfContent(comics = listOf(
+                    ComicShelfStore.Comic("a", "Alpha Comics", "content://test/a", 10, 0),
+                    ComicShelfStore.Comic("b", "Bravo", "content://test/b", 6, 0)
+                ), isEink = false, busy = false, message = null,
+                    onImport = {}, onOpen = {}, onRemove = {})
+            }
+        }
+        compose.onNodeWithContentDescription("Search comics").performClick()
+        compose.onNodeWithText("Search comics").performTextInput("zzz-not-in-library")
+        compose.onNodeWithText("No comics match your search.").assertExists()
+        compose.onNodeWithContentDescription("Clear comic search").performClick()
+        compose.onNodeWithContentDescription("Open comic Alpha Comics").assertExists()
+        compose.onNodeWithContentDescription("Open comic Bravo").assertExists()
+    }
+
+    @Test fun allSortingModesCanBeSelectedAndContinueMenuOpensTheReader() {
+        var opened = ""
+        compose.setContent {
+            MaterialTheme {
+                ComicShelfContent(comics = listOf(
+                    ComicShelfStore.Comic("older", "Issue 10", "content://test/10", 10, 5,
+                        format = "CBR", lastOpenedAt = 99L),
+                    ComicShelfStore.Comic("newer", "Issue 2", "content://test/2", 10, 0,
+                        format = "CBZ", lastOpenedAt = 100L)
+                ), isEink = false, busy = false, message = null,
+                    onImport = {}, onOpen = { opened = it }, onRemove = {})
+            }
+        }
+        for (label in listOf("Sort by Title", "Sort by Progress", "Sort by Recent")) {
+            compose.onNodeWithContentDescription("Sort comics").performClick()
+            compose.onNodeWithText(label).performClick()
+        }
+        compose.onNodeWithText("60% · 6/10").assertExists()
+        compose.onNodeWithText("CBR").assertExists()
+        compose.onNodeWithContentDescription("More options for Issue 10").performClick()
+        compose.onNodeWithText("Read / Continue").performClick()
+        compose.runOnIdle { assertEquals("older", opened) }
+    }
+
+    @Test fun emptyImportMessageIsVisibleWithoutBlockingActions() {
+        var opened = ""
+        compose.setContent {
+            MaterialTheme {
+                ComicShelfContent(comics = listOf(
+                    ComicShelfStore.Comic("a", "Finished", "content://test/a", 4, 3)
+                ), isEink = true, busy = false, message = "Already imported",
+                    onImport = {}, onOpen = { opened = it }, onRemove = {})
+            }
+        }
+        compose.onNodeWithText("Already imported").assertExists()
+        compose.onNodeWithText("100% · 4/4").assertExists()
+        compose.onNodeWithContentDescription("Open comic Finished").performClick()
+        compose.runOnIdle { assertEquals("a", opened) }
+    }
+
+    @Test fun missingComicReaderShowsBackToComicsInsteadOfCrashing() {
+        var didGoBack = false
+        compose.setContent {
+            MaterialTheme {
+                ComicReaderScreen(
+                    vaultId = "test-comic-vault-${System.nanoTime()}",
+                    comicId = "missing-comic",
+                    preferences = org.vaachak.reader.core.domain.model.ComicPreferences(),
+                    onBack = { didGoBack = true }
+                )
+            }
+        }
+        compose.onNodeWithText("Comic no longer exists in this profile").assertExists()
+        compose.onNodeWithText("Back to Comics").performClick()
+        compose.runOnIdle { assertTrue(didGoBack) }
     }
 }

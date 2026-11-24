@@ -8,10 +8,7 @@ import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 
-/**
- * CBZ stream-based archive inspector. Never extracts ZIP paths to the file system.
- * All limits apply while decompressing, not just to the ZIP header's untrusted sizes.
- */
+/** Stream CBZ archives without extracting paths to disk; enforce limits on actual decompressed bytes. */
 object SafeCbzArchive {
     const val MAX_ARCHIVE_BYTES: Long = 2L * 1024L * 1024L * 1024L
     private const val MAX_ENTRIES = 20_000
@@ -24,70 +21,84 @@ object SafeCbzArchive {
 
     class UnsafeArchive(message: String) : IOException(message)
 
-    /** Inspect once at import time. A reader must revalidate on every subsequent file open. */
     fun inspect(input: InputStream): Index = visit(input, wantedPage = null).first
 
-    /** Revalidate the entire archive before returning one bounded image to the caller. */
+    /** Revalidate the archive each time a page is requested; never trust saved metadata. */
     fun readPage(input: InputStream, name: String): ByteArray {
         val (index, bytes) = visit(input, wantedPage = name)
-        if (name !in index.pages || bytes == null) {
-            throw UnsafeArchive("Requested comic page is unavailable")
-        }
+        if (name !in index.pages || bytes == null) throw UnsafeArchive("Requested comic page is unavailable")
         return bytes
     }
 
-    private fun visit(input: InputStream, wantedPage: String?): Pair<Index, ByteArray?> {
+    private class Inspection(private val wantedPage: String?) {
         val pageNames = ArrayList<String>()
         val seenNames = HashSet<String>()
-        val buffer = ByteArray(8192)
-        var archiveEntries = 0
-        var totalBytes = 0L
-        var totalImageBytes = 0L
+        var entryCount = 0
+        var decompressedBytes = 0L
+        var imageBytes = 0L
         var selected: ByteArray? = null
 
+        fun process(zip: ZipInputStream, entry: ZipEntry) {
+            entryCount++
+            if (entryCount > MAX_ENTRIES) reject("Too many archive entries")
+            val name = validateEntryName(entry.name)
+            if (!seenNames.add(name.lowercase(Locale.ROOT))) reject("Duplicate archive path")
+            val image = isReadableImage(entry, name)
+            if (image) {
+                pageNames += name
+                if (pageNames.size > MAX_PAGES) reject("Too many comic pages")
+            }
+            val bytes = drainEntry(zip, if (image) MAX_IMAGE_BYTES else MAX_METADATA_BYTES,
+                if (image && name == wantedPage) ByteArrayOutputStream() else null)
+            if (image) {
+                validateImage(entry, bytes)
+                imageBytes += bytes
+            }
+            zip.closeEntry()
+        }
+
+        private fun isReadableImage(entry: ZipEntry, name: String): Boolean =
+            !entry.isDirectory && isImage(name) &&
+                !name.startsWith("__MACOSX/", ignoreCase = true) &&
+                !name.substringAfterLast('/').startsWith(".")
+
+        private fun drainEntry(zip: ZipInputStream, limit: Long, output: ByteArrayOutputStream?): Long {
+            val buffer = ByteArray(8192)
+            var bytes = 0L
+            while (true) {
+                val count = zip.read(buffer)
+                if (count < 0) break
+                if (count == 0) continue
+                bytes += count
+                decompressedBytes += count
+                if (bytes > limit || decompressedBytes > MAX_TOTAL_BYTES) {
+                    reject("Archive exceeds safe decompression limits")
+                }
+                output?.write(buffer, 0, count)
+            }
+            if (output != null) selected = output.toByteArray()
+            return bytes
+        }
+
+        private fun validateImage(entry: ZipEntry, bytes: Long) {
+            if (bytes <= 0L) reject("Empty comic image")
+            val compressed = entry.compressedSize
+            if (bytes > 1024L * 1024L && compressed >= 0L &&
+                (compressed == 0L || bytes / compressed > 500L)
+            ) reject("Suspiciously compressed comic image")
+        }
+    }
+
+    private fun visit(input: InputStream, wantedPage: String?): Pair<Index, ByteArray?> {
+        val inspection = Inspection(wantedPage)
         ZipInputStream(BoundedInputStream(input, MAX_ARCHIVE_BYTES)).use { zip ->
             while (true) {
-                val entry: ZipEntry = zip.nextEntry ?: break
-                archiveEntries++
-                if (archiveEntries > MAX_ENTRIES) throw UnsafeArchive("Too many archive entries")
-                val normalized = validateEntryName(entry.name)
-                val folded = normalized.lowercase(Locale.ROOT)
-                if (!seenNames.add(folded)) throw UnsafeArchive("Duplicate archive path")
-                val image = !entry.isDirectory && isImage(normalized) &&
-                    !normalized.startsWith("__MACOSX/", ignoreCase = true) &&
-                    !normalized.substringAfterLast('/').startsWith(".")
-                if (image) {
-                    pageNames += normalized
-                    if (pageNames.size > MAX_PAGES) throw UnsafeArchive("Too many comic pages")
-                }
-                val limit = if (image) MAX_IMAGE_BYTES else MAX_METADATA_BYTES
-                val content = if (image && normalized == wantedPage) ByteArrayOutputStream() else null
-                var entryBytes = 0L
-                while (true) {
-                    val count = zip.read(buffer)
-                    if (count == -1) break
-                    entryBytes += count.toLong()
-                    totalBytes += count.toLong()
-                    if (entryBytes > limit || totalBytes > MAX_TOTAL_BYTES) {
-                        throw UnsafeArchive("Archive exceeds safe decompression limits")
-                    }
-                    content?.write(buffer, 0, count)
-                }
-                if (image) {
-                    if (entryBytes == 0L) throw UnsafeArchive("Empty comic image")
-                    val compressed = entry.compressedSize
-                    if (entryBytes > 1024L * 1024 && compressed >= 0 &&
-                        (compressed == 0L || entryBytes / compressed > 500L)
-                    ) throw UnsafeArchive("Suspiciously compressed comic image")
-                    totalImageBytes += entryBytes
-                }
-                if (content != null) selected = content.toByteArray()
-                zip.closeEntry()
+                val entry = zip.nextEntry ?: break
+                inspection.process(zip, entry)
             }
         }
-        if (pageNames.isEmpty()) throw UnsafeArchive("No supported comic images were found")
-        pageNames.sortWith(::compareNatural)
-        return Index(pageNames, totalImageBytes) to selected
+        if (inspection.pageNames.isEmpty()) reject("No supported comic images were found")
+        return Index(inspection.pageNames.sortedWith(::compareNatural), inspection.imageBytes) to inspection.selected
     }
 
     internal fun isImage(name: String): Boolean = when (name.substringAfterLast('.').lowercase(Locale.ROOT)) {
@@ -100,14 +111,12 @@ object SafeCbzArchive {
             name.any { it == '\u0000' || it == '\\' || it.code < 32 || it == ':' } ||
             name.split('/').any { it == "." || it == ".." || it.isEmpty() && name.last() != '/' } ||
             name.count { it == '/' } > 24
-        ) throw UnsafeArchive("Unsafe archive entry path")
-        // Directory markers are accepted but never created on disk.
-        val components = name.trimEnd('/').split('/')
-        if (components.any { it.isEmpty() }) throw UnsafeArchive("Unsafe archive entry path")
+        ) reject("Unsafe archive entry path")
+        if (name.trimEnd('/').split('/').any { it.isEmpty() }) reject("Unsafe archive entry path")
         return name
     }
 
-    /** Natural ordering: 2.jpg sorts before 10.jpg without parsing enormous numbers. */
+    /** Natural ordering: page 2 comes before page 10, without overflow on enormous numbers. */
     internal fun compareNatural(a: String, b: String): Int {
         var left = 0
         var right = 0
@@ -117,12 +126,10 @@ object SafeCbzArchive {
             if (c1.isDigit() && c2.isDigit()) {
                 val end1 = a.indexOfFirstFrom(left) { !it.isDigit() }
                 val end2 = b.indexOfFirstFrom(right) { !it.isDigit() }
-                val d1 = a.substring(left, end1)
-                val d2 = b.substring(right, end2)
-                val n1 = d1.trimStart('0').ifEmpty { "0" }
-                val n2 = d2.trimStart('0').ifEmpty { "0" }
-                val numeric = n1.length.compareTo(n2.length).takeIf { it != 0 }
-                    ?: n1.compareTo(n2).takeIf { it != 0 }
+                val d1 = a.substring(left, end1).trimStart('0').ifEmpty { "0" }
+                val d2 = b.substring(right, end2).trimStart('0').ifEmpty { "0" }
+                val numeric = d1.length.compareTo(d2.length).takeIf { it != 0 }
+                    ?: d1.compareTo(d2).takeIf { it != 0 }
                 if (numeric != null) return numeric
                 left = end1
                 right = end2
@@ -141,15 +148,11 @@ object SafeCbzArchive {
         return length
     }
 
-    /** Limit compressed input bytes, including when ZIP headers lie about size. */
-    private class BoundedInputStream(delegate: InputStream, private val limit: Long) :
-        FilterInputStream(delegate) {
+    private class BoundedInputStream(delegate: InputStream, private val limit: Long) : FilterInputStream(delegate) {
         private var consumed = 0L
-
         override fun read(): Int {
             if (consumed >= limit) {
-                val next = super.read()
-                if (next != -1) throw UnsafeArchive("Archive is too large")
+                if (super.read() != -1) reject("Archive is too large")
                 return -1
             }
             val result = super.read()
@@ -160,8 +163,7 @@ object SafeCbzArchive {
         override fun read(b: ByteArray, off: Int, len: Int): Int {
             if (len == 0) return 0
             if (consumed >= limit) {
-                val next = super.read()
-                if (next != -1) throw UnsafeArchive("Archive is too large")
+                if (super.read() != -1) reject("Archive is too large")
                 return -1
             }
             val allowed = minOf(len.toLong(), limit - consumed).toInt()
@@ -170,4 +172,6 @@ object SafeCbzArchive {
             return result
         }
     }
+
+    private fun reject(message: String): Nothing = throw UnsafeArchive(message)
 }
