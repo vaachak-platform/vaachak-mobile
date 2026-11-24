@@ -96,4 +96,58 @@ class SafeCbrArchiveTest {
             index.add(header("next.jpg", unpacked = 64))
         }
     }
+
+    @Test fun signaturesRejectShortPrefixesAndAcceptRARHeadersWithTrailingBytes() {
+        assertFalse(SafeCbrArchive.isRarSignature(byteArrayOf()))
+        assertFalse(SafeCbrArchive.isRarSignature(byteArrayOf(0x52, 0x61, 0x72, 0x21, 0x1a, 0x07)))
+        assertFalse(SafeCbrArchive.isRarSignature(byteArrayOf(0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 1)))
+        assertTrue(SafeCbrArchive.isRarSignature(
+            byteArrayOf(0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0, 0x12, 0x13)))
+        assertTrue(SafeCbrArchive.isRarSignature(
+            byteArrayOf(0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 1, 0, 0x12)))
+    }
+
+    @Test fun missingEmptyAndTruncatedArchivesFailWithoutExtraction() {
+        val empty = File.createTempFile("empty-comic", ".cbr")
+        val missing = File(empty.parentFile, "missing-${System.nanoTime()}.cbr")
+        try {
+            assertThrows(SafeCbzArchive.UnsafeArchive::class.java) { SafeCbrArchive.inspect(empty) }
+            assertThrows(SafeCbzArchive.UnsafeArchive::class.java) { SafeCbrArchive.inspect(missing) }
+            assertThrows(SafeCbzArchive.UnsafeArchive::class.java) { SafeCbrArchive.readPage(missing, "1.jpg") }
+            empty.writeBytes(byteArrayOf(0x52, 0x61, 0x72, 0x21, 0x1a, 0x07, 0))
+            assertThrows(SafeCbzArchive.UnsafeArchive::class.java) { SafeCbrArchive.inspect(empty) }
+        } finally {
+            assertTrue(empty.delete())
+        }
+    }
+
+    @Test fun directoriesHiddenFilesAndNonImageFormatsAreIgnored() {
+        val catalog = SafeCbrArchive.Inspection()
+        assertEquals(null, catalog.add(header("chapters/", directory = true)))
+        assertEquals(null, catalog.add(header("__MACOSX/1.png")))
+        assertEquals(null, catalog.add(header("chapters/.thumbnail.jpg")))
+        assertEquals(null, catalog.add(header("chapters/cover.gif")))
+        assertEquals(null, catalog.add(header("ComicInfo.xml", unpacked = -1)))
+        assertEquals("chapters/1.webp", catalog.add(header("chapters\\1.webp", unpacked = -1, packed = -1)))
+        assertEquals(1, catalog.pages.size)
+        assertEquals(64L * 1024 * 1024, catalog.imageBytes)
+    }
+
+    @Test fun safeCompressionRatioBoundariesAreAccepted() {
+        val catalog = SafeCbrArchive.Inspection()
+        assertEquals("first.png", catalog.add(header("first.png", unpacked = 2L * 1024 * 1024,
+            packed = 4_194)))
+        assertEquals("second.jpg", catalog.add(header("second.jpg", unpacked = 2L * 1024 * 1024,
+            packed = -1)))
+        assertEquals(4L * 1024 * 1024, catalog.imageBytes)
+    }
+
+    @Test fun invalidHeaderPathsAreRejectedBeforeExtraction() {
+        for (path in listOf("/cover.png", "C:/cover.png", "dir/../cover.png", "dir//page.jpg",
+            "path/./page.png", "x".repeat(513), "a/\u0001.jpg", "a/".repeat(25) + "1.jpg")) {
+            assertThrows("Unexpectedly accepted: $path", SafeCbzArchive.UnsafeArchive::class.java) {
+                SafeCbrArchive.Inspection().add(header(path))
+            }
+        }
+    }
 }
