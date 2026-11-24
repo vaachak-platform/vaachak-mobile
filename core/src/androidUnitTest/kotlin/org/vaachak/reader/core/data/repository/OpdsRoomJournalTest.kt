@@ -166,6 +166,7 @@ class OpdsRoomJournalTest {
         private val values = mutableMapOf<String, String>()
         override fun read(id: String): String = values[id].orEmpty()
         override fun write(id: String, value: String) { values[id] = value }
+        override fun ensureDurable(id: String) { check(id in values) }
         override fun clear(id: String) { values.remove(id) }
     }
 }

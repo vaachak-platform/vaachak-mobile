@@ -6,10 +6,10 @@ import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.security.keystore.UserNotAuthenticatedException
+import android.system.Os
+import android.system.OsConstants
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.security.KeyStore
 import java.security.MessageDigest
 import javax.crypto.Cipher
@@ -17,6 +17,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /** Safe, non-secret diagnostic messages for unavailable device-authenticated credentials. */
 class GatewayCredentialUnavailableException(message: String, cause: Throwable? = null) :
@@ -34,11 +35,23 @@ class GatewayCredentialUnavailableException(message: String, cause: Throwable? =
  * credentials are ever written with it. Do not delete the v1 alias globally while other vaults
  * may still hold unmigrated VAG1 files.
  */
+@Singleton
 class PrivateGatewaySecrets @Inject constructor(
     @param:ApplicationContext private val context: Context
 ) {
     private companion object {
         const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
+        val keyCreationLock = Any()
+    }
+
+    private val durableFile = DurableCredentialFile { directory ->
+        val descriptor = Os.open(directory.absolutePath, OsConstants.O_RDONLY, 0)
+        try {
+            check(OsConstants.S_ISDIR(Os.fstat(descriptor).st_mode)) { "Credential storage path is not a directory" }
+            Os.fsync(descriptor)
+        } finally {
+            Os.close(descriptor)
+        }
     }
 
     private val legacyAlias = "vaachak.private.ai.gateway.key.v1"
@@ -71,10 +84,10 @@ class PrivateGatewaySecrets @Inject constructor(
         }
     }
 
-    private fun authenticatedKey(): SecretKey {
+    private fun authenticatedKey(): SecretKey = synchronized(keyCreationLock) {
         checkDeviceCredential()
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(authenticatedAlias, null) as? SecretKey)?.let { return it }
+        (store.getKey(authenticatedAlias, null) as? SecretKey)?.let { return@synchronized it }
         val builder = KeyGenParameterSpec.Builder(
             authenticatedAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
         )
@@ -88,7 +101,7 @@ class PrivateGatewaySecrets @Inject constructor(
             @Suppress("DEPRECATION")
             builder.setUserAuthenticationValidityDurationSeconds(60)
         }
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
             .apply { init(builder.build()) }
             .generateKey()
     }
@@ -160,7 +173,8 @@ class PrivateGatewaySecrets @Inject constructor(
                     decryptAead(vaultId, bytes, oldKey)
                 }
                 // write() atomically replaces VAG2 with authenticated VAS2 only
-                // AFTER encryption succeeds. The legacy file remains on failure.
+                // AFTER encryption succeeds. A post-rename sync failure is reported;
+                // the new ciphertext may already exist and must not be treated as lost.
                 write(vaultId, plaintext)
                 plaintext
             }
@@ -208,17 +222,13 @@ class PrivateGatewaySecrets @Inject constructor(
             val magic = if (isSyncCredential(vaultId)) authenticatedSyncMagic else currentMagic
             magic + cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
         }
-        val dest = vaultFile(vaultId)
-        val temporary = File.createTempFile(".private_ai_", ".tmp", context.noBackupFilesDir)
-        try {
-            temporary.writeBytes(encrypted)
-            Files.move(
-                temporary.toPath(), dest.toPath(),
-                StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE
-            )
-        } finally {
-            check(!temporary.exists() || temporary.delete()) { "Cannot remove temporary gateway key" }
-        }
+        durableFile.replace(vaultFile(vaultId), encrypted)
+    }
+
+    /** Re-establish durability before publishing a previously written OPDS generation. */
+    @Synchronized
+    internal fun ensureDurable(vaultId: String) {
+        durableFile.ensureDurable(vaultFile(vaultId))
     }
 
     @Synchronized
