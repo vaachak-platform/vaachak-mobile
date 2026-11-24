@@ -15,7 +15,7 @@ internal class OpdsRepositoryHarness {
     val repository: OpdsRepository
     init {
         every { visible.getAllFeeds() } returns flowOf(emptyList())
-        repository = OpdsRepository(visible, lifecycle)
+        repository = OpdsRepository(visible, lifecycle, CatalogDispatcherModule.provideCatalogIoDispatcher())
         repository.setAbsoluteUrlResolverForTest { mockk(relaxed = true) }
     }
     suspend fun authenticated(url: String, username: String, password: String): OpdsEntity {

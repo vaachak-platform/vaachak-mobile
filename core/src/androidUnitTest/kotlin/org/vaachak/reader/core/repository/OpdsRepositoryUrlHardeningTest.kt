@@ -3,6 +3,7 @@ package org.vaachak.reader.core.data.repository
 import com.sun.net.httpserver.HttpServer
 import io.mockk.coVerify
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
@@ -252,4 +253,33 @@ class OpdsRepositoryUrlHardeningTest {
         check(repository.saveCatalog(null, "Fixture", "https://@secure.example/opds", CatalogCredentialAction.REMOVE).isFailure)
         check(harness.rows.rows.isEmpty())
     }
+
+    @Test fun repositoryMigrationThenDeleteRetiresOnlySelectedGeneration() = runTest {
+        val original = harness.anonymous(root)
+        val legacy = original.copy(username = "legacy-fixture", password = "fixture-password")
+        harness.rows.rows[original.id] = legacy
+        val other = harness.authenticated(root, "other-fixture", "other-password")
+        check(repository.migrateLegacyCredentials().getOrThrow() == OpdsMigrationReport(1, 0))
+        val active = checkNotNull(harness.rows.rows[original.id])
+        check(active.username == null && active.password == null)
+        val generation = checkNotNull(active.credentialGeneration)
+        check(harness.lifecycle.readForRequest(OpdsCatalogSession(active), root)?.password == "fixture-password")
+        check(repository.deleteFeed(active).isSuccess)
+        check(original.id !in harness.rows.rows)
+        check(harness.rows.entries[original.id to generation]?.state == "RETIRED")
+        check(harness.lifecycle.readForRequest(OpdsCatalogSession(other), root)?.password == "other-password")
+    }
+
+    @Test fun missingReplacementFieldsDoNotChangeSavedGeneration() = runTest {
+        val saved = harness.authenticated(root, "reader", "fixture")
+        check(repository.saveCatalog(saved, "Changed", root, CatalogCredentialAction.REPLACE, null, "fixture").isFailure)
+        check(repository.saveCatalog(saved, "Changed", root, CatalogCredentialAction.REPLACE, "reader", null).isFailure)
+        check(harness.rows.rows[saved.id] == saved)
+    }
+
+    @Test fun cancelledFeedRequestIsNotConvertedToOrdinaryFailure() = runTest {
+        repository.setClientForTest(OkHttpClient.Builder().addInterceptor { throw CancellationException("fixture") }.build())
+        check(runCatching { repository.parseFeed(root) }.exceptionOrNull() is CancellationException)
+    }
+
 }

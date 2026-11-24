@@ -52,14 +52,7 @@ internal class OpdsCredentialMigration(
 ) {
     suspend fun migrate(catalogId: Long): OpdsMigrationOutcome = mutationMutex.withLock {
         val row = journal.load(catalogId) ?: return@withLock OpdsMigrationOutcome.CATALOG_NOT_FOUND
-        if (row.catalogId != catalogId || row.activeRef?.catalogId?.let { it != catalogId } == true) {
-            return@withLock OpdsMigrationOutcome.RECOVERY_REQUIRED
-        }
-        if (row.activeRef != null) {
-            return@withLock if (row.hasLegacy) OpdsMigrationOutcome.RECOVERY_REQUIRED
-            else OpdsMigrationOutcome.ALREADY_REFERENCED
-        }
-        if (!row.hasLegacy) return@withLock OpdsMigrationOutcome.NONE
+        preflight(row, catalogId)?.let { return@withLock it }
         val username = row.legacyUsername ?: return@withLock OpdsMigrationOutcome.RECOVERY_REQUIRED
         val password = row.legacyPassword ?: return@withLock OpdsMigrationOutcome.RECOVERY_REQUIRED
         val ref = OpdsCredentialRef.create(catalogId)
@@ -82,4 +75,15 @@ internal class OpdsCredentialMigration(
             OpdsMigrationOutcome.CONFLICT
         }
     }
+
+    private fun preflight(row: OpdsCredentialSnapshot, catalogId: Long): OpdsMigrationOutcome? {
+        if (row.catalogId != catalogId || row.activeRef?.catalogId?.let { it != catalogId } == true) {
+            return OpdsMigrationOutcome.RECOVERY_REQUIRED
+        }
+        if (row.activeRef != null) {
+            return if (row.hasLegacy) OpdsMigrationOutcome.RECOVERY_REQUIRED else OpdsMigrationOutcome.ALREADY_REFERENCED
+        }
+        return if (row.hasLegacy) null else OpdsMigrationOutcome.NONE
+    }
+
 }

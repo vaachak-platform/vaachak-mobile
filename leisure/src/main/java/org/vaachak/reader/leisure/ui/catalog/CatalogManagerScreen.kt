@@ -76,11 +76,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.vaachak.reader.core.domain.model.OpdsEntity
 import org.vaachak.reader.core.data.repository.CatalogCredentialAction
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Deferred
+import org.vaachak.reader.core.data.repository.OpdsMigrationReport
 import org.vaachak.reader.leisure.ui.testability.Tid
 import org.vaachak.reader.leisure.ui.testability.TidScreen
 import org.vaachak.reader.leisure.ui.testability.tid
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CatalogManagerScreen(
     onBack: () -> Unit,
@@ -88,140 +89,164 @@ fun CatalogManagerScreen(
 ) {
     val catalogs by viewModel.catalogs.collectAsStateWithLifecycle()
     val isEink by viewModel.isEinkEnabled.collectAsStateWithLifecycle()
+    CatalogManagerContent(catalogs, isEink, onBack,
+        onSave = { existing, title, url, action, user, pass ->
+            viewModel.saveCatalog(existing, title, url, action, user, pass).awaitCatalogOperation()
+        },
+        onDelete = { viewModel.deleteCatalog(it).awaitCatalogOperation() },
+        onMigrate = { viewModel.migrateLegacyCredentials().awaitCatalogOperation() })
+}
 
-    // Dialog State
+// The ViewModel owns the job; disposing its requesting screen also cancels the operation.
+private suspend fun <T> Deferred<T>.awaitCatalogOperation(): T = try { await() } finally { cancel() }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun CatalogManagerContent(
+    catalogs: List<OpdsEntity>,
+    isEink: Boolean,
+    onBack: () -> Unit,
+    onSave: suspend (OpdsEntity?, String, String, CatalogCredentialAction, String?, String?) -> Result<String>,
+    onDelete: suspend (OpdsEntity) -> Result<String>,
+    onMigrate: suspend () -> Result<OpdsMigrationReport>
+) {
     var showDialog by remember { mutableStateOf(false) }
     var editingCatalog by remember { mutableStateOf<OpdsEntity?>(null) }
     var deletingCatalog by remember { mutableStateOf<OpdsEntity?>(null) }
     var operationBusy by remember { mutableStateOf(false) }
     var operationMessage by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val legacyCount = catalogs.count { it.username != null || it.password != null }
+
+    fun migrate() {
+        if (operationBusy) return
+        operationBusy = true
+        operationMessage = null
+        scope.launch {
+            try {
+                operationMessage = onMigrate().fold(
+                    onSuccess = { "Migrated ${it.migrated}; ${it.remaining} catalog(s) still need migration." },
+                    onFailure = { "Migration unavailable. Unlock your device and retry." }
+                )
+            } finally { operationBusy = false }
+        }
+    }
+
+    fun delete(feed: OpdsEntity) {
+        if (operationBusy) return
+        operationBusy = true
+        scope.launch {
+            try {
+                val result = onDelete(feed)
+                operationMessage = if (result.isSuccess) "Catalog deleted." else "Delete unavailable. Refresh and retry."
+                deletingCatalog = null
+            } finally { operationBusy = false }
+        }
+    }
 
     val containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.background
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
-
     TidScreen(Tid.Screen.catalogManager) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Manage Catalogs") },
-                navigationIcon = {
-                    IconButton(
-                        onClick = { if (!operationBusy) onBack() },
-                        enabled = !operationBusy,
-                        modifier = Modifier.tid(Tid.CatalogManager.back)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = containerColor,
-                    titleContentColor = contentColor,
-                    navigationIconContentColor = contentColor
-                )
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    if (operationBusy) return@FloatingActionButton
-                    editingCatalog = null
-                    showDialog = true
-                },
-                containerColor = if(isEink) Color.Black else MaterialTheme.colorScheme.primary,
-                contentColor = if(isEink) Color.White else MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.tid(Tid.CatalogManager.add)
-            ) {
-                Icon(Icons.Default.Add, "Add Catalog")
-            }
-        },
-        containerColor = containerColor,
-        contentColor = contentColor
-    ) { padding ->
-        if (catalogs.isEmpty()) {
-            Box(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No catalogs added yet.", color = Color.Gray)
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.padding(padding).fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 80.dp)
-            ) {
-                // Fix: explicit 'items' call resolving to OpdsEntity
-                item {
-                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (legacyCount > 0) {
-                            Text("$legacyCount catalog(s) need credential migration. Unlock your device with its PIN, then migrate. Existing values are preserved if migration cannot finish.")
-                            Button(enabled = !operationBusy, onClick = {
-                                operationBusy = true
-                                operationMessage = null
-                                scope.launch {
-                                    try {
-                                        val result = viewModel.migrateLegacyCredentials()
-                                        operationMessage = result.fold(
-                                            onSuccess = { "Migrated ${it.migrated}; ${it.remaining} catalog(s) still need migration." },
-                                            onFailure = { "Migration unavailable. Unlock your device and retry." }
-                                        )
-                                    } finally { operationBusy = false }
-                                }
-                            }) { Text("Migrate saved credentials") }
-                        }
-                        operationMessage?.let { Text(it) }
-                    }
-                }
-                items(items = catalogs, key = { it.id }) { feed ->
-                    CatalogManagerItem(
-                        feed = feed,
-                        isEink = isEink,
-                        onEdit = {
-                            if (operationBusy) return@CatalogManagerItem
-                            editingCatalog = feed
+        Scaffold(
+            topBar = { CatalogManagerTopBar(containerColor, contentColor, operationBusy, onBack) },
+            floatingActionButton = {
+                FloatingActionButton(
+                    onClick = {
+                        if (!operationBusy) {
+                            editingCatalog = null
                             showDialog = true
-                        },
-                        onDelete = { if (!operationBusy) deletingCatalog = feed },
-                        modifier = if (catalogs.first() == feed) Modifier.tid(Tid.CatalogManager.first) else Modifier
-                    )
-                    HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
-                }
-            }
-        }
-
-        deletingCatalog?.let { feed ->
-            AlertDialog(
-                onDismissRequest = { if (!operationBusy) deletingCatalog = null },
-                title = { Text("Delete catalog?") },
-                text = { Text("Remove this catalog and its saved credential reference. Downloaded books are not deleted.") },
-                properties = DialogProperties(dismissOnBackPress = !operationBusy, dismissOnClickOutside = !operationBusy),
-                confirmButton = {
-                    Button(enabled = !operationBusy, onClick = {
-                        operationBusy = true
-                        scope.launch {
-                            try {
-                                val result = viewModel.deleteCatalog(feed)
-                                operationMessage = if (result.isSuccess) "Catalog deleted." else "Delete unavailable. Refresh and retry."
-                                deletingCatalog = null
-                            } finally { operationBusy = false }
                         }
-                    }) { Text("Delete") }
-                },
-                dismissButton = { TextButton(enabled = !operationBusy, onClick = { deletingCatalog = null }) { Text("Cancel") } }
-            )
+                    },
+                    containerColor = if (isEink) Color.Black else MaterialTheme.colorScheme.primary,
+                    contentColor = if (isEink) Color.White else MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.tid(Tid.CatalogManager.add)
+                ) { Icon(Icons.Default.Add, "Add Catalog") }
+            },
+            containerColor = containerColor,
+            contentColor = contentColor
+        ) { padding ->
+            CatalogManagerList(catalogs, isEink, operationBusy, operationMessage,
+                onMigrate = ::migrate,
+                onEdit = { feed -> editingCatalog = feed; showDialog = true },
+                onDelete = { deletingCatalog = it },
+                modifier = Modifier.padding(padding).fillMaxSize())
+        }
+        deletingCatalog?.let { feed ->
+            CatalogDeleteConfirmation(operationBusy, onDismiss = { deletingCatalog = null }, onConfirm = { delete(feed) })
         }
         if (showDialog) {
             AddCatalogDialog(
                 existingCatalog = editingCatalog,
                 onDismiss = { showDialog = false; editingCatalog = null },
-                onSave = { title, url, action, user, pass ->
-                    viewModel.saveCatalog(editingCatalog, title, url, action, user, pass)
-                }
+                onSave = { title, url, action, user, pass -> onSave(editingCatalog, title, url, action, user, pass) }
             )
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CatalogManagerTopBar(containerColor: Color, contentColor: Color, busy: Boolean, onBack: () -> Unit) {
+    TopAppBar(
+        title = { Text("Manage Catalogs") },
+        navigationIcon = {
+            IconButton(onClick = { if (!busy) onBack() }, enabled = !busy,
+                modifier = Modifier.tid(Tid.CatalogManager.back)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = containerColor,
+            titleContentColor = contentColor, navigationIconContentColor = contentColor)
+    )
+}
+
+@Composable
+private fun CatalogManagerList(
+    catalogs: List<OpdsEntity>, isEink: Boolean, busy: Boolean, message: String?,
+    onMigrate: () -> Unit, onEdit: (OpdsEntity) -> Unit, onDelete: (OpdsEntity) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (catalogs.isEmpty()) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("No catalogs added yet.", color = Color.Gray)
+                message?.let { Text(it) }
+            }
+        }
+        return
     }
+    LazyColumn(modifier = modifier, contentPadding = PaddingValues(bottom = 80.dp)) {
+        item { CatalogMigrationHeader(catalogs.count { it.username != null || it.password != null }, busy, message, onMigrate) }
+        items(items = catalogs, key = { it.id }) { feed ->
+            CatalogManagerItem(feed, isEink,
+                onEdit = { if (!busy) onEdit(feed) },
+                onDelete = { if (!busy) onDelete(feed) },
+                modifier = if (catalogs.first() == feed) Modifier.tid(Tid.CatalogManager.first) else Modifier)
+            HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
+        }
+    }
+}
+
+@Composable
+private fun CatalogMigrationHeader(legacyCount: Int, busy: Boolean, message: String?, onMigrate: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (legacyCount > 0) {
+            Text("$legacyCount catalog(s) need credential migration. Unlock your device with its PIN, then migrate. Existing values are preserved if migration cannot finish.")
+            Button(enabled = !busy, onClick = onMigrate) { Text("Migrate saved credentials") }
+        }
+        message?.let { Text(it) }
+    }
+}
+
+@Composable
+private fun CatalogDeleteConfirmation(busy: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Delete catalog?") },
+        text = { Text("Remove this catalog and its saved credential reference. Downloaded books are not deleted.") },
+        properties = DialogProperties(dismissOnBackPress = !busy, dismissOnClickOutside = !busy),
+        confirmButton = { Button(enabled = !busy, onClick = onConfirm) { Text("Delete") } },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
@@ -259,111 +284,135 @@ fun CatalogManagerItem(
     )
 }
 
+// Intentionally not rememberSaveable: neither replacement input nor credential-bearing rows enter saved state.
+private class CatalogEditorState(existing: OpdsEntity?) {
+    var title by mutableStateOf(existing?.title ?: "")
+    var url by mutableStateOf(existing?.url?.let(::safeCatalogDisplayUrl) ?: "")
+    var username by mutableStateOf("")
+    var password by mutableStateOf("")
+    var action by mutableStateOf(if (existing == null) CatalogCredentialAction.REMOVE else CatalogCredentialAction.KEEP)
+        private set
+    var confirmRemove by mutableStateOf(false)
+    var busy by mutableStateOf(false)
+    var errorMessage by mutableStateOf<String?>(null)
+    val hasLegacy = existing?.let { it.username != null || it.password != null } == true
+    val hasCredentials = hasLegacy || existing?.credentialGeneration != null
+    val options = if (existing == null) listOf(CatalogCredentialAction.REMOVE, CatalogCredentialAction.REPLACE)
+        else CatalogCredentialAction.entries
+    val canSave: Boolean get() = !busy && title.isNotBlank() && url.isNotBlank() &&
+        (action != CatalogCredentialAction.REPLACE || (username.isNotBlank() && password.isNotBlank()))
+    fun clearPair() { username = ""; password = "" }
+    fun select(option: CatalogCredentialAction) {
+        action = option
+        if (option != CatalogCredentialAction.REPLACE) clearPair()
+        errorMessage = null
+    }
+}
+
 @Composable
 fun AddCatalogDialog(
     existingCatalog: OpdsEntity?,
     onDismiss: () -> Unit,
     onSave: suspend (String, String, CatalogCredentialAction, String?, String?) -> Result<String>
 ) {
-    var title by remember { mutableStateOf(existingCatalog?.title ?: "") }
-    var url by remember { mutableStateOf(existingCatalog?.url?.let(::safeCatalogDisplayUrl) ?: "") }
-    // Never prefill or rememberSaveable a stored username/password.
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var action by remember { mutableStateOf(if (existingCatalog == null) CatalogCredentialAction.REMOVE else CatalogCredentialAction.KEEP) }
-    var confirmRemove by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val state = remember { CatalogEditorState(existingCatalog) }
     val scope = rememberCoroutineScope()
-    val hasLegacy = existingCatalog?.let { it.username != null || it.password != null } == true
-    val hasCredentials = hasLegacy || existingCatalog?.credentialGeneration != null
-    val options = if (existingCatalog == null) listOf(CatalogCredentialAction.REMOVE, CatalogCredentialAction.REPLACE)
-        else CatalogCredentialAction.entries
-
     fun submit() {
-        if (busy) return
-        busy = true
-        errorMessage = null
+        if (!state.canSave) return
+        state.busy = true
+        state.errorMessage = null
         scope.launch {
             try {
-                val result = onSave(title, url, action,
-                    username.takeIf { action == CatalogCredentialAction.REPLACE },
-                    password.takeIf { action == CatalogCredentialAction.REPLACE })
+                val result = onSave(state.title, state.url, state.action,
+                    state.username.takeIf { state.action == CatalogCredentialAction.REPLACE },
+                    state.password.takeIf { state.action == CatalogCredentialAction.REPLACE })
                 if (result.isSuccess) {
-                    username = ""
-                    password = ""
+                    state.clearPair()
                     onDismiss()
                 } else {
-                    errorMessage = "Save unavailable. Check HTTPS URL and credentials, configure or unlock your device PIN, or refresh and retry. Saved credentials were not silently removed."
+                    state.errorMessage = "Save unavailable. Check HTTPS URL and credentials, configure or unlock your device PIN, or refresh and retry. Saved credentials were not silently removed."
                 }
-            } finally { busy = false }
+            } finally { state.busy = false }
         }
     }
-
     AlertDialog(
-        onDismissRequest = { if (!busy) onDismiss() },
-        properties = DialogProperties(dismissOnBackPress = !busy, dismissOnClickOutside = !busy),
+        onDismissRequest = { if (!state.busy) onDismiss() },
+        properties = DialogProperties(dismissOnBackPress = !state.busy, dismissOnClickOutside = !state.busy),
         title = { Text(if (existingCatalog == null) "Add Catalog" else "Edit Catalog") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = title, onValueChange = { title = it }, enabled = !busy,
-                    label = { Text("Name") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogTitle))
-                OutlinedTextField(value = url, onValueChange = { url = it }, enabled = !busy,
-                    label = { Text("URL (OPDS)") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogUrl))
-                Text(when {
-                    hasLegacy -> "Legacy credentials saved; migrate or replace after device authentication."
-                    hasCredentials -> "Encrypted credentials saved; they may be locked or unavailable."
-                    else -> "No credentials saved."
-                })
-                options.forEach { option ->
-                    val label = when (option) {
-                        CatalogCredentialAction.KEEP -> "Keep saved credentials"
-                        CatalogCredentialAction.REPLACE -> "Replace credentials"
-                        CatalogCredentialAction.REMOVE -> if (hasCredentials) "Remove saved credentials" else "No authentication"
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = action == option, enabled = !busy, modifier = Modifier.tid("catalog_credential_${option.name.lowercase()}"), onClick = {
-                            action = option
-                            if (option != CatalogCredentialAction.REPLACE) { username = ""; password = "" }
-                            errorMessage = null
-                        })
-                        Text(label)
-                    }
-                }
-                if (action == CatalogCredentialAction.REPLACE) {
-                    OutlinedTextField(value = username, onValueChange = { username = it }, enabled = !busy,
-                        label = { Text("Username") }, singleLine = true,
-                        modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogUser))
-                    OutlinedTextField(value = password, onValueChange = { password = it }, enabled = !busy,
-                        label = { Text("Password") }, singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogPass))
-                }
-                if (action == CatalogCredentialAction.KEEP && hasCredentials) Text("Changing the server origin requires Replace or Remove.")
-                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-        },
+        text = { CatalogEditorFields(state) },
         confirmButton = {
             Button(onClick = {
-                if (action == CatalogCredentialAction.REMOVE && hasCredentials) confirmRemove = true else submit()
-            }, enabled = !busy && title.isNotBlank() && url.isNotBlank() &&
-                (action != CatalogCredentialAction.REPLACE || (username.isNotBlank() && password.isNotBlank())),
-                modifier = Modifier.tid(Tid.CatalogManager.dialogSave)) { Text(if (busy) "Saving…" else "Save") }
+                if (state.action == CatalogCredentialAction.REMOVE && state.hasCredentials) state.confirmRemove = true else submit()
+            }, enabled = state.canSave,
+                modifier = Modifier.tid(Tid.CatalogManager.dialogSave)) { Text(if (state.busy) "Saving…" else "Save") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !busy,
+            TextButton(onClick = onDismiss, enabled = !state.busy,
                 modifier = Modifier.tid(Tid.CatalogManager.dialogCancel)) { Text("Cancel") }
         }
     )
-    if (confirmRemove) {
-        AlertDialog(onDismissRequest = { confirmRemove = false }, title = { Text("Remove credentials?") },
-            text = { Text("The catalog will no longer use its saved credentials. You can enter a replacement later.") },
-            confirmButton = { Button(onClick = { confirmRemove = false; submit() }) { Text("Remove") } },
-            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } })
+    if (state.confirmRemove) {
+        RemoveCredentialConfirmation(onDismiss = { state.confirmRemove = false }, onConfirm = { state.confirmRemove = false; submit() })
     }
+}
+
+@Composable
+private fun CatalogEditorFields(state: CatalogEditorState) {
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(value = state.title, onValueChange = { state.title = it }, enabled = !state.busy,
+            label = { Text("Name") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogTitle))
+        OutlinedTextField(value = state.url, onValueChange = { state.url = it }, enabled = !state.busy,
+            label = { Text("URL (OPDS)") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogUrl))
+        CatalogCredentialOptions(state)
+        if (state.action == CatalogCredentialAction.REPLACE) CatalogReplacementFields(state)
+        if (state.action == CatalogCredentialAction.KEEP && state.hasCredentials) {
+            Text("Changing the server origin requires Replace or Remove.")
+        }
+        state.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
+private fun CatalogCredentialOptions(state: CatalogEditorState) {
+    Text(when {
+        state.hasLegacy -> "Legacy credentials saved; migrate or replace after device authentication."
+        state.hasCredentials -> "Encrypted credentials saved; they may be locked or unavailable."
+        else -> "No credentials saved."
+    })
+    state.options.forEach { option ->
+        val label = when (option) {
+            CatalogCredentialAction.KEEP -> "Keep saved credentials"
+            CatalogCredentialAction.REPLACE -> "Replace credentials"
+            CatalogCredentialAction.REMOVE -> if (state.hasCredentials) "Remove saved credentials" else "No authentication"
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = state.action == option, enabled = !state.busy,
+                modifier = Modifier.tid("catalog_credential_${option.name.lowercase()}"), onClick = { state.select(option) })
+            Text(label)
+        }
+    }
+}
+
+@Composable
+private fun CatalogReplacementFields(state: CatalogEditorState) {
+    OutlinedTextField(value = state.username, onValueChange = { state.username = it }, enabled = !state.busy,
+        label = { Text("Username") }, singleLine = true,
+        modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogUser))
+    OutlinedTextField(value = state.password, onValueChange = { state.password = it }, enabled = !state.busy,
+        label = { Text("Password") }, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        visualTransformation = PasswordVisualTransformation(),
+        modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogPass))
+}
+
+@Composable
+private fun RemoveCredentialConfirmation(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Remove credentials?") },
+        text = { Text("The catalog will no longer use its saved credentials. You can enter a replacement later.") },
+        confirmButton = { Button(onClick = onConfirm) { Text("Remove") } },
+        dismissButton = { TextButton(onClick = onDismiss, modifier = Modifier.tid("catalog_remove_confirm_cancel")) { Text("Cancel") } })
 }
 
 /** Historical URLs might contain user-info. Never prefill or display those credentials. */

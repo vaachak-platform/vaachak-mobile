@@ -28,6 +28,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -492,15 +494,21 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    suspend fun saveCatalog(
+    fun saveCatalog(
         existing: OpdsEntity?, title: String, url: String, action: CatalogCredentialAction,
         username: String?, password: String?
-    ): Result<String> = opdsRepository.saveCatalog(existing, title.ifBlank { "Library" },
-        OpdsUrlUtils.cleanCatalogUrl(url), action, username, password)
+    ): Deferred<Result<String>> = viewModelScope.async {
+        opdsRepository.saveCatalog(existing, title.ifBlank { "Library" },
+            OpdsUrlUtils.cleanCatalogUrl(url), action, username, password)
+    }
 
-    suspend fun deleteCatalog(feed: OpdsEntity): Result<String> = opdsRepository.deleteFeed(feed)
+    fun deleteCatalog(feed: OpdsEntity): Deferred<Result<String>> = viewModelScope.async {
+        opdsRepository.deleteFeed(feed)
+    }
 
-    suspend fun migrateLegacyCredentials(): Result<OpdsMigrationReport> = opdsRepository.migrateLegacyCredentials()
+    fun migrateLegacyCredentials(): Deferred<Result<OpdsMigrationReport>> = viewModelScope.async {
+        opdsRepository.migrateLegacyCredentials()
+    }
 
 }
 
