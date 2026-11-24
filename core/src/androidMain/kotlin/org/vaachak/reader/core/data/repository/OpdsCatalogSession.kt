@@ -9,6 +9,8 @@ import java.security.SecureRandom
 class OpdsCatalogSession(feed: OpdsEntity) {
     val catalogId: Long = feed.id
     val catalogUrl: String = feed.url
+    private val catalogTitle = feed.title
+    private val predefined = feed.isPredefined
     private val salt = ByteArray(32).also { SecureRandom().nextBytes(it) }
     private val credentialStamp = stamp(feed)
 
@@ -16,6 +18,9 @@ class OpdsCatalogSession(feed: OpdsEntity) {
     internal fun matches(row: OpdsEntity): Boolean = catalogId > 0 &&
         row.id == catalogId && row.url == catalogUrl &&
         MessageDigest.isEqual(credentialStamp, stamp(row))
+
+    internal fun matchesEditor(row: OpdsEntity): Boolean =
+        matches(row) && catalogTitle == row.title && predefined == row.isPredefined
 
     private fun stamp(row: OpdsEntity): ByteArray {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -33,25 +38,4 @@ class OpdsCatalogSession(feed: OpdsEntity) {
     }
 
     override fun toString(): String = "OpdsCatalogSession(REDACTED)"
-}
-
-/** Transitional request resolver. Never guesses a catalog from a navigation URL. */
-internal suspend fun resolveLegacyCatalogCredentials(
-    session: OpdsCatalogSession,
-    requestedUrl: String,
-    load: suspend (Long) -> OpdsEntity?
-): OpdsCredentialPair? {
-    check(session.catalogId > 0) { "Catalog identity unavailable; reopen the catalog" }
-    val origin = httpsOrigin(session.catalogUrl)
-    val destination = httpsOrigin(requestedUrl)
-    val row = load(session.catalogId)
-    check(row != null && session.matches(row)) { "Catalog changed; reopen the catalog" }
-    if (origin != destination) return null
-    // Do not activate encrypted generations until journal-aware CRUD and editor are ready.
-    check(row.credentialGeneration == null) { "Secure catalog credentials are not available in this build" }
-    if (row.username == null && row.password == null) return null
-    val username = row.username
-    val password = row.password
-    check(!username.isNullOrBlank() && !password.isNullOrBlank()) { "Catalog credentials incomplete" }
-    return OpdsCredentialPair(username, password)
 }

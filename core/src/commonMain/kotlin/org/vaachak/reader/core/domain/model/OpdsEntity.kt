@@ -50,4 +50,6 @@ data class OpdsEntity(
     val isPredefined: Boolean = false,
     /** Non-secret pointer; null for legacy or anonymous catalogs. */
     val credentialGeneration: String? = null
-)
+) {
+    override fun toString(): String = "OpdsEntity(REDACTED)"
+}

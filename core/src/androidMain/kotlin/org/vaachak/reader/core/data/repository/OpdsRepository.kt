@@ -5,11 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.withContext
-import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Credentials
-import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -34,33 +31,23 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class OpdsRepository @Inject constructor(
-    private val opdsDao: OpdsDao
+class OpdsRepository internal constructor(
+    private val opdsDao: OpdsDao,
+    private val lifecycle: OpdsCredentialLifecycle
 ) {
+    @Inject internal constructor(opdsDao: OpdsDao, owner: AndroidOpdsCredentialLifecycle) :
+        this(opdsDao, owner.lifecycle)
     private val uaChrome =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     private val uaCalibre = "Stanza/3.2 iPhone/5.1"
 
-    private val cookieStore = HashMap<String, List<Cookie>>()
+    val catalogs: Flow<List<OpdsEntity>> = opdsDao.getAllFeeds().onStart {
+        try { lifecycle.prepareCatalogs() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { Timber.w("Catalog recovery unavailable") }
+    }
 
-    val catalogs: Flow<List<OpdsEntity>> = opdsDao.getAllFeeds()
-        .onStart {
-            val count = opdsDao.getFeedsCount()
-            if (count == 0) {
-                val gutenberg = OpdsEntity(
-                    title = "Project Gutenberg",
-                    url = "https://gutendex.com/books"
-                )
-                val manyBooks = OpdsEntity(
-                    title = "ManyBooks",
-                    url = "https://manybooks.net/opds"
-                )
-                opdsDao.insertFeed(gutenberg)
-                opdsDao.insertFeed(manyBooks)
-            }
-        }
-
-    val allFeeds: Flow<List<OpdsEntity>> = opdsDao.getAllFeeds()
+    val allFeeds: Flow<List<OpdsEntity>> = catalogs
 
     private var client: OkHttpClient = createClient()
     private val scopedClients = WeakHashMap<OpdsCatalogSession, OkHttpClient>()
@@ -100,27 +87,7 @@ class OpdsRepository @Inject constructor(
             .readTimeout(60, TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(false)
-            .cookieJar(object : CookieJar {
-                override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-                    val existing = cookieStore[url.host] ?: emptyList()
-                    val updated = ArrayList(existing)
-
-                    for (incoming in cookies) {
-                        updated.removeAll { current ->
-                            current.name == incoming.name &&
-                                    current.domain == incoming.domain &&
-                                    current.path == incoming.path
-                        }
-                        updated.add(incoming)
-                    }
-
-                    cookieStore[url.host] = updated
-                }
-
-                override fun loadForRequest(url: HttpUrl): List<Cookie> {
-                    return cookieStore[url.host] ?: emptyList()
-                }
-            })
+            .cookieJar(CookieJar.NO_COOKIES)
             .addNetworkInterceptor(Interceptor { chain ->
                 val original = chain.request()
                 val host = original.url.host.lowercase()
@@ -148,56 +115,27 @@ class OpdsRepository @Inject constructor(
     }
 
     private fun normalizeHttpsUrl(urlStr: String): String {
-        return OpdsUrlUtils.normalizeHttpsUrl(urlStr)
+        val normalized = OpdsUrlUtils.normalizeHttpsUrl(urlStr)
+        // Check raw and canonical URL so user-info cannot be stripped by canonicalization.
+        httpsOrigin(urlStr.trim())
+        httpsOrigin(normalized)
+        return normalized
     }
-
-    private suspend fun findEffectiveFeed(urlStr: String): OpdsEntity? {
-        val cleanUrl = normalizeHttpsUrl(urlStr)
-
-        var feed = opdsDao.getFeedByUrl(cleanUrl)
-            ?: opdsDao.getFeedByUrl(cleanUrl.removeSuffix("/"))
-            ?: opdsDao.getFeedByUrl("$cleanUrl/")
-
-        if (feed != null) return feed
-
-        if (cleanUrl.contains("/opds")) {
-            val base = cleanUrl.substringBefore("/opds") + "/opds"
-            feed = opdsDao.getFeedByUrl(base)
-                ?: opdsDao.getFeedByUrl("$base/")
-            if (feed != null) return feed
-        }
-
-        return null
-    }
-
-    private suspend fun scopedPair(session: OpdsCatalogSession, requestedUrl: String): OpdsCredentialPair? =
-        resolveLegacyCatalogCredentials(session, requestedUrl, opdsDao::getFeedById)
 
     private suspend fun executeRequest(url: String, session: OpdsCatalogSession?): Response {
         val secureUrl = normalizeHttpsUrl(url)
-        val storedFeed = if (session == null) findEffectiveFeed(secureUrl) else null
-        check(storedFeed?.credentialGeneration == null) { "Reopen the catalog using its saved identity" }
-
-        val requestBuilder = Request.Builder().url(secureUrl)
-
-        if (session != null) {
-            scopedPair(session, secureUrl)?.let { pair ->
-                requestBuilder.header("Authorization", Credentials.basic(pair.username, pair.password))
-            }
-        } else if (
-            storedFeed != null &&
-            OpdsAuthOrigin.sameOrigin(storedFeed.url, secureUrl) &&
-            !storedFeed.username.isNullOrBlank() &&
-            !storedFeed.password.isNullOrBlank()
-        ) {
-            requestBuilder.header(
-                "Authorization",
-                Credentials.basic(storedFeed.username, storedFeed.password)
-            )
+        val request = Request.Builder().url(secureUrl)
+        if (session == null) {
+            // Compatibility path is anonymous only. No URL credential lookup or shared cookies.
+            return client.newCall(request.build()).execute()
         }
-
-        return withContext(Dispatchers.IO) {
-            clientForSession(session).newCall(requestBuilder.build()).execute()
+        return lifecycle.dispatch(session, secureUrl) { pair ->
+            val sameOrigin = OpdsAuthOrigin.sameOrigin(session.catalogUrl, secureUrl)
+            if (pair != null && sameOrigin) {
+                request.header("Authorization", Credentials.basic(pair.username, pair.password))
+            }
+            // An initially foreign request cannot re-enter the catalog with cached auth cookies.
+            clientForSession(if (sameOrigin) session else null).newCall(request.build()).execute()
         }
     }
 
@@ -212,19 +150,18 @@ class OpdsRepository @Inject constructor(
                 executeRequest(cleanUrl, session)
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (e: Exception) {
-                return@withContext Failure(if (session == null) e else Exception("Catalog unavailable; reopen it or check credentials"))
+            } catch (_: Exception) {
+                return@withContext Failure(Exception("Catalog unavailable; unlock the device, migrate saved credentials if needed, or reopen the catalog"))
             }
 
             if (!response.isSuccessful) {
-                val message = if (session == null) "HTTP ${response.code}: ${response.message}" else "HTTP ${response.code}"
+                val message = "HTTP ${response.code}"
                 Timber.e(message)
                 response.close()
                 return@withContext Failure(Exception(message))
             }
 
-            val bodyBytes = response.body?.bytes()
-            response.close()
+            val bodyBytes = response.use { it.body?.bytes() }
 
             val nonNullBodyBytes = bodyBytes
                 ?: return@withContext Failure(Exception("Empty response"))
@@ -248,6 +185,8 @@ class OpdsRepository @Inject constructor(
             try {
                 val opds2 = OPDS2Parser.parse(safeBytes, absoluteUrl)
                 return@withContext Success(opds2)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 // Fall through to OPDS 1.x parsing.
             }
@@ -266,14 +205,15 @@ class OpdsRepository @Inject constructor(
 
                 val opds1 = OPDS1Parser.parse(cleanBytes, absoluteUrl)
                 return@withContext Success(opds1)
-            } catch (e: Exception) {
-                return@withContext Failure(Exception(if (session == null) "XML error: ${e.message}" else "Invalid OPDS response"))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return@withContext Failure(Exception("Invalid OPDS response"))
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (e: Exception) {
-            if (session == null) Timber.e(e, "Failed to parse OPDS feed")
-            return@withContext Failure(if (session == null) e else Exception("Catalog unavailable; reopen it or check credentials"))
+            return@withContext Failure(Exception(if (e is IllegalArgumentException) "Invalid URL or non-HTTPS OPDS endpoint" else "Catalog unavailable; unlock the device or reopen the catalog"))
         }
     }
 
@@ -285,47 +225,22 @@ class OpdsRepository @Inject constructor(
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             val secureDownloadUrl = normalizeHttpsUrl(downloadUrl)
-            val storedFeed = if (session == null) {
-                val feedUrlForConfig = originalFeedUrl?.let(::normalizeHttpsUrl) ?: secureDownloadUrl
-                findEffectiveFeed(feedUrlForConfig)
-            } else null
-            check(storedFeed?.credentialGeneration == null) { "Reopen the catalog using its saved identity" }
+            if (session == null && originalFeedUrl != null) normalizeHttpsUrl(originalFeedUrl)
+            val response = executeRequest(secureDownloadUrl, session)
 
-            val requestBuilder = Request.Builder().url(secureDownloadUrl)
-
-            if (session != null) {
-                scopedPair(session, secureDownloadUrl)?.let { pair ->
-                    requestBuilder.header("Authorization", Credentials.basic(pair.username, pair.password))
-                }
-            } else if (
-                storedFeed != null &&
-                OpdsAuthOrigin.sameOrigin(storedFeed.url, secureDownloadUrl) &&
-                !storedFeed.username.isNullOrBlank() &&
-                !storedFeed.password.isNullOrBlank()
-            ) {
-                requestBuilder.header(
-                    "Authorization",
-                    Credentials.basic(storedFeed.username, storedFeed.password)
-                )
-            }
-
-            val response = clientForSession(session).newCall(requestBuilder.build()).execute()
-
-            if (response.isSuccessful && response.body != null) {
-                response.body!!.byteStream().use { input ->
-                    FileOutputStream(destinationFile).use { output ->
-                        input.copyTo(output)
+            response.use {
+                val body = it.body
+                if (it.isSuccessful && body != null) {
+                    body.byteStream().use { input ->
+                        FileOutputStream(destinationFile).use { output -> input.copyTo(output) }
                     }
+                    return@withContext true
                 }
-                response.close()
-                return@withContext true
             }
-
-            response.close()
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (e: Exception) {
-            if (session == null) Timber.e(e, "Failed to download publication")
+        } catch (_: Exception) {
+            Timber.w("OPDS download unavailable")
         }
 
         return@withContext false
@@ -350,35 +265,42 @@ class OpdsRepository @Inject constructor(
         }
     }
 
-    suspend fun insertFeed(feed: OpdsEntity): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun saveCatalog(
+        existing: OpdsEntity?, title: String, url: String, action: CatalogCredentialAction,
+        username: String? = null, password: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val normalizedFeed = feed.copy(url = normalizeHttpsUrl(feed.url))
-            opdsDao.insertFeed(normalizedFeed)
+            val normalizedUrl = normalizeHttpsUrl(url)
+            val edit = when (action) {
+                CatalogCredentialAction.KEEP -> OpdsCredentialEdit.Keep
+                CatalogCredentialAction.REMOVE -> OpdsCredentialEdit.Remove
+                CatalogCredentialAction.REPLACE -> OpdsCredentialEdit.Replace(OpdsCredentialPair(
+                    requireNotNull(username), requireNotNull(password)))
+            }
+            if (existing == null) lifecycle.create(title, normalizedUrl, edit)
+            else lifecycle.update(OpdsCatalogSession(existing), title, normalizedUrl, edit)
             Result.success("Catalog has been saved")
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to save catalog")
-            Result.failure(e)
-        }
-    }
-
-    suspend fun updateFeed(feed: OpdsEntity): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val normalizedFeed = feed.copy(url = normalizeHttpsUrl(feed.url))
-            opdsDao.updateFeed(normalizedFeed)
-            Result.success("Catalog has been updated")
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to update catalog")
-            Result.failure(e)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Result.failure(OpdsLifecycleException())
         }
     }
 
     suspend fun deleteFeed(feed: OpdsEntity): Result<String> = withContext(Dispatchers.IO) {
         try {
-            opdsDao.deleteFeed(feed)
+            lifecycle.delete(OpdsCatalogSession(feed))
             Result.success("Catalog has been deleted")
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to delete catalog")
-            Result.failure(e)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Result.failure(OpdsLifecycleException())
         }
+    }
+
+    suspend fun migrateLegacyCredentials(): Result<OpdsMigrationReport> = withContext(Dispatchers.IO) {
+        try { Result.success(lifecycle.migrateAll()) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { Result.failure(OpdsLifecycleException()) }
     }
 }

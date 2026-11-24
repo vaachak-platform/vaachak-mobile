@@ -1,11 +1,9 @@
 package org.vaachak.reader.core.data.repository
 
-import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -14,7 +12,6 @@ import okhttp3.Request
 import okhttp3.Response
 import org.junit.Test
 import org.readium.r2.shared.util.Try
-import org.vaachak.reader.core.data.local.OpdsDao
 import org.vaachak.reader.core.domain.model.OpdsEntity
 import java.io.File
 import java.io.IOException
@@ -23,13 +20,10 @@ import java.io.IOException
 class OpdsScopedNetworkPolicyTest {
     private val row = OpdsEntity(id = 1, title = "Fixture", url = "https://catalog.example/opds",
         username = "fixture-user", password = "fixture-password")
-    private val dao = mockk<OpdsDao>()
+    private val harness = OpdsRepositoryHarness()
     private val session = OpdsCatalogSession(row)
 
-    private fun repository(): OpdsRepository {
-        every { dao.getAllFeeds() } returns flowOf(emptyList())
-        return OpdsRepository(dao).apply { setAbsoluteUrlResolverForTest { mockk(relaxed = true) } }
-    }
+    private fun repository(): OpdsRepository = harness.repository
 
     private fun interceptor(repository: OpdsRepository): Interceptor {
         // Existing tests use reflection for the private client factory; exercise the real policy.
@@ -71,7 +65,7 @@ class OpdsScopedNetworkPolicyTest {
 
     @Test fun scopedFeedAndDownloadPropagateCancellationRatherThanReturnAnonymousSuccess() = runTest {
         val repository = repository()
-        coEvery { dao.getFeedById(row.id) } throws CancellationException("fixture cancellation")
+        harness.rows.loadFailure = CancellationException("fixture cancellation")
         val client = mockk<OkHttpClient>()
         repository.setClientForTest(client)
         val file = File.createTempFile("opds-cancel-fixture", ".tmp")
@@ -86,7 +80,7 @@ class OpdsScopedNetworkPolicyTest {
 
     @Test fun scopedReadFailureDoesNotExposeBackendDiagnosticOrStartRequest() = runTest {
         val repository = repository()
-        coEvery { dao.getFeedById(row.id) } throws IllegalStateException("synthetic-sensitive-db-error")
+        harness.rows.loadFailure = IllegalStateException("synthetic-sensitive-db-error")
         val client = mockk<OkHttpClient>()
         repository.setClientForTest(client)
         val result = repository.parseFeed(row.url, session)

@@ -30,6 +30,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -48,6 +51,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,15 +61,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.vaachak.reader.core.domain.model.OpdsEntity
+import org.vaachak.reader.core.data.repository.CatalogCredentialAction
+import kotlinx.coroutines.launch
 import org.vaachak.reader.leisure.ui.testability.Tid
 import org.vaachak.reader.leisure.ui.testability.TidScreen
 import org.vaachak.reader.leisure.ui.testability.tid
@@ -82,6 +92,11 @@ fun CatalogManagerScreen(
     // Dialog State
     var showDialog by remember { mutableStateOf(false) }
     var editingCatalog by remember { mutableStateOf<OpdsEntity?>(null) }
+    var deletingCatalog by remember { mutableStateOf<OpdsEntity?>(null) }
+    var operationBusy by remember { mutableStateOf(false) }
+    var operationMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val legacyCount = catalogs.count { it.username != null || it.password != null }
 
     val containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.background
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
@@ -93,7 +108,8 @@ fun CatalogManagerScreen(
                 title = { Text("Manage Catalogs") },
                 navigationIcon = {
                     IconButton(
-                        onClick = onBack,
+                        onClick = { if (!operationBusy) onBack() },
+                        enabled = !operationBusy,
                         modifier = Modifier.tid(Tid.CatalogManager.back)
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -109,6 +125,7 @@ fun CatalogManagerScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
+                    if (operationBusy) return@FloatingActionButton
                     editingCatalog = null
                     showDialog = true
                 },
@@ -135,15 +152,37 @@ fun CatalogManagerScreen(
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
                 // Fix: explicit 'items' call resolving to OpdsEntity
+                item {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (legacyCount > 0) {
+                            Text("$legacyCount catalog(s) need credential migration. Unlock your device with its PIN, then migrate. Existing values are preserved if migration cannot finish.")
+                            Button(enabled = !operationBusy, onClick = {
+                                operationBusy = true
+                                operationMessage = null
+                                scope.launch {
+                                    try {
+                                        val result = viewModel.migrateLegacyCredentials()
+                                        operationMessage = result.fold(
+                                            onSuccess = { "Migrated ${it.migrated}; ${it.remaining} catalog(s) still need migration." },
+                                            onFailure = { "Migration unavailable. Unlock your device and retry." }
+                                        )
+                                    } finally { operationBusy = false }
+                                }
+                            }) { Text("Migrate saved credentials") }
+                        }
+                        operationMessage?.let { Text(it) }
+                    }
+                }
                 items(items = catalogs, key = { it.id }) { feed ->
                     CatalogManagerItem(
                         feed = feed,
                         isEink = isEink,
                         onEdit = {
+                            if (operationBusy) return@CatalogManagerItem
                             editingCatalog = feed
                             showDialog = true
                         },
-                        onDelete = { viewModel.deleteCatalog(feed) },
+                        onDelete = { if (!operationBusy) deletingCatalog = feed },
                         modifier = if (catalogs.first() == feed) Modifier.tid(Tid.CatalogManager.first) else Modifier
                     )
                     HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray)
@@ -151,17 +190,33 @@ fun CatalogManagerScreen(
             }
         }
 
+        deletingCatalog?.let { feed ->
+            AlertDialog(
+                onDismissRequest = { if (!operationBusy) deletingCatalog = null },
+                title = { Text("Delete catalog?") },
+                text = { Text("Remove this catalog and its saved credential reference. Downloaded books are not deleted.") },
+                properties = DialogProperties(dismissOnBackPress = !operationBusy, dismissOnClickOutside = !operationBusy),
+                confirmButton = {
+                    Button(enabled = !operationBusy, onClick = {
+                        operationBusy = true
+                        scope.launch {
+                            try {
+                                val result = viewModel.deleteCatalog(feed)
+                                operationMessage = if (result.isSuccess) "Catalog deleted." else "Delete unavailable. Refresh and retry."
+                                deletingCatalog = null
+                            } finally { operationBusy = false }
+                        }
+                    }) { Text("Delete") }
+                },
+                dismissButton = { TextButton(enabled = !operationBusy, onClick = { deletingCatalog = null }) { Text("Cancel") } }
+            )
+        }
         if (showDialog) {
             AddCatalogDialog(
                 existingCatalog = editingCatalog,
-                onDismiss = { showDialog = false },
-                onSave = { title, url, user, pass, insecure ->
-                    if (editingCatalog != null) {
-                        viewModel.updateCatalog(editingCatalog!!, title, url, user, pass)
-                    } else {
-                        viewModel.addCatalog(title, url, user, pass)
-                    }
-                    showDialog = false
+                onDismiss = { showDialog = false; editingCatalog = null },
+                onSave = { title, url, action, user, pass ->
+                    viewModel.saveCatalog(editingCatalog, title, url, action, user, pass)
                 }
             )
         }
@@ -180,7 +235,7 @@ fun CatalogManagerItem(
     ListItem(
         modifier = modifier.tid(Tid.CatalogManager.item(feed.id.toString())),
         headlineContent = { Text(feed.title, fontWeight = FontWeight.Bold) },
-        supportingContent = { Text(feed.url, style = MaterialTheme.typography.bodySmall) },
+        supportingContent = { Text(safeCatalogDisplayUrl(feed.url), style = MaterialTheme.typography.bodySmall) },
         colors = ListItemDefaults.colors(
             containerColor = if (isEink) Color.White else MaterialTheme.colorScheme.surface,
             headlineColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onSurface
@@ -208,70 +263,115 @@ fun CatalogManagerItem(
 fun AddCatalogDialog(
     existingCatalog: OpdsEntity?,
     onDismiss: () -> Unit,
-    onSave: (String, String, String?, String?, Boolean) -> Unit
+    onSave: suspend (String, String, CatalogCredentialAction, String?, String?) -> Result<String>
 ) {
     var title by remember { mutableStateOf(existingCatalog?.title ?: "") }
-    var url by remember { mutableStateOf(existingCatalog?.url ?: "") }
-    var username by remember { mutableStateOf(existingCatalog?.username ?: "") }
-    var password by remember { mutableStateOf(existingCatalog?.password ?: "") }
+    var url by remember { mutableStateOf(existingCatalog?.url?.let(::safeCatalogDisplayUrl) ?: "") }
+    // Never prefill or rememberSaveable a stored username/password.
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var action by remember { mutableStateOf(if (existingCatalog == null) CatalogCredentialAction.REMOVE else CatalogCredentialAction.KEEP) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val hasLegacy = existingCatalog?.let { it.username != null || it.password != null } == true
+    val hasCredentials = hasLegacy || existingCatalog?.credentialGeneration != null
+    val options = if (existingCatalog == null) listOf(CatalogCredentialAction.REMOVE, CatalogCredentialAction.REPLACE)
+        else CatalogCredentialAction.entries
+
+    fun submit() {
+        if (busy) return
+        busy = true
+        errorMessage = null
+        scope.launch {
+            try {
+                val result = onSave(title, url, action,
+                    username.takeIf { action == CatalogCredentialAction.REPLACE },
+                    password.takeIf { action == CatalogCredentialAction.REPLACE })
+                if (result.isSuccess) {
+                    username = ""
+                    password = ""
+                    onDismiss()
+                } else {
+                    errorMessage = "Save unavailable. Check HTTPS URL and credentials, configure or unlock your device PIN, or refresh and retry. Saved credentials were not silently removed."
+                }
+            } finally { busy = false }
+        }
+    }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!busy) onDismiss() },
+        properties = DialogProperties(dismissOnBackPress = !busy, dismissOnClickOutside = !busy),
         title = { Text(if (existingCatalog == null) "Add Catalog" else "Edit Catalog") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Name") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .tid(Tid.CatalogManager.dialogTitle)
-                )
-                OutlinedTextField(
-                    value = url,
-                    onValueChange = { url = it },
-                    label = { Text("URL (OPDS)") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .tid(Tid.CatalogManager.dialogUrl)
-                )
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text("Username (Optional)") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .tid(Tid.CatalogManager.dialogUser)
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password (Optional)") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .tid(Tid.CatalogManager.dialogPass)
-                )
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = title, onValueChange = { title = it }, enabled = !busy,
+                    label = { Text("Name") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogTitle))
+                OutlinedTextField(value = url, onValueChange = { url = it }, enabled = !busy,
+                    label = { Text("URL (OPDS)") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogUrl))
+                Text(when {
+                    hasLegacy -> "Legacy credentials saved; migrate or replace after device authentication."
+                    hasCredentials -> "Encrypted credentials saved; they may be locked or unavailable."
+                    else -> "No credentials saved."
+                })
+                options.forEach { option ->
+                    val label = when (option) {
+                        CatalogCredentialAction.KEEP -> "Keep saved credentials"
+                        CatalogCredentialAction.REPLACE -> "Replace credentials"
+                        CatalogCredentialAction.REMOVE -> if (hasCredentials) "Remove saved credentials" else "No authentication"
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = action == option, enabled = !busy, modifier = Modifier.tid("catalog_credential_${option.name.lowercase()}"), onClick = {
+                            action = option
+                            if (option != CatalogCredentialAction.REPLACE) { username = ""; password = "" }
+                            errorMessage = null
+                        })
+                        Text(label)
+                    }
+                }
+                if (action == CatalogCredentialAction.REPLACE) {
+                    OutlinedTextField(value = username, onValueChange = { username = it }, enabled = !busy,
+                        label = { Text("Username") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogUser))
+                    OutlinedTextField(value = password, onValueChange = { password = it }, enabled = !busy,
+                        label = { Text("Password") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth().tid(Tid.CatalogManager.dialogPass))
+                }
+                if (action == CatalogCredentialAction.KEEP && hasCredentials) Text("Changing the server origin requires Replace or Remove.")
+                errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
-            Button(
-                onClick = { onSave(title, url, username, password, false) },
-                enabled = title.isNotBlank() && url.isNotBlank(),
-                modifier = Modifier.tid(Tid.CatalogManager.dialogSave)
-            ) {
-                Text("Save")
-            }
+            Button(onClick = {
+                if (action == CatalogCredentialAction.REMOVE && hasCredentials) confirmRemove = true else submit()
+            }, enabled = !busy && title.isNotBlank() && url.isNotBlank() &&
+                (action != CatalogCredentialAction.REPLACE || (username.isNotBlank() && password.isNotBlank())),
+                modifier = Modifier.tid(Tid.CatalogManager.dialogSave)) { Text(if (busy) "Saving…" else "Save") }
         },
         dismissButton = {
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.tid(Tid.CatalogManager.dialogCancel)
-            ) { Text("Cancel") }
+            TextButton(onClick = onDismiss, enabled = !busy,
+                modifier = Modifier.tid(Tid.CatalogManager.dialogCancel)) { Text("Cancel") }
         }
     )
+    if (confirmRemove) {
+        AlertDialog(onDismissRequest = { confirmRemove = false }, title = { Text("Remove credentials?") },
+            text = { Text("The catalog will no longer use its saved credentials. You can enter a replacement later.") },
+            confirmButton = { Button(onClick = { confirmRemove = false; submit() }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } })
+    }
+}
+
+/** Historical URLs might contain user-info. Never prefill or display those credentials. */
+internal fun safeCatalogDisplayUrl(url: String): String {
+    val scheme = url.indexOf("://")
+    if (scheme < 0) return url
+    val start = scheme + 3
+    val end = url.indexOfAny(charArrayOf('/', '?', '#'), start).let { if (it < 0) url.length else it }
+    val at = url.lastIndexOf('@', end - 1)
+    return if (at >= start) url.substring(0, start) + url.substring(at + 1) else url
 }
