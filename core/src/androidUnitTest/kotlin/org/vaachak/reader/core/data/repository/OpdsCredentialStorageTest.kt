@@ -7,6 +7,8 @@ internal class FakeOpdsSecretBackend : OpdsSecretBackend {
     var reads = 0
     var writes = 0
     var clears = 0
+    var durabilityChecks = 0
+    var rejectDurability = false
     var rejectRead = false
     var rejectWrite = false
     var failAfterWrite = false
@@ -25,6 +27,11 @@ internal class FakeOpdsSecretBackend : OpdsSecretBackend {
         values[id] = if (corruptWrite) "corrupt" else value
         if (failAfterWrite) error("synthetic-sensitive-backend-error")
         if (cancelAfterWrite) throw java.util.concurrent.CancellationException("simulated cancellation")
+    }
+
+    override fun ensureDurable(id: String) {
+        durabilityChecks++
+        check(!rejectDurability && id in values) { "synthetic-sensitive-backend-error" }
     }
 
     override fun clear(id: String) {
@@ -91,6 +98,19 @@ class OpdsCredentialStorageTest {
         storage.writeVerified(ref, origin, pair)
         storage.writeVerified(ref, origin, pair)
         check(backend.writes == 1)
+        check(backend.durabilityChecks == 1)
+    }
+
+    @Test fun interruptedRenameRetryRequiresDurabilityBeforeSuccess() {
+        backend.failAfterWrite = true
+        expectCredentialFailure(OpdsCredentialFailure.UNAVAILABLE) { storage.writeVerified(ref, origin, pair) }
+        backend.failAfterWrite = false
+        backend.rejectDurability = true
+        expectCredentialFailure(OpdsCredentialFailure.UNAVAILABLE) { storage.writeVerified(ref, origin, pair) }
+        backend.rejectDurability = false
+        storage.writeVerified(ref, origin, pair)
+        check(backend.durabilityChecks == 2 && backend.writes == 1)
+        check(storage.readForRequest(42, ref, origin, origin)?.password == pair.password)
     }
 
     @Test fun generationConflictPreservesExistingValue() {

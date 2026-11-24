@@ -43,7 +43,10 @@ internal class OpdsCredentialStorageException(val reason: OpdsCredentialFailure)
 internal interface OpdsSecretBackend {
     /** Empty is the backend's explicit not-present result. An inaccessible file must throw. */
     fun read(id: String): String
+    /** Return only after the encrypted file and directory entry are synced. */
     fun write(id: String, value: String)
+    /** Sync a pre-existing generation without creating or rewriting it. */
+    fun ensureDurable(id: String)
     fun clear(id: String)
 }
 
@@ -72,7 +75,8 @@ internal class OpdsCredentialStorage(private val backend: OpdsSecretBackend) {
         when {
             existing.isEmpty() -> backendCall { backend.write(id, payload) }
             existing != payload -> fail(OpdsCredentialFailure.GENERATION_CONFLICT)
-            // A retry after interruption may find the identical verified payload.
+            // A prior rename may have succeeded before directory sync failed.
+            else -> backendCall { backend.ensureDurable(id) }
         }
         val readBack = backendCall { backend.read(id) }
         if (readBack != payload) fail(OpdsCredentialFailure.VERIFY_FAILED)

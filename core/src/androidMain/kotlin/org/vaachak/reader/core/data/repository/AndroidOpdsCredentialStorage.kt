@@ -9,6 +9,7 @@ internal class AndroidOpdsCredentialStorage @Inject constructor(secrets: Private
     val storage = OpdsCredentialStorage(object : OpdsSecretBackend {
         override fun read(id: String): String = secrets.read(id)
         override fun write(id: String, value: String) = secrets.write(id, value)
+        override fun ensureDurable(id: String) = secrets.ensureDurable(id)
         override fun clear(id: String) = secrets.clear(id)
     })
 }
