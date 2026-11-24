@@ -49,6 +49,7 @@ import org.readium.r2.shared.util.Url
 import org.readium.r2.shared.util.mediatype.MediaType
 import org.vaachak.reader.core.data.repository.GutendexRepository
 import org.vaachak.reader.core.data.repository.LibraryRepository
+import org.vaachak.reader.core.data.repository.OpdsCatalogSession
 import org.vaachak.reader.core.data.repository.OpdsRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.domain.model.OpdsEntity
@@ -108,6 +109,7 @@ class CatalogViewModel @Inject constructor(
 
     private val historyStack = ArrayDeque<Pair<String, String>>()
     private var currentContextUrl: String? = null
+    private var catalogSession: OpdsCatalogSession? = null
     private var isGutendexSession = false
 
     init {
@@ -120,7 +122,12 @@ class CatalogViewModel @Inject constructor(
     // --- NAVIGATION LOGIC ---
 
     private fun loadServerList() {
+        catalogSession = null
+        currentContextUrl = null
+        isGutendexSession = false
+        _feedItems.value = emptyList()
         viewModelScope.launch {
+            if (catalogSession != null) return@launch
             _isLoading.value = true
             _screenTitle.value = "Catalogs"
             historyStack.clear()
@@ -128,6 +135,7 @@ class CatalogViewModel @Inject constructor(
             currentContextUrl = null
 
             val feeds = opdsRepository.allFeeds.first()
+            if (catalogSession != null) return@launch
             _feedItems.value = feeds.map {
                 CatalogItem.Server(it.title, it.url, it)
             }
@@ -136,6 +144,8 @@ class CatalogViewModel @Inject constructor(
     }
 
     fun handleItemClick(item: CatalogItem) {
+        // A queued click from a previous catalog must never use a newer catalog's credentials.
+        if (_feedItems.value.none { it === item }) return
         when (item) {
             is CatalogItem.Server -> openCatalog(item.entity)
             is CatalogItem.Folder -> {
@@ -161,7 +171,9 @@ class CatalogViewModel @Inject constructor(
         historyStack.clear()
         _feedItems.value = emptyList()
         currentContextUrl = feed.url
+        catalogSession = OpdsCatalogSession(feed)
         _screenTitle.value = feed.title
+        _isLoading.value = false
 
         isGutendexSession = feed.url.contains("gutenberg.org") ||
                 feed.url.contains("gutendex") ||
@@ -175,6 +187,9 @@ class CatalogViewModel @Inject constructor(
     }
 
     fun handlePaginationClick(url: String) {
+        if (_feedItems.value.filterIsInstance<CatalogItem.Pagination>().none {
+            it.nextUrl == url || it.prevUrl == url
+        }) return
         if (isGutendexSession) {
             loadGutendexFeed(url, null, isPagination = true)
         } else {
@@ -234,7 +249,9 @@ class CatalogViewModel @Inject constructor(
     // --- GUTENDEX LOGIC ---
 
     private fun loadGutendexRoot(addToHistory: Boolean = true) {
+        val session = catalogSession ?: return
         viewModelScope.launch {
+            if (catalogSession !== session) return@launch
             if (addToHistory) {
                 historyStack.clear()
                 historyStack.addLast("" to "Home")
@@ -259,7 +276,9 @@ class CatalogViewModel @Inject constructor(
     }
 
     private fun loadGutendexFeed(url: String?, title: String?, isPagination: Boolean = false, addToHistory: Boolean = true) {
+        val session = catalogSession ?: return
         viewModelScope.launch {
+            if (catalogSession !== session) return@launch
             _isLoading.value = true
 
             val actualUrl = url ?: currentContextUrl ?: "https://gutendex.com/books"
@@ -274,7 +293,9 @@ class CatalogViewModel @Inject constructor(
             updateBreadcrumbs()
 
             val localBookMap = libraryRepository.getLocalBookMap()
+            if (catalogSession !== session) return@launch
             val result = gutendexRepository.fetchBooks(actualUrl)
+            if (catalogSession !== session) return@launch
 
             result.onSuccess { response ->
                 val items = mutableListOf<CatalogItem>()
@@ -320,19 +341,21 @@ class CatalogViewModel @Inject constructor(
                 if (addToHistory && !isPagination) rollbackBreadcrumb()
                 _uiEvent.send(CatalogUiEvent.ShowSnackbar("Failed to load: ${it.message}"))
             }
-            _isLoading.value = false
+            if (catalogSession === session) _isLoading.value = false
         }
     }
 
     // --- OPDS LOGIC ---
 
     private fun loadFeed(rawUrl: String, breadcrumbTitle: String? = null, addToHistory: Boolean = true) {
+        val session = catalogSession ?: return
         val finalUrl = try {
             val base = currentContextUrl ?: rawUrl
             if (rawUrl.startsWith("http")) rawUrl else URL(URL(base), rawUrl).toString()
         } catch (e: Exception) { rawUrl }
 
         viewModelScope.launch {
+            if (catalogSession !== session) return@launch
             _isLoading.value = true
 
             if (addToHistory) {
@@ -343,7 +366,10 @@ class CatalogViewModel @Inject constructor(
 
             val localBookMap = libraryRepository.getLocalBookMap()
 
-            when (val result = opdsRepository.parseFeed(finalUrl)) {
+            if (catalogSession !== session) return@launch
+            val result = opdsRepository.parseFeed(finalUrl, session)
+            if (catalogSession !== session) return@launch
+            when (result) {
                 is Try.Success -> {
                     val parseData = result.value
                     currentContextUrl = finalUrl
@@ -363,7 +389,7 @@ class CatalogViewModel @Inject constructor(
                     _uiEvent.send(CatalogUiEvent.ShowSnackbar("Error: ${result.value.message}"))
                 }
             }
-            _isLoading.value = false
+            if (catalogSession === session) _isLoading.value = false
         }
     }
 
@@ -397,7 +423,11 @@ class CatalogViewModel @Inject constructor(
     // --- DOWNLOADER & CRUD ---
 
     fun downloadBook(publication: Publication) {
+        if (_feedItems.value.filterIsInstance<CatalogItem.Book>().none { it.publication === publication }) return
+        val session = catalogSession ?: return
+        val gutendex = isGutendexSession
         viewModelScope.launch {
+            if (catalogSession !== session) return@launch
             val title = publication.metadata.title ?: "Unknown"
             if (libraryRepository.isBookDuplicate(title)) {
                 _uiEvent.send(CatalogUiEvent.ShowSnackbar("Duplicate: '$title' exists."))
@@ -409,6 +439,7 @@ class CatalogViewModel @Inject constructor(
                 return@launch
             }
 
+            if (catalogSession !== session) return@launch
             _isLoading.value = true
             val ext = "epub"
             val safeTitle = title.replace("[^a-zA-Z0-9.-]".toRegex(), "_").take(50)
@@ -419,31 +450,32 @@ class CatalogViewModel @Inject constructor(
             val coverFile = File(application.filesDir, "${safeTitle}_$uniqueSuffix.jpg")
 
             val downloadUrl = link.href.toString()
-            val success = if (isGutendexSession) {
+            val success = if (gutendex) {
                 gutendexRepository.downloadBook(downloadUrl, bookFile)
             } else {
-                opdsRepository.downloadPublication(downloadUrl, bookFile, currentContextUrl)
+                opdsRepository.downloadPublication(downloadUrl, bookFile, session.catalogUrl, session)
             }
 
             if (success) {
                 var coverUrl = publication.images.firstOrNull()?.href?.toString()
-                if (coverUrl == null && !isGutendexSession) {
+                if (coverUrl == null && !gutendex) {
                     coverUrl = publication.links.firstOrNull { it.mediaType?.toString()?.startsWith("image/") == true }?.href?.toString()
                 }
 
                 var savedCover: File? = null
                 if (coverUrl != null) {
-                    if (isGutendexSession) {
+                    if (gutendex) {
                         if (gutendexRepository.downloadBook(coverUrl, coverFile)) savedCover = coverFile
                     } else {
-                        if (opdsRepository.downloadPublication(coverUrl, coverFile, currentContextUrl)) savedCover = coverFile
+                        if (opdsRepository.downloadPublication(coverUrl, coverFile, session.catalogUrl, session)) savedCover = coverFile
                     }
                 }
                 libraryRepository.addDownloadedBook(bookFile, title, publication.metadata.authors.firstOrNull()?.name?.toString() ?: "Unknown", savedCover)
                 _uiEvent.send(CatalogUiEvent.ShowSnackbar("Downloaded '$title'", "View Library"))
 
+                if (catalogSession !== session) return@launch
                 val currentBreadcrumb = breadcrumbs.value.lastOrNull()
-                if (isGutendexSession) {
+                if (gutendex) {
                     loadGutendexFeed(currentBreadcrumb?.first ?: currentContextUrl, currentBreadcrumb?.second, isPagination = false, addToHistory = false)
                 } else {
                     loadFeed(currentContextUrl ?: "", null, addToHistory = false)
@@ -456,7 +488,7 @@ class CatalogViewModel @Inject constructor(
                         Timber.w("Failed to delete file: ${bookFile.absolutePath}")
                     }}
             }
-            _isLoading.value = false
+            if (catalogSession === session) _isLoading.value = false
         }
     }
 
