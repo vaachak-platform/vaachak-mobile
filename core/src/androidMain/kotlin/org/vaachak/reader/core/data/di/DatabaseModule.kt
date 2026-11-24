@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.room.migration.Migration
+import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.execSQL
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import dagger.Module
 import dagger.Provides
@@ -15,6 +17,8 @@ import org.vaachak.reader.core.data.local.AppDatabase
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
 import org.vaachak.reader.core.data.local.OpdsDao
+import org.vaachak.reader.core.data.local.OPDS_MIGRATION_2_3_SQL
+import org.vaachak.reader.core.data.local.OPDS_MIGRATION_3_4
 import org.vaachak.reader.core.data.local.ProfileDao
 import org.vaachak.reader.core.data.local.SyncVaultDao
 import org.vaachak.reader.core.data.local.createDataStore
@@ -27,29 +31,11 @@ import javax.inject.Singleton
 
 private val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL(
-            """
-            CREATE TABLE IF NOT EXISTS opds_feeds_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                title TEXT NOT NULL,
-                url TEXT NOT NULL,
-                username TEXT,
-                password TEXT,
-                isPredefined INTEGER NOT NULL DEFAULT 0
-            )
-            """.trimIndent()
-        )
+        OPDS_MIGRATION_2_3_SQL.forEach { db.execSQL(it) }
+    }
 
-        db.execSQL(
-            """
-            INSERT INTO opds_feeds_new (id, title, url, username, password, isPredefined)
-            SELECT id, title, url, username, password, isPredefined
-            FROM opds_feeds
-            """.trimIndent()
-        )
-
-        db.execSQL("DROP TABLE opds_feeds")
-        db.execSQL("ALTER TABLE opds_feeds_new RENAME TO opds_feeds")
+    override fun migrate(connection: SQLiteConnection) {
+        OPDS_MIGRATION_2_3_SQL.forEach { connection.execSQL(it) }
     }
 }
 
@@ -61,7 +47,7 @@ object DatabaseModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
         return getDatabaseBuilder(context)
-            .addMigrations(MIGRATION_2_3)
+            .addMigrations(MIGRATION_2_3, OPDS_MIGRATION_3_4)
             .setDriver(BundledSQLiteDriver())
             .build()
     }

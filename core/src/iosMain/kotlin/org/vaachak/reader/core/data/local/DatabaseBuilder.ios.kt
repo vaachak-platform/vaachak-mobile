@@ -24,6 +24,7 @@ package org.vaachak.reader.core.data.local
 
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.Foundation.NSDocumentDirectory
 import platform.Foundation.NSFileManager
@@ -43,5 +44,6 @@ fun getDatabaseBuilder(): RoomDatabase.Builder<AppDatabase> {
 
     return Room.databaseBuilder<AppDatabase>(
         name = dbFilePath
-    )
+    ).addMigrations(OPDS_DRIVER_MIGRATION_2_3, OPDS_MIGRATION_3_4)
+        .setDriver(BundledSQLiteDriver())
 }
