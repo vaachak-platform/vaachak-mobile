@@ -257,4 +257,27 @@ class ComicShelfStoreTest {
         override fun update(uri: Uri, values: ContentValues?, selection: String?,
             selectionArgs: Array<out String>?): Int = 0
     }
+
+    @Test fun blankLegacyFormatAndFingerprintFallbackToSafeDefaults() {
+        seed(vault, record("missing-hash", "Old CBZ", "content://previous/cover.cbz", 2, 1)
+            .put("format", "").put("sha256", ""))
+        val item = store.list(vault).single()
+        assertEquals("CBZ", item.format)
+        assertEquals(null, item.sha256)
+        assertEquals(0L, item.lastOpenedAt)
+        store.remove(vault, item.id)
+        assertTrue(store.list(vault).isEmpty())
+    }
+
+    @Test fun readingCbrFromOutsidePrivateComicsRootIsRejected() {
+        val outside = File.createTempFile("external-user-comic", ".cbr", context.cacheDir)
+        try {
+            val comic = ComicShelfStore.Comic("cbr", "External", Uri.fromFile(outside).toString(),
+                1, 0, "CBR")
+            assertThrows(IOException::class.java) { store.pageNames(comic) }
+            assertThrows(IOException::class.java) { store.readPage(comic, "1.jpg") }
+        } finally {
+            assertTrue(outside.delete())
+        }
+    }
 }

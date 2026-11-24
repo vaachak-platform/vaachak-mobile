@@ -103,4 +103,66 @@ class SafeCbzArchiveTest {
         val archive = cbz("__MACOSX/._1.jpg" to byteArrayOf(1), "images/1.JPG" to byteArrayOf(2))
         assertEquals(listOf("images/1.JPG"), SafeCbzArchive.inspect(ByteArrayInputStream(archive)).pages)
     }
+
+    @Test fun directoriesAndHiddenEntriesDoNotBecomePages() {
+        val archive = cbz(
+            "images/" to byteArrayOf(),
+            "__MACOSX/cover.jpg" to byteArrayOf(9),
+            "images/.hidden.png" to byteArrayOf(8),
+            "images/page.gif" to byteArrayOf(7),
+            "notes.txt" to byteArrayOf(6),
+            "images/0001.jpeg" to byteArrayOf(1, 2),
+            "images/0002.PNG" to byteArrayOf(3)
+        )
+        val indexed = SafeCbzArchive.inspect(ByteArrayInputStream(archive))
+        assertEquals(listOf("images/0001.jpeg", "images/0002.PNG"), indexed.pages)
+        assertEquals(3L, indexed.totalImageBytes)
+        assertArrayEquals(byteArrayOf(3), SafeCbzArchive.readPage(ByteArrayInputStream(archive), "images/0002.PNG"))
+    }
+
+    @Test fun rejectEmptyImageAndPathValidationBoundaries() {
+        assertThrows(SafeCbzArchive.UnsafeArchive::class.java) {
+            SafeCbzArchive.inspect(ByteArrayInputStream(cbz("page.jpg" to byteArrayOf())))
+        }
+        for (bad in listOf(
+            "", "/", "a/../escape.jpg", "a/./image.jpg", "a//image.jpg",
+            "folder/image:1.png", "a/\\image.jpg", "a/\u0001.jpg", 
+            "x".repeat(513), "x/".repeat(25) + "page.jpg"
+        )) {
+            assertThrows("Expected unsafe path: $bad", SafeCbzArchive.UnsafeArchive::class.java) {
+                SafeCbzArchive.validateEntryName(bad)
+            }
+        }
+        assertEquals("valid/path/", SafeCbzArchive.validateEntryName("valid/path/"))
+    }
+
+    @Test fun orderingHandlesLongNumericRunsWithoutOverflow() {
+        assertTrue(SafeCbzArchive.compareNatural("issue2.jpg", "issue10.jpg") < 0)
+        assertTrue(SafeCbzArchive.compareNatural(
+            "page00000000000000000000002.jpg", "page00000000000000000000010.jpg") < 0)
+        assertEquals(0, SafeCbzArchive.compareNatural("a.JPG", "A.jpg"))
+        assertTrue(SafeCbzArchive.compareNatural("page.jpg", "page2.jpg") < 0)
+    }
+
+    @Test fun incompressiblePageCanBeReadWithoutTriggeringBombDetection() {
+        val page = kotlin.random.Random(72).nextBytes(ByteArray(1_250_000))
+        val archive = cbz("chapter/0001.webp" to page)
+        assertTrue(archive.size > 1_000_000)
+        assertEquals(page.size.toLong(), SafeCbzArchive.inspect(ByteArrayInputStream(archive)).totalImageBytes)
+        assertArrayEquals(page, SafeCbzArchive.readPage(ByteArrayInputStream(archive), "chapter/0001.webp"))
+    }
+
+    @Test fun rejectMoreThanFiveThousandImagePages() {
+        val stream = ByteArrayOutputStream()
+        ZipOutputStream(stream).use { zip ->
+            repeat(5_001) { i ->
+                zip.putNextEntry(ZipEntry("pages/$i.jpg"))
+                zip.write(byteArrayOf(1))
+                zip.closeEntry()
+            }
+        }
+        assertThrows(SafeCbzArchive.UnsafeArchive::class.java) {
+            SafeCbzArchive.inspect(ByteArrayInputStream(stream.toByteArray()))
+        }
+    }
 }
