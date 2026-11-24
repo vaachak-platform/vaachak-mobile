@@ -192,7 +192,10 @@ fun ComicReaderScreen(
         return
     }
     ComicReader(
-        comic = comic, store = store, preferences = preferences,
+        comic = comic,
+        pageNames = { store.pageNames(comic) },
+        pageBytes = { page -> store.readPage(comic, page) },
+        preferences = preferences,
         onBack = onBack,
         onPageChange = { page ->
             scope.launch { withContext(AppCoroutineConfig.io) { store.setPage(vaultId, comic.id, page) } }
@@ -225,21 +228,8 @@ internal fun ComicShelfContent(
         query = ""
     }
 
-    val readingComics = comics.filter { it.lastOpenedAt > 0L || it.lastPage > 0 }
-        .asReversed().sortedByDescending { it.lastOpenedAt }
-    val visible = if (selectedTab == 0) {
-        readingComics
-    } else {
-        comics.filter { it.title.contains(query, ignoreCase = true) }.let { matches ->
-            when (sort) {
-                "Title" -> matches.sortedBy { it.title.lowercase() }
-                "Progress" -> matches.sortedByDescending {
-                    (it.lastPage + 1).toFloat() / it.pageCount.coerceAtLeast(1)
-                }
-                else -> matches.asReversed().sortedByDescending { it.lastOpenedAt }
-            }
-        }
-    }
+    val readingComics = ComicShelfFiltering.recent(comics)
+    val visible = ComicShelfFiltering.visible(comics, selectedTab, query, sort)
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
     Column(modifier.fillMaxSize()) {
@@ -501,9 +491,10 @@ private tailrec fun Context.findComicActivity(): Activity? = when (this) {
  * Fit Page retains the entire artwork; Fill Screen is optional because it necessarily crops.
  */
 @Composable
-private fun ComicReader(
+internal fun ComicReader(
     comic: ComicShelfStore.Comic,
-    store: ComicShelfStore,
+    pageNames: () -> List<String>,
+    pageBytes: (String) -> ByteArray,
     preferences: ComicPreferences,
     onBack: () -> Unit,
     onPageChange: (Int) -> Unit,
@@ -530,9 +521,15 @@ private fun ComicReader(
     BackHandler(onBack = onBack)
 
     LaunchedEffect(comic.id) {
-        val result = runCatching { withContext(AppCoroutineConfig.io) { store.pageNames(comic) } }
-        result.onSuccess { pages = it; index = index.coerceIn(0, it.lastIndex) }
-            .onFailure { message = it.message ?: "Comic cannot be opened; please import again" }
+        val result = runCatching { withContext(AppCoroutineConfig.io) { pageNames() } }
+        result.onSuccess { loaded ->
+            if (loaded.isEmpty()) {
+                message = "No supported comic images were found"
+            } else {
+                pages = loaded
+                index = index.coerceIn(0, loaded.lastIndex)
+            }
+        }.onFailure { message = it.message ?: "Comic cannot be opened; please import again" }
     }
     LaunchedEffect(comic.id, index, pages, vertical) {
         if (pages.isNotEmpty() && !vertical) {
@@ -540,7 +537,7 @@ private fun ComicReader(
             message = null
             val page = pages[index.coerceIn(0, pages.lastIndex)]
             val result = runCatching {
-                withContext(AppCoroutineConfig.io) { decodeBoundedBitmap(store.readPage(comic, page), 2048) }
+                withContext(AppCoroutineConfig.io) { decodeBoundedBitmap(pageBytes(page), 2048) }
             }
             result.onSuccess { bitmap = it }
                 .onFailure { message = it.message ?: "Comic page could not be decoded" }
@@ -572,7 +569,7 @@ private fun ComicReader(
             }
             LazyColumn(state = scroll, modifier = Modifier.fillMaxSize()) {
                 itemsIndexed(pages) { pageIndex, name ->
-                    VerticalComicPage(comic, store, name, pageIndex,
+                    VerticalComicPage(comic.id, pageBytes, name, pageIndex,
                         onToggleChrome = { chromeVisible = !chromeVisible })
                 }
             }
@@ -606,8 +603,7 @@ private fun ComicReader(
                 vertical = vertical,
                 modeMenu = modeMenu,
                 onBack = onBack,
-                topModifier = Modifier.align(Alignment.TopCenter),
-                bottomModifier = Modifier.align(Alignment.BottomCenter),
+                modifier = Modifier.fillMaxSize(),
                 onModeMenuChange = { modeMenu = it },
                 onReadingDirection = { rightToLeft ->
                     vertical = false
@@ -625,15 +621,14 @@ private fun ComicReader(
 
 /** Immersive overlay chrome; pages and gestures stay in the separate reader canvas. */
 @Composable
-private fun ComicReaderChrome(
+internal fun ComicReaderChrome(
     comic: ComicShelfStore.Comic,
     index: Int,
     pageCount: Int,
     vertical: Boolean,
     modeMenu: Boolean,
     onBack: () -> Unit,
-    topModifier: Modifier,
-    bottomModifier: Modifier,
+    modifier: Modifier = Modifier,
     onModeMenuChange: (Boolean) -> Unit,
     onReadingDirection: (Boolean) -> Unit,
     onVertical: () -> Unit,
@@ -641,7 +636,8 @@ private fun ComicReaderChrome(
     onPrevious: () -> Unit,
     onNext: () -> Unit
 ) {
-            Surface(modifier = topModifier.fillMaxWidth(),
+    Box(modifier) {
+            Surface(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.91f)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically) {
@@ -682,24 +678,27 @@ private fun ComicReaderChrome(
                     }
                 }
             }
-            Surface(modifier = bottomModifier.fillMaxWidth(),
+            Surface(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.91f)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween) {
                     IconButton(onClick = onPrevious,
-                        enabled = pageCount > 0 && !vertical) {
-                        Icon(Icons.Default.ArrowBackIosNew, contentDescription = "Previous comic page")
+                        enabled = pageCount > 0 && !vertical,
+                        modifier = Modifier.semantics { contentDescription = "Previous comic page" }) {
+                        Icon(Icons.Default.ArrowBackIosNew, contentDescription = null)
                     }
                     Text(if (pageCount == 0) "Loading…" else "${index + 1} / $pageCount",
                         style = MaterialTheme.typography.labelLarge)
                     IconButton(onClick = onNext,
-                        enabled = pageCount > 0 && !vertical) {
+                        enabled = pageCount > 0 && !vertical,
+                        modifier = Modifier.semantics { contentDescription = "Next comic page" }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowForwardIos,
-                            contentDescription = "Next comic page")
+                            contentDescription = null)
                     }
                 }
             }
+    }
 }
 
 /**
@@ -792,24 +791,24 @@ internal fun ZoomableComicPage(
 
 @Composable
 private fun VerticalComicPage(
-    comic: ComicShelfStore.Comic,
-    store: ComicShelfStore,
+    comicId: String,
+    pageBytes: (String) -> ByteArray,
     name: String,
     index: Int,
     onToggleChrome: () -> Unit
 ) {
-    var bitmap by remember(comic.id, name) { mutableStateOf<Bitmap?>(null) }
-    var error by remember(comic.id, name) { mutableStateOf<String?>(null) }
-    LaunchedEffect(comic.id, name) {
+    var bitmap by remember(comicId, name) { mutableStateOf<Bitmap?>(null) }
+    var error by remember(comicId, name) { mutableStateOf<String?>(null) }
+    LaunchedEffect(comicId, name) {
         runCatching {
-            withContext(AppCoroutineConfig.io) { decodeBoundedBitmap(store.readPage(comic, name), 2048) }
+            withContext(AppCoroutineConfig.io) { decodeBoundedBitmap(pageBytes(name), 2048) }
         }.onSuccess { bitmap = it }
             .onFailure { error = it.message ?: "Page unavailable" }
     }
     val image = bitmap
     if (image != null) {
         ZoomableComicPage(
-            bitmap = image, pageKey = "${comic.id}:$index", fit = ComicZoomFit.PAGE,
+            bitmap = image, pageKey = "${comicId}:$index", fit = ComicZoomFit.PAGE,
             tapToTurn = false, rtl = false, onPrevious = {}, onNext = {},
             onToggleChrome = onToggleChrome,
             modifier = Modifier.fillMaxWidth().aspectRatio(

@@ -191,10 +191,11 @@ class ComicShelfStore(private val context: Context) {
         if (removed.format == "CBR") {
             // Only delete files under this vault's private directory. Never touch external files.
             val file = runCatching { ownedFile(removed.uri) }.getOrNull()
-            if (file != null && file.canonicalFile.parentFile == ownedDirectory(vaultId).canonicalFile) {
-                if (file.exists() && !file.delete()) {
-                    throw IOException("Could not remove the private comic archive")
-                }
+            if (file != null &&
+                file.canonicalFile.parentFile == ownedDirectory(vaultId).canonicalFile &&
+                file.exists() && !file.delete()
+            ) {
+                throw IOException("Could not remove the private comic archive")
             }
         }
     }
