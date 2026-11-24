@@ -253,6 +253,7 @@ class OpdsRepository @Inject constructor(
 
             if (
                 storedFeed != null &&
+                OpdsAuthOrigin.sameOrigin(storedFeed.url, secureDownloadUrl) &&
                 !storedFeed.username.isNullOrBlank() &&
                 !storedFeed.password.isNullOrBlank()
             ) {

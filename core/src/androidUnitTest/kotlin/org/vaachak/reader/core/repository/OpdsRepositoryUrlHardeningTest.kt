@@ -509,7 +509,7 @@ class OpdsRepositoryUrlHardeningTest {
         )
 
         val success = repository.downloadPublication(
-            downloadUrl = "https://example.com/book.epub",
+            downloadUrl = "https://secure.example/book.epub",
             destinationFile = destination,
             originalFeedUrl = feedUrl
         )
@@ -552,7 +552,7 @@ class OpdsRepositoryUrlHardeningTest {
         )
 
         val success = repository.downloadPublication(
-            downloadUrl = "https://example.com/book.epub",
+            downloadUrl = "https://secure.example/book.epub",
             destinationFile = destination,
             originalFeedUrl = "https://secure.example/opds/search?q=test"
         )
