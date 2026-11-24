@@ -90,6 +90,7 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
                 implementation("app.cash.turbine:turbine:1.2.1")
                 implementation(libs.mockk)
+                implementation(libs.ktor.client.mock)
             }
         }
     }

@@ -23,7 +23,9 @@
 package org.vaachak.reader.core.data.remote
 
 import io.ktor.client.HttpClient
+import io.ktor.client.HttpClientConfig
 import io.ktor.client.call.body
+import io.ktor.client.engine.HttpClientEngine
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -34,40 +36,43 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import org.vaachak.reader.core.common.AppCoroutineConfig
 import org.vaachak.reader.core.data.remote.dto.LoginRequest
 import org.vaachak.reader.core.data.remote.dto.RegisterRequest
 import org.vaachak.reader.core.data.remote.dto.SyncDto
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Credential-bearing requests must never have body-level HTTP logging enabled.
- * Ktor's Logging(LogLevel.ALL) previously logged JSON request bodies, including
- * sync authentication. HTTPS is mandatory for cloud and local servers alike.
- */
+/** Shared production/test configuration. Never log or follow credential-bearing redirects. */
+private fun HttpClientConfig<*>.configureSecureSync() {
+    followRedirects = false
+    install(ContentNegotiation) {
+        json(Json {
+            ignoreUnknownKeys = true
+            prettyPrint = true
+            isLenient = true
+            encodeDefaults = true
+        })
+    }
+    install(HttpTimeout) {
+        requestTimeoutMillis = 15_000
+        connectTimeoutMillis = 10_000
+        socketTimeoutMillis = 15_000
+    }
+    // No Logging plugin. Sync HTTP bodies contain passwords and other secrets.
+}
+
+/** HTTPS-only sync client with fail-closed transport and sanitized error results. */
 @Singleton
 class SyncApi @Inject constructor() {
-    private val client = HttpClient(CIO) {
-        // Do not forward credential-bearing requests to redirect destinations.
-        followRedirects = false
-        install(ContentNegotiation) {
-            json(Json {
-                ignoreUnknownKeys = true
-                prettyPrint = true
-                isLenient = true
-                encodeDefaults = true
-            })
-        }
-        install(HttpTimeout) {
-            requestTimeoutMillis = 15_000
-            connectTimeoutMillis = 10_000
-            socketTimeoutMillis = 15_000
-        }
-        // Intentionally no Ktor Logging plugin. Even HEADERS can disclose Basic
-        // credentials; BODY/ALL can expose the sync password JSON payload.
+    private var client: HttpClient = HttpClient(CIO) { configureSecureSync() }
+
+    /** Test-only engine seam: same security configuration, no external network. */
+    internal constructor(engine: HttpClientEngine) : this() {
+        client.close()
+        client = HttpClient(engine) { configureSecureSync() }
     }
 
     private var baseUrl = "https://vaachak-sync.ai-mindseye.workers.dev"
@@ -81,7 +86,7 @@ class SyncApi @Inject constructor() {
     )
 
     suspend fun syncVault(request: SyncDto.SyncRequest): Result<SyncDto.SyncResponse> =
-        withContext(Dispatchers.IO) {
+        withContext(AppCoroutineConfig.io) {
             try {
                 val response = client.post("${baseUrl.trimEnd('/')}/api/v1/sync") {
                     contentType(ContentType.Application.Json)
@@ -95,8 +100,7 @@ class SyncApi @Inject constructor() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // Do not log/return the original throwable: it may embed a URL
-                // or sensitive request material from an HTTP client/plugin.
+                // Never return the raw throwable; HTTP errors can embed private URLs.
                 networkFailure()
             }
         }
@@ -117,7 +121,7 @@ class SyncApi @Inject constructor() {
         networkFailure()
     }
 
-    suspend fun login(request: LoginRequest): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun login(request: LoginRequest): Result<Unit> = withContext(AppCoroutineConfig.io) {
         try {
             val response = client.post("${baseUrl.trimEnd('/')}/api/v1/login") {
                 contentType(ContentType.Application.Json)
