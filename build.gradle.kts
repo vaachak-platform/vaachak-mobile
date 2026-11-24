@@ -35,7 +35,6 @@ tasks.register("clean", Delete::class) {
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     val composeMetricsDir = layout.buildDirectory.dir("compose_metrics").get().asFile.absolutePath
-
     compilerOptions {
         freeCompilerArgs.addAll(
             "-P", "plugin:androidx.compose.compiler.plugins.kotlin:reportsDestination=$composeMetricsDir",
@@ -60,7 +59,14 @@ sonar {
                 "**/dagger/hilt/internal/**",
                 "**/R.class",
                 "**/R$*.class",
-                "**/BuildConfig.*"
+                "**/BuildConfig.*",
+                // Android binary resources are not source text, and must not be decoded as UTF-8.
+                "**/src/main/res/**/*.webp",
+                "**/src/main/res/**/*.png",
+                "**/src/main/res/**/*.jpg",
+                "**/src/main/res/**/*.jpeg",
+                "**/src/main/res/**/*.ttf",
+                "**/src/main/res/**/*.otf"
             ).joinToString(",")
         )
 
@@ -76,7 +82,7 @@ sonar {
                 "**/*ComposableSingletons*.*",
                 "**/CryptoManager.kt",
 
-                // Temporary exclusions to unblock coverage gate
+                // Existing root-project exclusions; no comics source is excluded from coverage.
                 "**/DatabaseModule.kt",
                 "**/AppDatabase.kt",
                 "**/AppDatabaseConstructor.kt",

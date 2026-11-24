@@ -301,7 +301,7 @@ class MainActivity : AppCompatActivity() {
                                     route = "comic_reader/{comicId}",
                                     arguments = listOf(navArgument("comicId") { type = NavType.StringType })
                                 ) { backStackEntry ->
-                                    val comicsSettings: SettingsViewModel = hiltViewModel()
+                                    val comicsSettings: SettingsViewModel = androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel()
                                     val comicPreferences by comicsSettings.comicPreferences.collectAsState()
                                     ComicReaderScreen(
                                         vaultId = activeVaultId,

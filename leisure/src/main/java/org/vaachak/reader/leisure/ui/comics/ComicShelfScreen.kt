@@ -93,7 +93,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
+import org.vaachak.reader.core.common.AppCoroutineConfig
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.launch
@@ -123,8 +123,10 @@ fun ComicShelfScreen(
     var message by remember { mutableStateOf<String?>(null) }
     val coverLoader: suspend (ComicShelfStore.Comic) -> Bitmap? = remember(store) {
         { comic ->
-            val first = store.pageNames(comic).firstOrNull()
-            if (first != null) decodeBoundedBitmap(store.readPage(comic, first), 420) else null
+            withContext(AppCoroutineConfig.io) {
+                val first = store.pageNames(comic).firstOrNull()
+                if (first != null) decodeBoundedBitmap(store.readPage(comic, first), 420) else null
+            }
         }
     }
 
@@ -135,7 +137,7 @@ fun ComicShelfScreen(
             busy = true
             message = null
             val result = runCatching {
-                withContext(Dispatchers.IO) { store.importComic(vaultId, uri) }
+                withContext(AppCoroutineConfig.io) { store.importComic(vaultId, uri) }
             }
             result.onSuccess {
                 comics = store.list(vaultId)
@@ -151,7 +153,7 @@ fun ComicShelfScreen(
         onOpen = onOpenComic,
         onRemove = { id ->
             scope.launch {
-                withContext(Dispatchers.IO) { store.remove(vaultId, id) }
+                withContext(AppCoroutineConfig.io) { store.remove(vaultId, id) }
                 comics = store.list(vaultId)
             }
         },
@@ -177,7 +179,7 @@ fun ComicReaderScreen(
     }
     LaunchedEffect(vaultId, comicId) {
         if (comic != null) {
-            withContext(Dispatchers.IO) { store.markOpened(vaultId, comicId) }
+            withContext(AppCoroutineConfig.io) { store.markOpened(vaultId, comicId) }
         }
     }
     if (comic == null) {
@@ -193,7 +195,7 @@ fun ComicReaderScreen(
         comic = comic, store = store, preferences = preferences,
         onBack = onBack,
         onPageChange = { page ->
-            scope.launch { withContext(Dispatchers.IO) { store.setPage(vaultId, comic.id, page) } }
+            scope.launch { withContext(AppCoroutineConfig.io) { store.setPage(vaultId, comic.id, page) } }
         },
         modifier = modifier
     )
@@ -241,69 +243,21 @@ internal fun ComicShelfContent(
     val contentColor = if (isEink) Color.Black else MaterialTheme.colorScheme.onBackground
 
     Column(modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = { selectedTab = 0; isSearchActive = false; query = "" },
-                modifier = Modifier.semantics { contentDescription = "Recently read comics" }
-            ) {
-                Icon(if (selectedTab == 0) Icons.Filled.Schedule else Icons.Outlined.Schedule,
-                    contentDescription = null, tint = contentColor)
-            }
-            IconButton(
-                onClick = { selectedTab = 1 },
-                modifier = Modifier.semantics { contentDescription = "All comics" }
-            ) {
-                Icon(if (selectedTab == 1) Icons.Filled.Folder else Icons.Outlined.Folder,
-                    contentDescription = null, tint = contentColor)
-            }
-            Spacer(Modifier.weight(1f))
-            if (selectedTab == 1) {
-                if (isSearchActive) {
-                    TextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        placeholder = { Text("Search comics") },
-                        modifier = Modifier.weight(1f).height(50.dp),
-                        singleLine = true,
-                        trailingIcon = {
-                            IconButton(onClick = { isSearchActive = false; query = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear comic search")
-                            }
-                        },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color.Transparent,
-                            unfocusedContainerColor = Color.Transparent
-                        )
-                    )
-                } else {
-                    IconButton(
-                        onClick = { isSearchActive = true },
-                        modifier = Modifier.semantics { contentDescription = "Search comics" }
-                    ) { Icon(Icons.Default.Search, contentDescription = null, tint = contentColor) }
-                    Box {
-                        IconButton(
-                            onClick = { sortMenu = true },
-                            modifier = Modifier.semantics { contentDescription = "Sort comics" }
-                        ) { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, tint = contentColor) }
-                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                            listOf(
-                                "Progress" to "Sort by Progress",
-                                "Recent" to "Sort by Recent",
-                                "Title" to "Sort by Title"
-                            ).forEach { (key, label) ->
-                                DropdownMenuItem(text = { Text(label) }, onClick = {
-                                    sort = key
-                                    sortMenu = false
-                                })
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        ComicShelfToolbar(
+            selectedTab = selectedTab,
+            query = query,
+            isSearchActive = isSearchActive,
+            sortMenu = sortMenu,
+            contentColor = contentColor,
+            onSelectTab = { tab ->
+                selectedTab = tab
+                if (tab == 0) { isSearchActive = false; query = "" }
+            },
+            onSearchChange = { isSearchActive = it; if (!it) query = "" },
+            onQueryChange = { query = it },
+            onSortMenuChange = { sortMenu = it },
+            onSortChange = { sort = it; sortMenu = false }
+        )
         HorizontalDivider(color = contentColor.copy(alpha = 0.1f))
         if (message != null) {
             Text(message, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -357,6 +311,84 @@ internal fun ComicShelfContent(
     }
 }
 
+/** Books-style shelf actions are intentionally separate from the library grid's state machine. */
+@Composable
+private fun ComicShelfToolbar(
+    selectedTab: Int,
+    query: String,
+    isSearchActive: Boolean,
+    sortMenu: Boolean,
+    contentColor: Color,
+    onSelectTab: (Int) -> Unit,
+    onSearchChange: (Boolean) -> Unit,
+    onQueryChange: (String) -> Unit,
+    onSortMenuChange: (Boolean) -> Unit,
+    onSortChange: (String) -> Unit
+) {
+    Row(
+            modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = { onSelectTab(0) },
+                modifier = Modifier.semantics { contentDescription = "Recently read comics" }
+            ) {
+                Icon(if (selectedTab == 0) Icons.Filled.Schedule else Icons.Outlined.Schedule,
+                    contentDescription = null, tint = contentColor)
+            }
+            IconButton(
+                onClick = { onSelectTab(1) },
+                modifier = Modifier.semantics { contentDescription = "All comics" }
+            ) {
+                Icon(if (selectedTab == 1) Icons.Filled.Folder else Icons.Outlined.Folder,
+                    contentDescription = null, tint = contentColor)
+            }
+            Spacer(Modifier.weight(1f))
+            if (selectedTab == 1) {
+                if (isSearchActive) {
+                    TextField(
+                        value = query,
+                        onValueChange = onQueryChange,
+                        placeholder = { Text("Search comics") },
+                        modifier = Modifier.weight(1f).height(50.dp),
+                        singleLine = true,
+                        trailingIcon = {
+                            IconButton(onClick = { onSearchChange(false) }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear comic search")
+                            }
+                        },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent
+                        )
+                    )
+                } else {
+                    IconButton(
+                        onClick = { onSearchChange(true) },
+                        modifier = Modifier.semantics { contentDescription = "Search comics" }
+                    ) { Icon(Icons.Default.Search, contentDescription = null, tint = contentColor) }
+                    Box {
+                        IconButton(
+                            onClick = { onSortMenuChange(true) },
+                            modifier = Modifier.semantics { contentDescription = "Sort comics" }
+                        ) { Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = null, tint = contentColor) }
+                        DropdownMenu(expanded = sortMenu, onDismissRequest = { onSortMenuChange(false) }) {
+                            listOf(
+                                "Progress" to "Sort by Progress",
+                                "Recent" to "Sort by Recent",
+                                "Title" to "Sort by Title"
+                            ).forEach { (key, label) ->
+                                DropdownMenuItem(text = { Text(label) }, onClick = {
+                                    onSortChange(key)
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+}
+
 @Composable
 private fun ComicCoverCard(
     comic: ComicShelfStore.Comic,
@@ -368,7 +400,7 @@ private fun ComicCoverCard(
     var menuExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(comic.id, comic.format, loadCover) {
         if (loadCover != null) {
-            bitmap = runCatching { withContext(Dispatchers.IO) { loadCover(comic) } }.getOrNull()
+            bitmap = runCatching { loadCover(comic) }.getOrNull()
         }
     }
     val percent = if (comic.lastPage == 0) 0 else
@@ -498,7 +530,7 @@ private fun ComicReader(
     BackHandler(onBack = onBack)
 
     LaunchedEffect(comic.id) {
-        val result = runCatching { withContext(Dispatchers.IO) { store.pageNames(comic) } }
+        val result = runCatching { withContext(AppCoroutineConfig.io) { store.pageNames(comic) } }
         result.onSuccess { pages = it; index = index.coerceIn(0, it.lastIndex) }
             .onFailure { message = it.message ?: "Comic cannot be opened; please import again" }
     }
@@ -508,7 +540,7 @@ private fun ComicReader(
             message = null
             val page = pages[index.coerceIn(0, pages.lastIndex)]
             val result = runCatching {
-                withContext(Dispatchers.IO) { decodeBoundedBitmap(store.readPage(comic, page), 2048) }
+                withContext(AppCoroutineConfig.io) { decodeBoundedBitmap(store.readPage(comic, page), 2048) }
             }
             result.onSuccess { bitmap = it }
                 .onFailure { message = it.message ?: "Comic page could not be decoded" }
@@ -567,7 +599,49 @@ private fun ComicReader(
         }
 
         if (chromeVisible) {
-            Surface(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
+            ComicReaderChrome(
+                comic = comic,
+                index = index,
+                pageCount = pages.size,
+                vertical = vertical,
+                modeMenu = modeMenu,
+                onBack = onBack,
+                topModifier = Modifier.align(Alignment.TopCenter),
+                bottomModifier = Modifier.align(Alignment.BottomCenter),
+                onModeMenuChange = { modeMenu = it },
+                onReadingDirection = { rightToLeft ->
+                    vertical = false
+                    rtl = rightToLeft
+                    modeMenu = false
+                },
+                onVertical = { vertical = true; modeMenu = false },
+                onFitChange = { fitMode = it.name; modeMenu = false },
+                onPrevious = { advance(if (rtl) 1 else -1) },
+                onNext = { advance(if (rtl) -1 else 1) }
+            )
+        }
+    }
+}
+
+/** Immersive overlay chrome; pages and gestures stay in the separate reader canvas. */
+@Composable
+private fun ComicReaderChrome(
+    comic: ComicShelfStore.Comic,
+    index: Int,
+    pageCount: Int,
+    vertical: Boolean,
+    modeMenu: Boolean,
+    onBack: () -> Unit,
+    topModifier: Modifier,
+    bottomModifier: Modifier,
+    onModeMenuChange: (Boolean) -> Unit,
+    onReadingDirection: (Boolean) -> Unit,
+    onVertical: () -> Unit,
+    onFitChange: (ComicZoomFit) -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit
+) {
+            Surface(modifier = topModifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.91f)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically) {
@@ -579,55 +653,53 @@ private fun ComicReader(
                     Text(comic.title, modifier = Modifier.weight(1f), maxLines = 1,
                         overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                     Box {
-                        IconButton(onClick = { modeMenu = true }, modifier = Modifier.semantics {
+                        IconButton(onClick = { onModeMenuChange(true) }, modifier = Modifier.semantics {
                             contentDescription = "Comic reading and zoom options"
                         }) {
                             Icon(Icons.Default.Tune, contentDescription = null)
                         }
-                        DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
+                        DropdownMenu(expanded = modeMenu, onDismissRequest = { onModeMenuChange(false) }) {
                             DropdownMenuItem(text = { Text("Pages · Left to right") }, onClick = {
-                                vertical = false; rtl = false; modeMenu = false
+                                onReadingDirection(false)
                             })
                             DropdownMenuItem(text = { Text("Manga · Right to left") }, onClick = {
-                                vertical = false; rtl = true; modeMenu = false
+                                onReadingDirection(true)
                             })
                             DropdownMenuItem(text = { Text("Continuous vertical scroll") }, onClick = {
-                                vertical = true; modeMenu = false
+                                onVertical()
                             })
                             HorizontalDivider()
                             DropdownMenuItem(text = { Text("Fit page · no cropping") }, onClick = {
-                                fitMode = ComicZoomFit.PAGE.name; modeMenu = false
+                                onFitChange(ComicZoomFit.PAGE)
                             })
                             DropdownMenuItem(text = { Text("Fit width · pan taller pages") }, onClick = {
-                                fitMode = ComicZoomFit.WIDTH.name; modeMenu = false
+                                onFitChange(ComicZoomFit.WIDTH)
                             })
                             DropdownMenuItem(text = { Text("Fill screen · cropped, pannable") }, onClick = {
-                                fitMode = ComicZoomFit.FILL.name; modeMenu = false
+                                onFitChange(ComicZoomFit.FILL)
                             })
                         }
                     }
                 }
             }
-            Surface(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            Surface(modifier = bottomModifier.fillMaxWidth(),
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.91f)) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween) {
-                    IconButton(onClick = { advance(if (rtl) 1 else -1) },
-                        enabled = pages.isNotEmpty() && !vertical) {
+                    IconButton(onClick = onPrevious,
+                        enabled = pageCount > 0 && !vertical) {
                         Icon(Icons.Default.ArrowBackIosNew, contentDescription = "Previous comic page")
                     }
-                    Text(if (pages.isEmpty()) "Loading…" else "${index + 1} / ${pages.size}",
+                    Text(if (pageCount == 0) "Loading…" else "${index + 1} / $pageCount",
                         style = MaterialTheme.typography.labelLarge)
-                    IconButton(onClick = { advance(if (rtl) -1 else 1) },
-                        enabled = pages.isNotEmpty() && !vertical) {
+                    IconButton(onClick = onNext,
+                        enabled = pageCount > 0 && !vertical) {
                         Icon(Icons.AutoMirrored.Filled.ArrowForwardIos,
                             contentDescription = "Next comic page")
                     }
                 }
             }
-        }
-    }
 }
 
 /**
@@ -730,7 +802,7 @@ private fun VerticalComicPage(
     var error by remember(comic.id, name) { mutableStateOf<String?>(null) }
     LaunchedEffect(comic.id, name) {
         runCatching {
-            withContext(Dispatchers.IO) { decodeBoundedBitmap(store.readPage(comic, name), 2048) }
+            withContext(AppCoroutineConfig.io) { decodeBoundedBitmap(store.readPage(comic, name), 2048) }
         }.onSuccess { bitmap = it }
             .onFailure { error = it.message ?: "Page unavailable" }
     }

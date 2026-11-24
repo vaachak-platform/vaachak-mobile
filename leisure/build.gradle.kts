@@ -173,7 +173,7 @@ dependencies {
 
     // RAR4/RAR5 CBR decoding. Source-available under the UnRAR license (not OSI-approved).
     // No encoder is included; see docs/product/P0_11_COMIC_CBZ_CBR_DELIVERY.md.
-    implementation("com.github.junrar:junrar:8.1.2")
+    implementation(libs.junrar)
 
     coreLibraryDesugaring(libs.android.desugar)
 
@@ -198,6 +198,7 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
+    implementation(libs.androidx.hilt.lifecycle.viewmodel.compose)
 
     implementation(libs.retrofit)
     implementation(libs.retrofit.gson)

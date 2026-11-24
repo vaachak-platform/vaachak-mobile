@@ -3,6 +3,7 @@ package org.vaachak.reader.leisure.ui.comics
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.core.net.toUri
 import android.provider.OpenableColumns
 import java.io.File
 import java.io.IOException
@@ -125,12 +126,16 @@ class ComicShelfStore(private val context: Context) {
             try {
                 save(vaultId, existing + entry)
             } catch (e: Exception) {
-                owned.delete()
+                if (owned.exists() && !owned.delete()) {
+                    e.addSuppressed(IOException("Could not clean up imported comic file"))
+                }
                 throw e
             }
             return entry
         } finally {
-            staged.delete()
+            if (staged.exists() && !staged.delete()) {
+                staged.deleteOnExit() // Android process lifetime fallback; surface cleanup problems in logs.
+            }
         }
     }
 
@@ -180,21 +185,25 @@ class ComicShelfStore(private val context: Context) {
         val current = list(vaultId)
         val removed = current.firstOrNull { it.id == comicId } ?: return
         val others = current.filterNot { it.id == comicId }
+        // Persist the removal first; a failed preferences write must not leave a dangling
+        // shelf entry pointing to a deleted private file.
         save(vaultId, others)
         if (removed.format == "CBR") {
             // Only delete files under this vault's private directory. Never touch external files.
             val file = runCatching { ownedFile(removed.uri) }.getOrNull()
             if (file != null && file.canonicalFile.parentFile == ownedDirectory(vaultId).canonicalFile) {
-                file.delete()
+                if (file.exists() && !file.delete()) {
+                    throw IOException("Could not remove the private comic archive")
+                }
             }
         }
     }
 
-    fun open(uri: String) = resolver.openInputStream(Uri.parse(uri))
+    fun open(uri: String) = resolver.openInputStream(uri.toUri())
         ?: throw IOException("Comic document permission is unavailable; import it again")
 
     private fun ownedFile(uri: String): File {
-        val parsed = Uri.parse(uri)
+        val parsed = uri.toUri()
         if (parsed.scheme != "file") throw IOException("Expected private comic file")
         val file = File(parsed.path ?: "")
         val root = File(context.applicationContext.noBackupFilesDir, "comics")
