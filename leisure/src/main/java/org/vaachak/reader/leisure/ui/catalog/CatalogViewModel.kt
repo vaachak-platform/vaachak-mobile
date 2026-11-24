@@ -47,6 +47,8 @@ import org.readium.r2.shared.publication.opds.images
 import org.readium.r2.shared.util.Try
 import org.readium.r2.shared.util.Url
 import org.readium.r2.shared.util.mediatype.MediaType
+import org.vaachak.reader.core.data.repository.CatalogCredentialAction
+import org.vaachak.reader.core.data.repository.OpdsMigrationReport
 import org.vaachak.reader.core.data.repository.GutendexRepository
 import org.vaachak.reader.core.data.repository.LibraryRepository
 import org.vaachak.reader.core.data.repository.OpdsCatalogSession
@@ -175,9 +177,7 @@ class CatalogViewModel @Inject constructor(
         _screenTitle.value = feed.title
         _isLoading.value = false
 
-        isGutendexSession = feed.url.contains("gutenberg.org") ||
-                feed.url.contains("gutendex") ||
-                feed.url.endsWith("/books")
+        isGutendexSession = isPublicGutendex(feed)
 
         if (isGutendexSession) {
             loadGutendexRoot()
@@ -492,34 +492,22 @@ class CatalogViewModel @Inject constructor(
         }
     }
 
-    fun addCatalog(title: String, url: String, user: String?, pass: String?) {
-        viewModelScope.launch {
-            val cleanUrl = OpdsUrlUtils.cleanCatalogUrl(url)
-            val newFeed = OpdsEntity(
-                title = title.ifBlank { "Library" },
-                url = cleanUrl,
-                username = user?.ifBlank { null },
-                password = pass?.ifBlank { null }
-            )
-            opdsRepository.insertFeed(newFeed)
-        }
-    }
+    suspend fun saveCatalog(
+        existing: OpdsEntity?, title: String, url: String, action: CatalogCredentialAction,
+        username: String?, password: String?
+    ): Result<String> = opdsRepository.saveCatalog(existing, title.ifBlank { "Library" },
+        OpdsUrlUtils.cleanCatalogUrl(url), action, username, password)
 
-    fun updateCatalog(feed: OpdsEntity, title: String, url: String, user: String?, pass: String?) {
-        viewModelScope.launch {
-            val cleanUrl = OpdsUrlUtils.cleanCatalogUrl(url)
-            val updatedFeed = feed.copy(
-                title = title,
-                url = cleanUrl,
-                username = user?.ifBlank { null },
-                password = pass?.ifBlank { null }
-            )
-            opdsRepository.updateFeed(updatedFeed)
-        }
-    }
+    suspend fun deleteCatalog(feed: OpdsEntity): Result<String> = opdsRepository.deleteFeed(feed)
 
-    fun deleteCatalog(feed: OpdsEntity) {
-        viewModelScope.launch { opdsRepository.deleteFeed(feed) }
-    }
+    suspend fun migrateLegacyCredentials(): Result<OpdsMigrationReport> = opdsRepository.migrateLegacyCredentials()
 
+}
+
+/** Only the known anonymous public API may bypass OPDS session authentication. */
+internal fun isPublicGutendex(feed: OpdsEntity): Boolean {
+    if (feed.username != null || feed.password != null || feed.credentialGeneration != null) return false
+    val uri = runCatching { java.net.URI(feed.url) }.getOrNull() ?: return false
+    return uri.scheme.equals("https", true) && uri.host.equals("gutendex.com", true) &&
+        (uri.port == -1 || uri.port == 443) && uri.rawUserInfo == null && uri.path.trimEnd('/') == "/books"
 }

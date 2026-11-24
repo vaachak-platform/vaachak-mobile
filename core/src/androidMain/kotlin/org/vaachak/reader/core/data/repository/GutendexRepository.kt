@@ -23,8 +23,10 @@
 package org.vaachak.reader.core.data.repository
 
 import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.CookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.vaachak.reader.core.data.remote.dto.GutendexResponse
@@ -46,6 +48,8 @@ class GutendexRepository @Inject constructor() {
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        .followSslRedirects(false)
+        .cookieJar(CookieJar.NO_COOKIES)
         .build()
 
     private val gson = Gson()
@@ -53,7 +57,7 @@ class GutendexRepository @Inject constructor() {
     /**
      * Fetches a list of books from a given Gutendex API URL.
      * The URL is constructed by the caller (e.g., ViewModel) to allow for different
-     * search queries, pagination, and potentially custom API domains.
+     * search queries and pagination on the known public API.
      *
      * @param url The absolute URL to fetch the book list from. This should be a valid
      *            Gutendex API endpoint URL.
@@ -61,19 +65,17 @@ class GutendexRepository @Inject constructor() {
      */
     suspend fun fetchBooks(url: String): Result<GutendexResponse> = withContext(Dispatchers.IO) {
         try {
+            check(OpdsAuthOrigin.sameOrigin("https://gutendex.com/books", url)) { "Invalid public catalog endpoint" }
             val request = Request.Builder().url(url).build()
-            val response = client.newCall(request).execute()
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Gutendex Error: ${response.code}"))
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("Gutendex Error: ${response.code}"))
+                val body = response.body?.string() ?: return@withContext Result.failure(Exception("Empty Body"))
+                Result.success(gson.fromJson(body, GutendexResponse::class.java))
             }
-
-            val body = response.body?.string() ?: return@withContext Result.failure(Exception("Empty Body"))
-            val data = gson.fromJson(body, GutendexResponse::class.java)
-
-            Result.success(data)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Result.failure(Exception("Public catalog unavailable"))
         }
     }
 
@@ -86,19 +88,21 @@ class GutendexRepository @Inject constructor() {
      */
     suspend fun downloadBook(url: String, destination: File): Boolean = withContext(Dispatchers.IO) {
         try {
+            httpsOrigin(url)
             val request = Request.Builder().url(url).build()
-            val response = client.newCall(request).execute()
-
-            if (response.isSuccessful && response.body != null) {
-                response.body!!.byteStream().use { input ->
-                    FileOutputStream(destination).use { output ->
-                        input.copyTo(output)
+            client.newCall(request).execute().use { response ->
+                val body = response.body
+                if (response.isSuccessful && body != null) {
+                    body.byteStream().use { input ->
+                        FileOutputStream(destination).use { output -> input.copyTo(output) }
                     }
+                    return@withContext true
                 }
-                return@withContext true
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // No raw URL, response or exception diagnostics from a public catalog.
         }
         return@withContext false
     }
