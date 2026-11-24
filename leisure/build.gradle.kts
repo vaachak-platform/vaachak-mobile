@@ -171,6 +171,10 @@ dependencies {
     implementation(project(":core"))
     implementation(libs.androidx.foundation.layout)
 
+    // RAR4/RAR5 CBR decoding. Source-available under the UnRAR license (not OSI-approved).
+    // No encoder is included; see docs/product/P0_11_COMIC_CBZ_CBR_DELIVERY.md.
+    implementation("com.github.junrar:junrar:8.1.2")
+
     coreLibraryDesugaring(libs.android.desugar)
 
     implementation(libs.androidx.core.ktx)
