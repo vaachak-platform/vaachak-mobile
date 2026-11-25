@@ -48,7 +48,7 @@ class SettingsComposeInstrumentedTest {
         compose.onNodeWithText("Right to left (manga)").assertExists()
         compose.onNodeWithContentDescription("All settings").performClick()
         selectCategory("Audio")
-        compose.onNodeWithText("Audiobook playback settings will be added with the audiobook engine.").assertExists()
+        compose.onNodeWithText("Audiobook defaults are independent of text-to-speech. Title overrides are kept until reset.").assertExists()
     }
 
     @Test fun comicsChoicesUpdatePerVaultPreferences() {

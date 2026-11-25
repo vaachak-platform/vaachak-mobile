@@ -3,6 +3,9 @@
         xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <queries>
         <intent>
@@ -21,6 +24,15 @@
             android:supportsRtl="true"
             android:theme="@style/Theme.LeisureVaachak"
             tools:targetApi="31">
+
+        <service
+                android:name="org.vaachak.reader.leisure.ui.audio.AudioPlaybackService"
+                android:exported="false"
+                android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
 
         <activity
                 android:name="org.vaachak.reader.leisure.MainActivity"

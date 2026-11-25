@@ -77,6 +77,7 @@ import org.vaachak.reader.core.domain.model.ComicReadingDirection
 import org.vaachak.reader.core.domain.model.ComicReadingMode
 import org.vaachak.reader.core.domain.model.ThemeMode
 import org.vaachak.reader.leisure.navigation.Screen
+import org.vaachak.reader.leisure.ui.audio.AudioDefaultsPanel
 import org.vaachak.reader.leisure.ui.testability.Tid
 import org.vaachak.reader.leisure.ui.testability.TidScreen
 import org.vaachak.reader.leisure.ui.testability.tid
@@ -287,7 +288,7 @@ private fun SettingsDetail(
                 SettingsCategory.GENERAL -> GlobalSettingsBody(model.settings, model.activeVaultId, model.isMultiUserMode, actions, navController)
                 SettingsCategory.BOOKS -> BookSettingsTab(navController)
                 SettingsCategory.COMICS -> ComicsSettingsTab(model.comics, onChange = actions.saveComicPreferences)
-                SettingsCategory.AUDIO -> AudioSettingsTab(navController)
+                SettingsCategory.AUDIO -> AudioSettingsTab(navController, model.activeVaultId)
                 SettingsCategory.CONTENT -> ContentSettingsTab(navController)
                 SettingsCategory.INTELLIGENCE -> IntelligenceSettingsTab(model.settings, navController)
             }
@@ -371,7 +372,7 @@ private fun ComicSwitch(title: String, checked: Boolean, onChange: (Boolean) -> 
 }
 
 @Composable
-private fun AudioSettingsTab(navController: NavController) {
+private fun AudioSettingsTab(navController: NavController, vaultId: String) {
     // TTS remains reachable here for existing users; audio files will use a separate engine.
     SettingsGroup(title = "Speech & narration") {
         SettingsTile(
@@ -382,16 +383,7 @@ private fun AudioSettingsTab(navController: NavController) {
         )
     }
     SettingsGroup(title = "Audiobooks") {
-        Text(
-            "Audiobook playback settings will be added with the audiobook engine.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            "Local audiobook playback will be independent of text-to-speech settings.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        AudioDefaultsPanel(vaultId)
     }
 }
 

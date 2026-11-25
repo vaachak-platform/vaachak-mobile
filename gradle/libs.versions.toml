@@ -128,6 +128,7 @@ readium-navigator-media-tts = { group = "org.readium.kotlin-toolkit", name = "re
 google-generativeai = { group = "com.google.ai.client.generativeai", name = "generativeai", version.ref = "gemini" }
 androidx-media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
 androidx-media3-common = { group = "androidx.media3", name = "media3-common", version.ref = "media3" }
+androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 
 # -- Utilities --
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }

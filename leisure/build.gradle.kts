@@ -217,6 +217,7 @@ dependencies {
     implementation(libs.readium.navigator.media.tts)
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.media3.exoplayer)
 
     implementation(libs.google.generativeai)
     implementation(libs.androidx.datastore.preferences)
