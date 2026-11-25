@@ -55,6 +55,8 @@ class SettingsRepository @Inject constructor(
         val GEMINI_KEY = stringPreferencesKey("gemini_api_key")
         val CF_URL = stringPreferencesKey("cloudflare_url")
         val CF_TOKEN = stringPreferencesKey("cloudflare_token")
+        // Non-secret revision used to notify consumers when encrypted files change.
+        private val CREDENTIAL_REVISION = intPreferencesKey("encrypted_credential_revision")
 
         // AI provider routing (per-vault). These keys must coexist with the
         // existing Gemini/Cloudflare settings and the comic preferences.
@@ -134,6 +136,52 @@ class SettingsRepository @Inject constructor(
     private val activeVaults = mutableMapOf<String, DataStore<Preferences>>()
     private val vaultMutex = Mutex()
     private val gatewayMigrationMutex = Mutex()
+    private val credentialMutex = Mutex()
+
+    private enum class CredentialSlot { GEMINI, CLOUDFLARE, SYNC_PASSWORD }
+
+    /** Reserved namespace prevents collisions with existing Gateway vault files. */
+    private fun credentialId(vaultId: String, slot: CredentialSlot): String =
+        "vaachak_credential_v1:${slot.name}:\u0000$vaultId"
+
+    /** Secure slot used by existing repository mocks, without changing public APIs. */
+    private fun credentialFlow(legacyKey: Preferences.Key<String>, slot: CredentialSlot): Flow<String> =
+        vaultRepository.activeVaultId.flatMapLatest { vaultId ->
+            getVaultDataStore(vaultId).data.map {
+                readAndMigrateCredential(vaultId, legacyKey, slot)
+            }
+        }
+
+    private suspend fun readAndMigrateCredential(
+        vaultId: String,
+        legacyKey: Preferences.Key<String>,
+        slot: CredentialSlot
+    ): String = withContext(AppCoroutineConfig.io) {
+        try {
+            credentialMutex.withLock {
+                val store = getVaultDataStore(vaultId)
+                val key = credentialId(vaultId, slot)
+                val legacy = store.data.first()[legacyKey]
+                if (legacy != null) {
+                    if (legacy.isNotEmpty()) {
+                        privateGatewaySecrets.write(key, legacy)
+                        check(privateGatewaySecrets.read(key) == legacy) {
+                            "Encrypted credential verification failed"
+                        }
+                    }
+                    // Only remove plaintext once ciphertext has been verified.
+                    store.edit { prefs ->
+                        prefs.remove(legacyKey)
+                        prefs[CREDENTIAL_REVISION] = (prefs[CREDENTIAL_REVISION] ?: 0) + 1
+                    }
+                }
+                privateGatewaySecrets.read(key)
+            }
+        } catch (_: GatewayCredentialUnavailableException) {
+            // No plaintext network fallback. Leave legacy preference for retry after unlock.
+            ""
+        }
+    }
 
     private suspend fun getVaultDataStore(vaultId: String): DataStore<Preferences> {
         vaultMutex.withLock {
@@ -158,9 +206,9 @@ class SettingsRepository @Inject constructor(
 
     // --- APP FLOWS ---
     val isAiEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[IS_AI_ENABLED] ?: false }
-    val geminiKey: Flow<String> = vaultPreferencesFlow.map { it[GEMINI_KEY] ?: "" }
+    val geminiKey: Flow<String> = credentialFlow(GEMINI_KEY, CredentialSlot.GEMINI)
     val cfUrl: Flow<String> = vaultPreferencesFlow.map { it[CF_URL] ?: "" }
-    val cfToken: Flow<String> = vaultPreferencesFlow.map { it[CF_TOKEN] ?: "" }
+    val cfToken: Flow<String> = credentialFlow(CF_TOKEN, CredentialSlot.CLOUDFLARE)
 
     // Interpret unknown/obsolete provider IDs as Gemini instead of crashing
     // when a user's saved preferences are from another application version.
@@ -227,7 +275,7 @@ class SettingsRepository @Inject constructor(
     val deviceId: Flow<String> = vaultPreferencesFlow.map { it[SYNC_DEVICE_ID] ?: "" }
     val lastSyncTimestamp: Flow<Long> = vaultPreferencesFlow.map { it[LAST_SYNC_TIMESTAMP] ?: 0L }
     val syncUsername: Flow<String> = vaultPreferencesFlow.map { it[SYNC_USERNAME] ?: "" }
-    val syncPassword: Flow<String> = vaultPreferencesFlow.map { it[SYNC_PASSWORD] ?: "" }
+    val syncPassword: Flow<String> = credentialFlow(SYNC_PASSWORD, CredentialSlot.SYNC_PASSWORD)
     val deviceName: Flow<String> = vaultPreferencesFlow.map { preferences ->
         val savedName = preferences[DEVICE_NAME]
         if (savedName.isNullOrBlank()) {
@@ -301,13 +349,29 @@ class SettingsRepository @Inject constructor(
     }
 
     // --- SYNC ACTIONS ---
-    suspend fun updateSyncProfile(user: String, pass: String, name: String) {
-        editCurrentVault { prefs ->
-            prefs[SYNC_USERNAME] = user.trim()
-            prefs[SYNC_PASSWORD] = pass
-            prefs[DEVICE_NAME] = name.trim()
+    suspend fun updateSyncProfile(user: String, pass: String, name: String): Unit =
+        withContext(AppCoroutineConfig.io) {
+            credentialMutex.withLock {
+                val vaultId = vaultRepository.activeVaultId.first()
+                val store = getVaultDataStore(vaultId)
+                val key = credentialId(vaultId, CredentialSlot.SYNC_PASSWORD)
+                if (pass.isEmpty()) {
+                    privateGatewaySecrets.clear(key)
+                } else {
+                    privateGatewaySecrets.write(key, pass)
+                    check(privateGatewaySecrets.read(key) == pass) {
+                        "Encrypted sync credential verification failed"
+                    }
+                }
+                store.edit { prefs ->
+                    prefs.remove(SYNC_PASSWORD)
+                    prefs[SYNC_USERNAME] = user.trim()
+                    prefs[DEVICE_NAME] = name.trim()
+                    prefs[CREDENTIAL_REVISION] = (prefs[CREDENTIAL_REVISION] ?: 0) + 1
+                }
+                Unit
+            }
         }
-    }
 
     suspend fun setSyncEnabled(enabled: Boolean) { editCurrentVault { it[IS_SYNC_ENABLED] = enabled } }
     suspend fun setSyncCloudUrl(url: String) { editCurrentVault { it[SYNC_CLOUD_URL] = url } }
@@ -392,13 +456,47 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    suspend fun saveSettings(gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean, isAiEnabled: Boolean? = null) {
-        editCurrentVault { prefs ->
-            prefs[GEMINI_KEY] = gemini.trim()
-            prefs[CF_URL] = cfUrl
-            prefs[CF_TOKEN] = cfToken.trim()
-            prefs[IS_EINK_ENABLED] = isEnk
-            if (isAiEnabled != null) prefs[IS_AI_ENABLED] = isAiEnabled
+    suspend fun saveSettings(
+        gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean, isAiEnabled: Boolean? = null
+    ): Unit = withContext(AppCoroutineConfig.io) {
+        credentialMutex.withLock {
+            val vaultId = vaultRepository.activeVaultId.first()
+            val store = getVaultDataStore(vaultId)
+            val prefs = store.data.first()
+            val geminiValue = gemini.trim()
+            val cloudflareValue = cfToken.trim()
+            // A locked migration can leave a legacy secret hidden from the UI;
+            // refuse an accidental empty overwrite rather than deleting user data.
+            if ((prefs[GEMINI_KEY]?.isNotEmpty() == true && geminiValue.isEmpty()) ||
+                (prefs[CF_TOKEN]?.isNotEmpty() == true && cloudflareValue.isEmpty())) {
+                throw GatewayCredentialUnavailableException(
+                    "Unlock your device and retry migrating the existing AI credentials."
+                )
+            }
+            val geminiId = credentialId(vaultId, CredentialSlot.GEMINI)
+            val cloudflareId = credentialId(vaultId, CredentialSlot.CLOUDFLARE)
+            // Authentication/invalidated-key check before clearing any existing ciphertext.
+            privateGatewaySecrets.read(geminiId)
+            privateGatewaySecrets.read(cloudflareId)
+            if (geminiValue.isEmpty()) privateGatewaySecrets.clear(geminiId)
+            else privateGatewaySecrets.write(geminiId, geminiValue)
+            if (cloudflareValue.isEmpty()) privateGatewaySecrets.clear(cloudflareId)
+            else privateGatewaySecrets.write(cloudflareId, cloudflareValue)
+            check(privateGatewaySecrets.read(geminiId) == geminiValue) {
+                "Encrypted credential verification failed"
+            }
+            check(privateGatewaySecrets.read(cloudflareId) == cloudflareValue) {
+                "Encrypted credential verification failed"
+            }
+            store.edit { updated ->
+                updated.remove(GEMINI_KEY)
+                updated.remove(CF_TOKEN)
+                updated[CF_URL] = cfUrl
+                updated[IS_EINK_ENABLED] = isEnk
+                if (isAiEnabled != null) updated[IS_AI_ENABLED] = isAiEnabled
+                updated[CREDENTIAL_REVISION] = (updated[CREDENTIAL_REVISION] ?: 0) + 1
+            }
+            Unit
         }
     }
 

@@ -45,7 +45,13 @@ interface OpdsDao {
      *
      * @return A [Flow] emitting a list of all [OpdsEntity] objects.
      */
-    @Query("SELECT * FROM opds_feeds ORDER BY isPredefined DESC, title ASC")
+    @Query("""
+        SELECT * FROM opds_feeds WHERE NOT EXISTS (
+            SELECT 1 FROM opds_credential_journal j
+            WHERE j.catalogId = opds_feeds.id AND j.generation = opds_feeds.credentialGeneration
+              AND j.state = 'PENDING_CREATE'
+        ) ORDER BY isPredefined DESC, title ASC
+    """)
     fun getAllFeeds(): Flow<List<OpdsEntity>>
 
     /**
@@ -71,8 +77,24 @@ interface OpdsDao {
      * @param url The URL of the feed to retrieve.
      * @return The matching [OpdsEntity], or `null` if no feed with the given URL is found.
      */
-    @Query("SELECT * FROM opds_feeds WHERE url = :url LIMIT 1")
+    @Query("""
+        SELECT * FROM opds_feeds WHERE url = :url AND NOT EXISTS (
+            SELECT 1 FROM opds_credential_journal j
+            WHERE j.catalogId = opds_feeds.id AND j.generation = opds_feeds.credentialGeneration
+              AND j.state = 'PENDING_CREATE'
+        ) LIMIT 1
+    """)
     suspend fun getFeedByUrl(url: String): OpdsEntity?
+
+    /** Stable identity for a selected catalog; URL is not a unique key. */
+    @Query("""
+        SELECT * FROM opds_feeds WHERE id = :id AND NOT EXISTS (
+            SELECT 1 FROM opds_credential_journal j
+            WHERE j.catalogId = opds_feeds.id AND j.generation = opds_feeds.credentialGeneration
+              AND j.state = 'PENDING_CREATE'
+        )
+    """)
+    suspend fun getFeedById(id: Long): OpdsEntity?
 
     /**
      * Updates an existing OPDS feed in the database.
@@ -86,6 +108,12 @@ interface OpdsDao {
     @Query("DELETE FROM opds_feeds WHERE id = :id")
     suspend fun deleteFeedById(id: Long)
 
-    @Query("SELECT COUNT(*) FROM opds_feeds")
+    @Query("""
+        SELECT COUNT(*) FROM opds_feeds WHERE NOT EXISTS (
+            SELECT 1 FROM opds_credential_journal j
+            WHERE j.catalogId = opds_feeds.id AND j.generation = opds_feeds.credentialGeneration
+              AND j.state = 'PENDING_CREATE'
+        )
+    """)
     suspend fun getFeedsCount(): Int
 }

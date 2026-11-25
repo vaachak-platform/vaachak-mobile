@@ -23,8 +23,10 @@
 package org.vaachak.reader.core.data.repository
 
 import com.google.gson.Gson
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import okhttp3.CookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.vaachak.reader.core.data.remote.dto.GutendexResponse
@@ -40,40 +42,47 @@ import javax.inject.Singleton
  * books from a Project Gutenberg mirror that supports the Gutendex API.
  */
 @Singleton
-class GutendexRepository @Inject constructor() {
+class GutendexRepository internal constructor(
+    private val client: OkHttpClient,
+    private val ioDispatcher: CoroutineDispatcher
+) {
+    @Inject constructor(@CatalogIoDispatcher ioDispatcher: CoroutineDispatcher) : this(publicClient(), ioDispatcher)
 
-    // Timeout of 60s for slow topic searches
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
+    private companion object {
+        fun publicClient() = OkHttpClient.Builder()
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .followSslRedirects(false)
+            .cookieJar(CookieJar.NO_COOKIES)
+            .build()
+    }
 
     private val gson = Gson()
 
     /**
      * Fetches a list of books from a given Gutendex API URL.
      * The URL is constructed by the caller (e.g., ViewModel) to allow for different
-     * search queries, pagination, and potentially custom API domains.
+     * search queries and pagination on the known public API.
      *
      * @param url The absolute URL to fetch the book list from. This should be a valid
      *            Gutendex API endpoint URL.
      * @return A [Result] which is either a [GutendexResponse] on success or an [Exception] on failure.
      */
-    suspend fun fetchBooks(url: String): Result<GutendexResponse> = withContext(Dispatchers.IO) {
+    suspend fun fetchBooks(url: String): Result<GutendexResponse> = withContext(ioDispatcher) {
         try {
+            check(OpdsAuthOrigin.sameOrigin("https://gutendex.com/books", url)) { "Invalid public catalog endpoint" }
             val request = Request.Builder().url(url).build()
-            val response = client.newCall(request).execute()
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Gutendex Error: ${response.code}"))
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("Gutendex Error: ${response.code}"))
+                val body = response.body?.string() ?: return@withContext Result.failure(Exception("Empty Body"))
+                val parsed = gson.fromJson(body, GutendexResponse::class.java)
+                    ?: return@withContext Result.failure(Exception("Empty Body"))
+                Result.success(parsed)
             }
-
-            val body = response.body?.string() ?: return@withContext Result.failure(Exception("Empty Body"))
-            val data = gson.fromJson(body, GutendexResponse::class.java)
-
-            Result.success(data)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            Result.failure(Exception("Public catalog unavailable"))
         }
     }
 
@@ -84,21 +93,23 @@ class GutendexRepository @Inject constructor() {
      * @param destination The local [File] where the downloaded book should be saved.
      * @return `true` if the download and save operation is successful, `false` otherwise.
      */
-    suspend fun downloadBook(url: String, destination: File): Boolean = withContext(Dispatchers.IO) {
+    suspend fun downloadBook(url: String, destination: File): Boolean = withContext(ioDispatcher) {
         try {
+            httpsOrigin(url)
             val request = Request.Builder().url(url).build()
-            val response = client.newCall(request).execute()
-
-            if (response.isSuccessful && response.body != null) {
-                response.body!!.byteStream().use { input ->
-                    FileOutputStream(destination).use { output ->
-                        input.copyTo(output)
+            client.newCall(request).execute().use { response ->
+                val body = response.body
+                if (response.isSuccessful && body != null) {
+                    body.byteStream().use { input ->
+                        FileOutputStream(destination).use { output -> input.copyTo(output) }
                     }
+                    return@withContext true
                 }
-                return@withContext true
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // No raw URL, response or exception diagnostics from a public catalog.
         }
         return@withContext false
     }

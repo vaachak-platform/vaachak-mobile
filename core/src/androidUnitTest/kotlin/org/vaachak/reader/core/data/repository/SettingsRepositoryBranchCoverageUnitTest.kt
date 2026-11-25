@@ -29,13 +29,28 @@ class SettingsRepositoryBranchCoverageUnitTest {
     private val activeVaultId = MutableStateFlow("branches_${UUID.randomUUID()}")
     private val vault = mockk<VaultRepository>()
     private val secrets = mockk<PrivateGatewaySecrets>()
+
+    /**
+     * Simulates encrypted per-vault storage rather than a no-op mock.
+     * SettingsRepository now verifies that a newly written secret can be read
+     * back before removing its legacy plaintext copy.
+     */
+    private val encryptedSecrets = mutableMapOf<String, String>()
     private val repository: SettingsRepository
 
     init {
         every { vault.activeVaultId } returns activeVaultId
-        every { secrets.read(any()) } returns ""
-        every { secrets.write(any(), any()) } returns Unit
-        every { secrets.clear(any()) } returns Unit
+        every { secrets.read(any()) } answers {
+            encryptedSecrets[firstArg<String>()].orEmpty()
+        }
+        every { secrets.write(any(), any()) } answers {
+            encryptedSecrets[firstArg<String>()] = secondArg<String>()
+            Unit
+        }
+        every { secrets.clear(any()) } answers {
+            encryptedSecrets.remove(firstArg<String>())
+            Unit
+        }
         repository = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets)
     }
 
@@ -100,13 +115,19 @@ class SettingsRepositoryBranchCoverageUnitTest {
     }
 
     @Test fun syncProfileTrimsIdentifiersButPreservesPasswordBytes() = runBlocking {
-        repository.updateSyncProfile("  reader  ", "  secret with spaces  ", "  BOOX Reader  ")
+        val secret = "  secret with spaces  "
+        repository.updateSyncProfile("  reader  ", secret, "  BOOX Reader  ")
         assertEquals("reader", repository.syncUsername.first())
-        assertEquals("  secret with spaces  ", repository.syncPassword.first())
+        assertEquals(secret, repository.syncPassword.first())
         assertEquals("BOOX Reader", repository.deviceName.first())
+        // The production repository must no longer write the plaintext DataStore key.
+        assertNull(preferences().data.first()[SettingsRepository.SYNC_PASSWORD])
+        assertTrue(encryptedSecrets.values.contains(secret))
+
         repository.updateSyncProfile("", "", "")
         assertEquals("", repository.syncUsername.first())
         assertEquals("", repository.syncPassword.first())
         assertTrue(repository.deviceName.first().isNotBlank())
+        assertTrue(encryptedSecrets.values.none { it == secret })
     }
 }

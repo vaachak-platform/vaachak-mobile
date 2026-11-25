@@ -43,7 +43,7 @@ class DatabaseModuleTest {
         mockkStatic("org.vaachak.reader.core.data.local.DatabaseBuilder_androidKt")
         try {
             every { getDatabaseBuilder(context) } returns builder
-            every { builder.addMigrations(any()) } returns builder
+            every { builder.addMigrations(any(), any()) } returns builder
             every { builder.setDriver(any()) } returns builder
             every { builder.build() } returns db
 
@@ -51,7 +51,7 @@ class DatabaseModuleTest {
 
             assertNotNull(provided)
             assertSame(db, provided)
-            verify(exactly = 1) { builder.addMigrations(any()) }
+            verify(exactly = 1) { builder.addMigrations(any(), any()) }
             verify(exactly = 1) { builder.setDriver(any()) }
             verify(exactly = 1) { builder.build() }
         } finally {

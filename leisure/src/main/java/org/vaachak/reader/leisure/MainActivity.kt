@@ -85,6 +85,8 @@ import org.vaachak.reader.core.data.repository.VaultRepository
 import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.core.domain.model.ThemeMode
 import org.vaachak.reader.leisure.navigation.Screen
+import org.vaachak.reader.leisure.ui.comics.ComicReaderScreen
+import org.vaachak.reader.leisure.ui.comics.ComicShelfScreen
 import org.vaachak.reader.leisure.ui.bookshelf.BookshelfScreen
 import org.vaachak.reader.leisure.ui.bookshelf.BookshelfUiState
 import org.vaachak.reader.leisure.ui.bookshelf.BookshelfViewModel
@@ -246,11 +248,15 @@ class MainActivity : AppCompatActivity() {
                                                 navController.navigate(Screen.Reader.createRoute(book.bookHash, book.lastCfiLocation))
                                             }
                                         },
+                                        onComicClick = { comicId ->
+                                            navController.navigate("comic_reader/${Uri.encode(comicId)}")
+                                        },
                                         onCatalogClick = { navController.navigate(Screen.CatalogBrowser.route) },
                                         onHighlightsClick = { navController.navigate(Screen.Highlights.route) },
                                         onSwitchProfileClick = {
                                             navController.navigate("profile_picker")
-                                        }
+                                        },
+                                        activeVaultId = activeVaultId
                                     )
                                 }
                                 composable(
@@ -287,6 +293,22 @@ class MainActivity : AppCompatActivity() {
                                             }
                                         }
                                     }
+                                }
+
+                                // Comics are an independent full-screen navigation destination:
+                                // no app toolbar, main tabs or Books content above the comic reader.
+                                composable(
+                                    route = "comic_reader/{comicId}",
+                                    arguments = listOf(navArgument("comicId") { type = NavType.StringType })
+                                ) { backStackEntry ->
+                                    val comicsSettings: SettingsViewModel = androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel()
+                                    val comicPreferences by comicsSettings.comicPreferences.collectAsState()
+                                    ComicReaderScreen(
+                                        vaultId = activeVaultId,
+                                        comicId = backStackEntry.arguments?.getString("comicId").orEmpty(),
+                                        preferences = comicPreferences,
+                                        onBack = { navController.popBackStack() }
+                                    )
                                 }
 
                                 composable(Screen.Highlights.route) { AllHighlightsScreen(onBack = { navController.popBackStack() }, onHighlightClick = { bookId, locator -> navController.navigate(Screen.Reader.createRoute(bookId, locator)) }) }
@@ -472,9 +494,11 @@ fun MainAppScreen(
     isEink: Boolean,
     isMultiUser: Boolean, // <-- 2. ACCEPT IT HERE
     onBookClick: (String) -> Unit,
+    onComicClick: (String) -> Unit,
     onCatalogClick: () -> Unit,
     onHighlightsClick: () -> Unit,
-    onSwitchProfileClick: () -> Unit
+    onSwitchProfileClick: () -> Unit,
+    activeVaultId: String = VaultRepository.DEFAULT_VAULT_ID
 ) {
     val tabs = listOf("Books", "Comics", "Audio", "Settings")
     var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -566,7 +590,11 @@ fun MainAppScreen(
         Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
             when (selectedTabIndex) {
                 0 -> BookshelfScreen(viewModel = bookshelfViewModel, onBookClick = onBookClick, onCatalogClick = onCatalogClick, onHighlightsClick = onHighlightsClick)
-                1 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("ComicShelf (Coming Soon)") }
+                1 -> ComicShelfScreen(
+                    vaultId = activeVaultId,
+                    isEink = isEink,
+                    onOpenComic = onComicClick
+                )
                 2 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("AudioShelf (Coming Soon)") }
                 3 -> SettingsScreen(navController = navController)
             }
