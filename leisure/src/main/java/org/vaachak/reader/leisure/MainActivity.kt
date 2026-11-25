@@ -85,6 +85,8 @@ import org.vaachak.reader.core.data.repository.VaultRepository
 import org.vaachak.reader.core.domain.model.BookEntity
 import org.vaachak.reader.core.domain.model.ThemeMode
 import org.vaachak.reader.leisure.navigation.Screen
+import org.vaachak.reader.leisure.ui.audio.AudioPlayback
+import org.vaachak.reader.leisure.ui.audio.AudioShelfScreen
 import org.vaachak.reader.leisure.ui.comics.ComicReaderScreen
 import org.vaachak.reader.leisure.ui.comics.ComicShelfScreen
 import org.vaachak.reader.leisure.ui.bookshelf.BookshelfScreen
@@ -254,6 +256,7 @@ class MainActivity : AppCompatActivity() {
                                         onCatalogClick = { navController.navigate(Screen.CatalogBrowser.route) },
                                         onHighlightsClick = { navController.navigate(Screen.Highlights.route) },
                                         onSwitchProfileClick = {
+                                            AudioPlayback.stopForProfilePicker(this@MainActivity)
                                             navController.navigate("profile_picker")
                                         },
                                         activeVaultId = activeVaultId
@@ -595,7 +598,7 @@ fun MainAppScreen(
                     isEink = isEink,
                     onOpenComic = onComicClick
                 )
-                2 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("AudioShelf (Coming Soon)") }
+                2 -> AudioShelfScreen(vaultId = activeVaultId)
                 3 -> SettingsScreen(navController = navController)
             }
         }
