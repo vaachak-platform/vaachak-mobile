@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -95,6 +96,102 @@ class AudioIntegrationInstrumentedTest {
         } finally {
             AudioPlayback.stopForProfilePicker(context)
             store.remove("default", book.id)
+        }
+    }
+    @Test fun actualMediaMetadataAndBoundedArtwork() = runBlocking {
+        val root = File(context.cacheDir, "audio-meta-${UUID.randomUUID()}")
+        check(root.mkdirs())
+        try {
+            val file = File(root,"sample.mp3")
+            InstrumentationRegistry.getInstrumentation().context.assets.open("audio-quality-fixture.mp3").use { input ->
+                file.outputStream().use { input.copyTo(it) }
+            }
+            val cover = File(root,"cover.jpg")
+            val meta = PlatformAudioMetadataReader.read(file,cover)
+            assertEquals("Synthetic Track",meta.title)
+            assertEquals("Synthetic Album",meta.album)
+            assertEquals("Synthetic Author",meta.artist)
+            assertTrue(meta.duration > 0L)
+            assertTrue(cover.isFile)
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(cover.path,bounds)
+            assertTrue(bounds.outWidth in 1..512 && bounds.outHeight in 1..512)
+            val noCover = PlatformAudioMetadataReader.read(file,null)
+            assertEquals(meta,noCover)
+            val broken = File(root,"broken.wav").apply { writeText("not audio") }
+            assertTrue(runCatching { PlatformAudioMetadataReader.read(broken,cover) }.isFailure)
+        } finally { root.deleteRecursively() }
+    }
+
+    // Keep the original timeout; report which observable condition failed instead of
+    // emitting an unlabeled coroutine timeout. Only synthetic fixture state is reported.
+    private suspend fun awaitTransport(stage: String, condition: () -> Boolean) {
+        val reached = withTimeoutOrNull(20000L) {
+            while (!condition()) delay(100)
+            true
+        } ?: false
+        assertTrue("Transport stage '$stage' failed; state=${AudioPlayback.state.value}; error=${AudioPlayback.error.value}", reached)
+    }
+
+    @Test fun serviceTransportSettingsSleepCompletionAndRejectedOpen() = runBlocking {
+        assertTrue(context.packageName.endsWith(".debug"))
+        val store = AudioStore.get(context)
+        val sample = (System.nanoTime() % 1000).toShort()
+        val book = AudioImporter(context,store).importSources("default",listOf(
+            source("01.wav",wav(12,sample)), source("02.wav",wav(12,(sample+1).toShort()))),"Transport fixture")
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                fun send(action: String, value: Long = 0L, id: String = book.id, vault: String = "default") = scenario.onActivity {
+                    AudioPlayback.send(it,vault,action,id,value)
+                }
+                send("open",id=UUID.randomUUID().toString())
+                awaitTransport("missing-title error") { AudioPlayback.error.value?.message?.contains("unavailable") == true }
+                send("open")
+                awaitTransport("open starts playback") { AudioPlayback.state.value?.let { it.id==book.id && it.playing } == true }
+                send("seek", 2000L)
+                awaitTransport("initial seek") { AudioPlayback.state.value?.let { it.id == book.id && it.position in 2000L..7000L } == true }
+                send("open") // re-opening active title must not reset it
+                send("toggle")
+                awaitTransport("pause active title") { AudioPlayback.state.value?.let { it.id==book.id && !it.playing && it.position >= 2000L } == true }
+                send("next")
+                awaitTransport("next chapter") { (AudioPlayback.state.value?.position ?: 0L) >= 12000L }
+                send("previous")
+                awaitTransport("previous chapter") { (AudioPlayback.state.value?.position ?: Long.MAX_VALUE) < 1000L }
+                store.setTitlePreferences("default",book.id,AudioPreferences(2f,5,10))
+                send("settings")
+                awaitTransport("apply title preferences") { AudioPlayback.state.value?.preferences == AudioPreferences(2f,5,10) }
+                send("forward")
+                awaitTransport("forward ten seconds") { (AudioPlayback.state.value?.position ?: 0L) >= 10000L }
+                send("back")
+                awaitTransport("back five seconds") { (AudioPlayback.state.value?.position ?: Long.MAX_VALUE) in 4900L..5100L }
+                send("sleep",15)
+                awaitTransport("start timed sleep") { AudioPlayback.state.value?.sleep?.let { it != "Off" && it != "End of chapter" } == true }
+                send("sleep",0)
+                awaitTransport("cancel timed sleep") { AudioPlayback.state.value?.sleep == "Off" }
+                send("sleepChapter")
+                awaitTransport("arm end-of-chapter sleep") { AudioPlayback.state.value?.sleep == "End of chapter" }
+                send("seek",11900)
+                awaitTransport("seek just before chapter boundary") { AudioPlayback.state.value?.let { !it.playing && it.position in 11800L..11999L } == true }
+                send("toggle")
+                awaitTransport("pause at chapter boundary") { AudioPlayback.state.value?.let { !it.playing && it.sleep=="Off" && it.position >= 12000L } == true }
+                send("seek",book.duration-100)
+                send("toggle")
+                awaitTransport("reach natural end") { AudioPlayback.state.value?.ended == true }
+                awaitTransport("persist finished status") { store.load("default").find(book.id)?.finished == true }
+                assertFalse(store.load("default").recent().any { it.id==book.id })
+                send("toggle")
+                awaitTransport("replay with one toggle") { AudioPlayback.state.value?.let { it.playing && it.position < 5000L } == true }
+                awaitTransport("persist replay progress") { store.load("default").find(book.id)?.let { !it.finished && it.position < 5000L } == true }
+                send("stop",vault="wrong-vault")
+                // Same active book remains; an unauthorized vault cannot change transport.
+                delay(600)
+                assertEquals(book.id,AudioPlayback.state.value?.id)
+                scenario.onActivity { AudioPlayback.stopForProfilePicker(it) }
+                awaitTransport("profile picker stops playback") { AudioPlayback.state.value == null }
+            }
+        } finally {
+            AudioPlayback.stopForProfilePicker(context)
+            store.remove("default",book.id)
         }
     }
 }

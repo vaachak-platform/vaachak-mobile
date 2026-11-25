@@ -20,7 +20,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import org.vaachak.reader.core.common.AppCoroutineConfig
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -73,7 +73,7 @@ class AudioPlaybackService : MediaSessionService() {
     private lateinit var session: MediaSession
     private lateinit var store: AudioStore
     private val handler = Handler(Looper.getMainLooper())
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scope = CoroutineScope(SupervisorJob() + AppCoroutineConfig.main)
     private var activeVault: String? = null
     private var book: AudioBook? = null
     private var timeline: AudioTimeline? = null
@@ -100,20 +100,19 @@ class AudioPlaybackService : MediaSessionService() {
             publish()
         }
     }
-    private val tick = object : Runnable {
-        override fun run() {
-            if (destroyed) return
-            val vault = activeVault
-            if (vault != null && vault != vaultRepository.activeVaultId.value) {
-                stopPlayback(); return
-            }
-            if (!opening && book != null) {
-                checkSleep()
-                if (player.isPlaying && SystemClock.elapsedRealtime() - lastSave >= SAVE_INTERVAL) persist()
-                publish()
-            }
-            handler.postDelayed(this, TICK_INTERVAL)
+    private val tick = Runnable { runTick() }
+    private fun runTick() {
+        if (destroyed) return
+        val vault = activeVault
+        if (vault != null && vault != vaultRepository.activeVaultId.value) {
+            stopPlayback(); return
         }
+        if (!opening && book != null) {
+            checkSleep()
+            if (player.isPlaying && SystemClock.elapsedRealtime() - lastSave >= SAVE_INTERVAL) persist()
+            publish()
+        }
+        handler.postDelayed(tick, TICK_INTERVAL)
     }
     override fun onCreate() {
         super.onCreate()
@@ -162,17 +161,23 @@ class AudioPlaybackService : MediaSessionService() {
         val id = intent?.getStringExtra("book").orEmpty()
         val value = intent?.getLongExtra("value", 0L) ?: 0L
         val command = action.removePrefix("vaachak.audio.")
-        if (command == "open") open(vault, id)
-        else if (!opening && activeVault == vault && book?.id == id) transport(command, value)
-        else if (book == null && !opening) stopSelf()
+        when {
+            command == "open" -> open(vault, id)
+            !opening && activeVault == vault && book?.id == id -> transport(command, value)
+            book == null && !opening -> stopSelf()
+        }
         return START_NOT_STICKY
     }
     private fun transport(command: String, value: Long) {
         val line = timeline ?: return
         when (command) {
-            "toggle" -> if (player.playWhenReady) player.pause() else {
-                if (player.playbackState == Player.STATE_ENDED) seek(0L)
-                player.play()
+            "toggle" -> when {
+                player.playbackState == Player.STATE_ENDED -> {
+                    seek(0L)
+                    player.play()
+                }
+                player.playWhenReady -> player.pause()
+                else -> player.play()
             }
             "back" -> seek(position() - preferences.back * 1000L)
             "forward" -> seek(position() + preferences.forward * 1000L)

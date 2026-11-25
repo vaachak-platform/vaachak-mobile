@@ -7,19 +7,19 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
-import kotlinx.coroutines.Dispatchers
+import org.vaachak.reader.core.common.AppCoroutineConfig
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.InputStream
-import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 
-internal data class AudioInput(val name: String, val open: () -> InputStream)
-internal class AudioImporter(private val context: Context, private val store: AudioStore = AudioStore.get(context)) {
-    suspend fun documents(vault: String, uris: List<Uri>): AudioBook = withContext(Dispatchers.IO) {
+internal data class AudioMetadata(val duration: Long, val title: String?, val album: String?, val artist: String?)
+internal fun interface AudioMetadataReader { fun read(file: File, cover: File?): AudioMetadata }
+internal class AudioImporter(private val context: Context, private val store: AudioStore = AudioStore.get(context),
+    private val metadataReader: AudioMetadataReader = PlatformAudioMetadataReader) {
+    suspend fun documents(vault: String, uris: List<Uri>): AudioBook = withContext(AppCoroutineConfig.io) {
         require(uris.size in 1..MAX_AUDIO_TRACKS && uris.distinct().size == uris.size)
         val sources = uris.map { uri ->
             require(uri.scheme == "content")
@@ -29,7 +29,7 @@ internal class AudioImporter(private val context: Context, private val store: Au
         }
         importSources(vault, sources, null)
     }
-    suspend fun folder(vault: String, uri: Uri): AudioBook = withContext(Dispatchers.IO) {
+    suspend fun folder(vault: String, uri: Uri): AudioBook = withContext(AppCoroutineConfig.io) {
         require(uri.scheme == "content")
         val tree = DocumentFile.fromTreeUri(context, uri) ?: error("Folder unavailable")
         val files = mutableListOf<AudioInput>()
@@ -54,7 +54,7 @@ internal class AudioImporter(private val context: Context, private val store: Au
         require(uri.scheme == "content")
         context.contentResolver.openInputStream(uri) ?: error("Cannot open document")
     }
-    suspend fun importSources(vault: String, inputs: List<AudioInput>, title: String?): AudioBook = withContext(Dispatchers.IO) {
+    suspend fun importSources(vault: String, inputs: List<AudioInput>, title: String?): AudioBook = withContext(AppCoroutineConfig.io) {
         require(inputs.size in 1..MAX_AUDIO_TRACKS)
         require(inputs.all { extension(it.name) in AUDIO_EXTENSIONS }) { "Unsupported audio file" }
         val stage = store.staging(vault)
@@ -65,9 +65,9 @@ internal class AudioImporter(private val context: Context, private val store: Au
             val tracks = ordered.mapIndexed { index, input ->
                 val filename = String.format(Locale.ROOT, "%03d.%s", index, extension(input.name))
                 val local = File(stage, filename)
-                val copied = copy(input, local, minOf(remaining, MAX_FILE_BYTES))
+                val copied = copyAudioInput(input, local, minOf(remaining, MAX_FILE_BYTES))
                 remaining -= copied.first
-                val info = readMetadata(local, if (index == 0) File(stage, "cover.jpg") else null)
+                val info = metadataReader.read(local, if (index == 0) File(stage, "cover.jpg") else null)
                 metadata += info
                 val label = info.title ?: input.name.substringAfterLast('/').substringBeforeLast('.').take(256)
                 AudioTrack(label, filename, copied.second, info.duration, AudioChapters.read(local, info.duration))
@@ -79,32 +79,20 @@ internal class AudioImporter(private val context: Context, private val store: Au
             currentCoroutineContext().ensureActive()
             store.publish(vault, stage, AudioBook(UUID.randomUUID().toString(), label, first.artist.orEmpty(), tracks))
         } finally {
-            if (stage.exists()) stage.deleteRecursively()
-        }
-    }
-    private suspend fun copy(source: AudioInput, file: File, limit: Long): Pair<Long, String> {
-        val digest = MessageDigest.getInstance("SHA-256")
-        var total = 0L
-        source.open().use { input ->
-            file.outputStream().use { output ->
-                val buffer = ByteArray(64 * 1024)
-                while (true) {
-                    currentCoroutineContext().ensureActive()
-                    val count = input.read(buffer)
-                    if (count == -1) break
-                    check(count > 0 && total <= limit - count) { "Audio file exceeds import size limit" }
-                    total += count
-                    digest.update(buffer, 0, count)
-                    output.write(buffer, 0, count)
-                }
-                output.fd.sync()
+            if (stage.exists() && !stage.deleteRecursively()) {
+                android.util.Log.w("AudioImporter", "Temporary audio cleanup incomplete")
             }
         }
-        require(total > 0) { "Empty audio file" }
-        return total to digest.digest().joinToString("") { "%02x".format(it) }
     }
-    private data class AudioMetadata(val duration: Long, val title: String?, val album: String?, val artist: String?)
-    private fun readMetadata(file: File, cover: File?): AudioMetadata {
+    private fun extension(name: String): String = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+    private companion object {
+        const val MAX_FILE_BYTES = 8L * 1024 * 1024 * 1024
+        const val MAX_BOOK_BYTES = 16L * 1024 * 1024 * 1024
+    }
+}
+
+internal object PlatformAudioMetadataReader : AudioMetadataReader {
+    override fun read(file: File, cover: File?): AudioMetadata {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(file.absolutePath)
@@ -131,13 +119,10 @@ internal class AudioImporter(private val context: Context, private val store: Au
             try {
                 target.outputStream().use { output -> check(bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)); output.fd.sync() }
             } finally { bitmap.recycle() }
-        } catch (_: Exception) { target.delete() }
+        } catch (_: Exception) {
+            check(!target.exists() || target.delete()) { "Incomplete artwork could not be removed" }
+        }
     }
-    private fun extension(name: String): String = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-    private companion object {
-        const val MAX_ART_SOURCE_BYTES = 32L * 1024 * 1024
-        const val MAX_ART_BYTES = 2 * 1024 * 1024
-        const val MAX_FILE_BYTES = 8L * 1024 * 1024 * 1024
-        const val MAX_BOOK_BYTES = 16L * 1024 * 1024 * 1024
-    }
+    private const val MAX_ART_SOURCE_BYTES = 32L * 1024 * 1024
+    private const val MAX_ART_BYTES = 2 * 1024 * 1024
 }

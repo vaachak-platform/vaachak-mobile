@@ -74,7 +74,10 @@ internal class AudioStore(private val root: File) {
         val current = load(vault)
         val book = current.find(id) ?: return
         save(vault, current.copy(books = current.books.filterNot { it.id == id }))
-        mediaFile(vault, id, book.tracks.first().file).parentFile?.deleteRecursively()
+        val media = mediaFile(vault, id, book.tracks.first().file).parentFile
+        if (media != null && !media.deleteRecursively()) {
+            android.util.Log.w("AudioStore", "Removed title has residual private media")
+        }
     }
     private fun update(vault: String, id: String, transform: (AudioBook) -> AudioBook) {
         val current = load(vault)

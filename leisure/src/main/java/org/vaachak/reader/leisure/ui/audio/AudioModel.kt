@@ -89,3 +89,16 @@ internal val audioNaturalOrder = Comparator<String> { a, b ->
 }
 internal fun audioMatches(book: AudioBook, query: String): Boolean =
     query.trim().split(Regex("\\s+")).all { term -> "${book.title} ${book.author}".contains(term, ignoreCase = true) }
+
+internal fun audioShelfSelection(library: AudioLibrary, query: String, filter: String, order: String): List<AudioBook> {
+    val matching = library.books.filter { book -> audioMatches(book, query) && when (filter) {
+        "Continue" -> book.continueListening
+        "Finished" -> book.finished
+        else -> true
+    } }
+    return when (order) {
+        "Title" -> matching.sortedWith { a, b -> audioNaturalOrder.compare(a.title, b.title) }
+        "Progress" -> matching.sortedByDescending { it.fraction }
+        else -> matching.sortedByDescending { it.opened }
+    }
+}
