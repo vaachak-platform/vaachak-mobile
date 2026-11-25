@@ -43,6 +43,11 @@ class VaultRepository(
         }
     }
 
+    /** Read the persisted identity for network authorization; never use the eager startup placeholder. */
+    internal val persistedVaultIdentity = globalDataStore.data.map { prefs ->
+        prefs[ACTIVE_VAULT_ID] ?: DEFAULT_VAULT_ID
+    }
+
     // OPTIMIZATION: Converted to an eager StateFlow on the IO dispatcher.
     // The UI will no longer freeze waiting for the first disk read.
     val activeVaultId: StateFlow<String> = globalDataStore.data.map { prefs ->

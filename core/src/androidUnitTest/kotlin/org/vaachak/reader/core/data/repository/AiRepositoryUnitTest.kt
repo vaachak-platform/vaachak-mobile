@@ -6,6 +6,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import okhttp3.ResponseBody
@@ -49,6 +50,17 @@ class AiRepositoryUnitTest {
         coEvery { settings.loadPrivateGatewayToken() } returns "gateway-secret"
         every { settings.cfUrl } returns flowOf(cfUrl)
         every { settings.cfToken } returns flowOf(cfToken)
+        coEvery { settings.loadAiRequest(any(), any()) } coAnswers {
+            if (offline) throw AiOfflineException()
+            val image = firstArg<AiRequestKind>() == AiRequestKind.IMAGE
+            AiRequestConfig(
+                provider,
+                if (image) cfUrl else "https://reader.example.ts.net:8443/v1",
+                "local-chat",
+                if (image) cfToken else if (provider == AiTextProvider.GEMINI) geminiKey else "gateway-secret",
+                MutableStateFlow(false)
+            )
+        }
     }
 
     @Test fun offlineModeBlocksEveryTextOperationAndImageRequests() = runBlocking {

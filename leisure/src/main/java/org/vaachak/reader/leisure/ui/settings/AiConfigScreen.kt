@@ -50,6 +50,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import org.vaachak.reader.core.data.repository.GatewayDiagnosticReport
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,13 +76,18 @@ fun AiConfigScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val vaultId by viewModel.activeVaultId.collectAsState()
+    val diagnostics: GatewayDiagnosticsViewModel = hiltViewModel()
+    androidx.compose.runtime.key(vaultId) {
     AiConfigForm(
         state = state,
         onBack = onBack,
         onMaskChange = viewModel::setAiMasked,
         onClearGatewayKey = viewModel::clearPrivateGatewayToken,
-        onSave = { request -> viewModel.saveAiConfig(request, onSaved = onBack) }
+        onSave = { request -> viewModel.saveAiConfig(request, onSaved = onBack) },
+        onTestGateway = { diagnostics.check(vaultId) }
     )
+    }
 }
 
 /** Production AI form accepts callbacks to make credential validation testable on an emulator. */
@@ -91,7 +97,8 @@ internal fun AiConfigForm(
     onBack: () -> Unit,
     onMaskChange: (Boolean) -> Unit,
     onClearGatewayKey: () -> Unit,
-    onSave: (AiConfigSaveRequest) -> Unit
+    onSave: (AiConfigSaveRequest) -> Unit,
+    onTestGateway: (suspend () -> GatewayDiagnosticReport)? = null
 ) {
     val isEink = state.themeMode == ThemeMode.E_INK
     // Local state for the form
@@ -104,6 +111,10 @@ internal fun AiConfigForm(
     var gatewayModel by remember { mutableStateOf(state.aiConfig.gatewayModel) }
     var gatewayToken by remember { mutableStateOf("") }
     var gatewayError by remember { mutableStateOf("") }
+    var diagnosticRevision by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val savedGatewayUnchanged = provider == state.aiConfig.textProvider &&
+        gatewayUrl == state.aiConfig.gatewayUrl && gatewayModel == state.aiConfig.gatewayModel &&
+        gatewayToken.isBlank()
     LaunchedEffect(state.aiConfig) {
         key = state.aiConfig.geminiKey
         url = state.aiConfig.cloudflareUrl
@@ -131,6 +142,8 @@ internal fun AiConfigForm(
                 .verticalScroll(rememberScrollState())
                 .padding(24.dp)
         ) {
+            Text("Saved text provider: ${if (state.aiConfig.textProvider == AiTextProvider.GEMINI) "Gemini" else "Private Text Gateway"}",
+                modifier = Modifier.tid("ai_config_active_provider"))
             Text("Text AI Provider", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(selected = provider == AiTextProvider.GEMINI,
@@ -140,7 +153,7 @@ internal fun AiConfigForm(
                 RadioButton(selected = provider == AiTextProvider.PRIVATE_GATEWAY,
                     onClick = { provider = AiTextProvider.PRIVATE_GATEWAY },
                     modifier = Modifier.tid("ai_config_provider_gateway"))
-                Text("Private ai-g732")
+                Text("Private Text Gateway")
             }
             if (provider == AiTextProvider.PRIVATE_GATEWAY) {
                 Text("Text only. Requires Tailscale and a separate Vaachak key.",
@@ -156,8 +169,16 @@ internal fun AiConfigForm(
                     modifier = Modifier.fillMaxWidth().tid("ai_config_gateway_key"), singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false))
-                Button(onClick = { onClearGatewayKey() }) {
+                Button(onClick = { diagnosticRevision++; onClearGatewayKey() }) {
                     Text("Remove saved Vaachak gateway key")
+                }
+                if (onTestGateway != null) {
+                    androidx.compose.runtime.key(diagnosticRevision, state.aiConfig.gatewayUrl, state.aiConfig.gatewayModel) {
+                        GatewayDiagnosticsPanel(
+                            enabled = savedGatewayUnchanged && !state.isOfflineMode,
+                            onTest = onTestGateway
+                        )
+                    }
                 }
             }
             if (gatewayError.isNotBlank()) Text(gatewayError, color = MaterialTheme.colorScheme.error)
@@ -249,6 +270,7 @@ internal fun AiConfigForm(
                             return@Button
                         }
                     }
+                    diagnosticRevision++
                     onSave(
                         AiConfigSaveRequest(
                             geminiKey = key,

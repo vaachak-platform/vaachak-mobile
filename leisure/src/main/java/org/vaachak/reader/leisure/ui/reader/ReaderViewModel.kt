@@ -6,7 +6,10 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -48,6 +51,7 @@ import org.vaachak.reader.core.common.AppCoroutineConfig
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
 import org.vaachak.reader.core.data.repository.AiRepository
+import org.vaachak.reader.core.data.repository.AiVaultScope
 import org.vaachak.reader.core.data.repository.DictionaryRepository
 import org.vaachak.reader.core.data.repository.ReadiumManager
 import org.vaachak.reader.core.data.repository.SettingsRepository
@@ -284,7 +288,32 @@ class ReaderViewModel @Inject constructor(
         this.visualNavigatorProvider = provider
     }
 
+    private var readerAiVault: String? = null
+    private var selectionAiJob: Job? = null
+    private var recapAiJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            vaultRepository.activeVaultId.collect { active ->
+                if (readerAiVault != null && readerAiVault != active) {
+                    readerAiVault = null
+                    cancelReaderAi()
+                }
+            }
+        }
+    }
+
+    fun cancelReaderAi() {
+        selectionAiJob?.cancel()
+        recapAiJob?.cancel()
+        clearAiState()
+        _recapText.value = null
+        _isRecapLoading.value = false
+    }
+
     fun onFileSelected(uri: Uri) {
+        cancelReaderAi()
+        readerAiVault = vaultRepository.activeVaultId.value
         _bookSearchQuery.value = ""
         _searchResults.value = emptyList()
         _showSearch.value = false
@@ -466,33 +495,47 @@ class ReaderViewModel @Inject constructor(
     fun getQuickRecap() {
         if (!_bookAiEnabled.value) return
 
+        val profileId = readerAiVault ?: return
+        if (profileId != vaultRepository.activeVaultId.value) return
+        recapAiJob?.cancel()
         _showRecapConfirmation.value = false
         _isRecapLoading.value = true
 
-        viewModelScope.launch {
-            val title = _publication.value?.metadata?.title ?: "Unknown Book"
-            val currentContext = "Current Position: ${_currentPageInfo.value}"
-            val profileId = vaultRepository.activeVaultId.first()
-            val highlights = highlightDao
-                .getHighlightsForBook(_currentBookHash.value ?: "", profileId)
-                .first()
-                .take(10)
-                .joinToString("\n") { "- ${it.text}" }
+        recapAiJob = viewModelScope.launch(AiVaultScope(profileId)) {
+            try {
+                val title = _publication.value?.metadata?.title ?: "Unknown Book"
+                val currentContext = "Current Position: ${_currentPageInfo.value}"
+                val highlights = highlightDao
+                    .getHighlightsForBook(_currentBookHash.value ?: "", profileId)
+                    .first()
+                    .take(10)
+                    .joinToString("\n") { "- ${it.text}" }
 
-            val summary = aiRepository.generateRecap(title, highlights, currentContext)
-            _recapText.value = summary
-            _isRecapLoading.value = false
+                val summary = aiRepository.generateRecap(title, highlights, currentContext)
+                if (profileId == vaultRepository.activeVaultId.value) _recapText.value = summary
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _recapText.value = "Error: Unable to generate recap."
+            } finally {
+                if (kotlinx.coroutines.currentCoroutineContext()[Job]?.isActive == true) {
+                    _isRecapLoading.value = false
+                }
+            }
         }
     }
 
     fun saveRecapAsHighlight() {
         val summary = _recapText.value ?: return
+        val recapVault = readerAiVault ?: return
+        if (recapVault != vaultRepository.activeVaultId.value) return
         val currentUri = _currentBookHash.value ?: return
         val locator = _currentLocator.value ?: return
         val isEink = isEinkEnabled.value
 
         viewModelScope.launch {
-            val profileId = vaultRepository.activeVaultId.first()
+            if (recapVault != vaultRepository.activeVaultId.value) return@launch
+            val profileId = recapVault
             val highlight = HighlightEntity(
                 bookHashId = currentUri,
                 profileId = profileId,
@@ -508,6 +551,8 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun dismissRecapResult() {
+        recapAiJob?.cancel()
+        _isRecapLoading.value = false
         _recapText.value = null
     }
 
@@ -648,6 +693,8 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun closeBook() {
+        cancelReaderAi()
+        readerAiVault = null
         val finalUri = _currentLocalUri.value
         val finalLocator = _currentLocator.value
 
@@ -738,67 +785,60 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun onTextSelected(t: String) {
+        selectionAiJob?.cancel()
+        clearAiState()
         currentSelectedText = t
         _isBottomSheetVisible.value = true
     }
 
     fun onActionExplain() {
-        _isDictionaryLookup.value = false
-        _isDictionaryLoading.value = false
-        _isImageResponse.value = false
-        if (!_bookAiEnabled.value) return
-
-        viewModelScope.launch {
-            performAiAction("Thinking...") {
-                aiRepository.explainContext(currentSelectedText)
-            }
-        }
+        val selection = currentSelectedText
+        launchSelectionAi("Thinking...") { aiRepository.explainContext(selection) }
     }
 
     fun onActionWhoIsThis() {
-        _isDictionaryLookup.value = false
-        _isDictionaryLoading.value = false
-        _isImageResponse.value = false
-        if (!_bookAiEnabled.value) return
-
-        viewModelScope.launch {
-            performAiAction("Investigating...") {
-                aiRepository.whoIsThis(
-                    currentSelectedText,
-                    _publication.value?.metadata?.title ?: "",
-                    ""
-                )
-            }
-        }
+        val selection = currentSelectedText
+        val title = _publication.value?.metadata?.title ?: ""
+        launchSelectionAi("Investigating...") { aiRepository.whoIsThis(selection, title, "") }
     }
 
     fun onActionVisualize() {
-        _isDictionaryLookup.value = false
-        _isDictionaryLoading.value = false
-        if (!_bookAiEnabled.value) return
-
-        viewModelScope.launch {
-            performAiAction("Drawing...") {
-                aiRepository.visualizeText(currentSelectedText)
-            }
-            _isImageResponse.value = true
-        }
+        val selection = currentSelectedText
+        launchSelectionAi("Drawing...", image = true) { aiRepository.visualizeText(selection) }
     }
 
-    private suspend fun performAiAction(message: String, action: suspend () -> String) {
+    private fun launchSelectionAi(message: String, image: Boolean = false, action: suspend () -> String) {
+        val profileId = readerAiVault ?: return
+        if (!_bookAiEnabled.value || profileId != vaultRepository.activeVaultId.value) return
+        selectionAiJob?.cancel()
+        _isDictionaryLookup.value = false
+        _isDictionaryLoading.value = false
+        _isImageResponse.value = false
         _aiResponse.value = message
-        try {
-            _aiResponse.value = action()
-        } catch (e: Exception) {
-            _aiResponse.value = e.message ?: ""
+        selectionAiJob = viewModelScope.launch(AiVaultScope(profileId)) {
+            try {
+                val result = action()
+                if (profileId == vaultRepository.activeVaultId.value) {
+                    _aiResponse.value = result
+                    _isImageResponse.value = image
+                }
+            } catch (cancelled: CancellationException) {
+                if (kotlinx.coroutines.currentCoroutineContext()[Job]?.isActive == true) {
+                    _aiResponse.value = "Request cancelled. Retry explicitly."
+                }
+                throw cancelled
+            } catch (_: Exception) {
+                _aiResponse.value = "Error: AI request failed. Retry explicitly."
+            }
         }
     }
 
     fun dismissRecap() {
-        _recapText.value = null
+        dismissRecapResult()
     }
 
     fun dismissBottomSheet() {
+        selectionAiJob?.cancel()
         _isBottomSheetVisible.value = false
         clearAiState()
     }
@@ -815,6 +855,7 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun lookupWord(word: String) {
+        selectionAiJob?.cancel()
         val trimmedWord = word.trim()
         val wordCount = trimmedWord.split(Regex("\\s+")).size
 
