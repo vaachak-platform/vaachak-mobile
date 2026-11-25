@@ -18,7 +18,9 @@ import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.documentfile.provider.DocumentFile
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -157,30 +159,34 @@ class SettingsRepository @Inject constructor(
         legacyKey: Preferences.Key<String>,
         slot: CredentialSlot
     ): String = withContext(AppCoroutineConfig.io) {
-        try {
-            credentialMutex.withLock {
-                val store = getVaultDataStore(vaultId)
-                val key = credentialId(vaultId, slot)
-                val legacy = store.data.first()[legacyKey]
-                if (legacy != null) {
-                    if (legacy.isNotEmpty()) {
-                        privateGatewaySecrets.write(key, legacy)
-                        check(privateGatewaySecrets.read(key) == legacy) {
-                            "Encrypted credential verification failed"
-                        }
-                    }
-                    // Only remove plaintext once ciphertext has been verified.
-                    store.edit { prefs ->
-                        prefs.remove(legacyKey)
-                        prefs[CREDENTIAL_REVISION] = (prefs[CREDENTIAL_REVISION] ?: 0) + 1
-                    }
+        credentialMutex.withLock { readAndMigrateCredentialLocked(vaultId, legacyKey, slot) }
+    }
+
+    private suspend fun readAndMigrateCredentialLocked(
+        vaultId: String,
+        legacyKey: Preferences.Key<String>,
+        slot: CredentialSlot
+    ): String = try {
+        val store = getVaultDataStore(vaultId)
+        val key = credentialId(vaultId, slot)
+        val legacy = store.data.first()[legacyKey]
+        if (legacy != null) {
+            if (legacy.isNotEmpty()) {
+                privateGatewaySecrets.write(key, legacy)
+                check(privateGatewaySecrets.read(key) == legacy) {
+                    "Encrypted credential verification failed"
                 }
-                privateGatewaySecrets.read(key)
             }
-        } catch (_: GatewayCredentialUnavailableException) {
-            // No plaintext network fallback. Leave legacy preference for retry after unlock.
-            ""
+            // Only remove plaintext once ciphertext has been verified.
+            store.edit { prefs ->
+                prefs.remove(legacyKey)
+                prefs[CREDENTIAL_REVISION] = (prefs[CREDENTIAL_REVISION] ?: 0) + 1
+            }
         }
+        privateGatewaySecrets.read(key)
+    } catch (_: GatewayCredentialUnavailableException) {
+        // No plaintext network fallback. Leave legacy preference for retry after unlock.
+        ""
     }
 
     private suspend fun getVaultDataStore(vaultId: String): DataStore<Preferences> {
@@ -231,18 +237,65 @@ class SettingsRepository @Inject constructor(
      * the credential. The vault ID is captured once to avoid crossing profiles mid-call.
      */
     suspend fun loadPrivateGatewayToken(): String = withContext(AppCoroutineConfig.io) {
-        gatewayMigrationMutex.withLock {
-            val vaultId = vaultRepository.activeVaultId.first()
-            val dataStore = getVaultDataStore(vaultId)
-            val legacy = dataStore.data.first()[PRIVATE_GATEWAY_TOKEN]
-            if (legacy != null) {
-                if (legacy.isNotEmpty()) privateGatewaySecrets.write(vaultId, legacy)
-                dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
-                if (legacy.isEmpty()) return@withLock ""
-            }
-            privateGatewaySecrets.read(vaultId)
-        }
+        gatewayMigrationMutex.withLock { loadGatewayTokenLocked(vaultRepository.activeVaultId.first()) }
     }
+
+    private suspend fun loadGatewayTokenLocked(vaultId: String): String {
+        val dataStore = getVaultDataStore(vaultId)
+        val legacy = dataStore.data.first()[PRIVATE_GATEWAY_TOKEN]
+        if (legacy != null) {
+            if (legacy.isNotEmpty()) privateGatewaySecrets.write(vaultId, legacy)
+            dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
+            if (legacy.isEmpty()) return ""
+        }
+        return privateGatewaySecrets.read(vaultId)
+    }
+    /** A fixed-vault network snapshot. Existing key storage and migration paths are reused. */
+    internal suspend fun loadAiRequest(kind: AiRequestKind, expectedVault: String?): AiRequestConfig =
+        withContext(AppCoroutineConfig.io) {
+            // Existing writers take one lock only; the network snapshot takes both in this fixed order.
+            credentialMutex.withLock {
+                gatewayMigrationMutex.withLock { loadAiRequestLocked(kind, expectedVault) }
+            }
+        }
+
+    private suspend fun loadAiRequestLocked(kind: AiRequestKind, expectedVault: String?): AiRequestConfig {
+        val vaultId = vaultRepository.persistedVaultIdentity.first()
+        if (expectedVault != null && expectedVault != vaultId) {
+            throw CancellationException("AI vault changed")
+        }
+        val store = getVaultDataStore(vaultId)
+        val before = store.data.first()
+        if (before[OFFLINE_MODE_KEY] ?: true) throw AiOfflineException()
+        val provider = if (before[AI_TEXT_PROVIDER] == "PRIVATE_GATEWAY") {
+            AiTextProvider.PRIVATE_GATEWAY
+        } else AiTextProvider.GEMINI
+        val credential = when {
+            kind == AiRequestKind.IMAGE -> readAndMigrateCredentialLocked(vaultId, CF_TOKEN, CredentialSlot.CLOUDFLARE)
+            provider == AiTextProvider.PRIVATE_GATEWAY -> loadGatewayTokenLocked(vaultId)
+            else -> readAndMigrateCredentialLocked(vaultId, GEMINI_KEY, CredentialSlot.GEMINI)
+        }
+        val after = store.data.first()
+        // Allow the existing legacy migration to update credential revision, but never mix endpoints.
+        if (!sameAiRouting(before, after) || vaultRepository.persistedVaultIdentity.first() != vaultId) {
+            throw CancellationException("AI configuration changed")
+        }
+        if (after[OFFLINE_MODE_KEY] ?: true) throw AiOfflineException()
+        val url = if (kind == AiRequestKind.IMAGE) after[CF_URL].orEmpty() else after[PRIVATE_GATEWAY_URL].orEmpty()
+        val invalidated = combine(vaultRepository.persistedVaultIdentity, store.data) { active, prefs ->
+            active != vaultId || !sameAiRouting(after, prefs) ||
+                after[CREDENTIAL_REVISION] != prefs[CREDENTIAL_REVISION]
+        }
+        return AiRequestConfig(provider, url, after[PRIVATE_GATEWAY_MODEL].orEmpty(), credential, invalidated)
+    }
+
+    private fun sameAiRouting(left: Preferences, right: Preferences): Boolean =
+        left[OFFLINE_MODE_KEY] == right[OFFLINE_MODE_KEY] &&
+            left[AI_TEXT_PROVIDER] == right[AI_TEXT_PROVIDER] &&
+            left[CF_URL] == right[CF_URL] &&
+            left[PRIVATE_GATEWAY_URL] == right[PRIVATE_GATEWAY_URL] &&
+            left[PRIVATE_GATEWAY_MODEL] == right[PRIVATE_GATEWAY_MODEL]
+
     val isEinkEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[IS_EINK_ENABLED] ?: false }
     val isAutoSaveRecapsEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[AUTO_SAVE_RECAPS_KEY] ?: true }
     val einkContrast: Flow<Float> = vaultPreferencesFlow.map { it[CONTRAST_KEY] ?: 0.5f }
@@ -437,6 +490,7 @@ class SettingsRepository @Inject constructor(
                     prefs[PRIVATE_GATEWAY_URL] = url.trim()
                     prefs[PRIVATE_GATEWAY_MODEL] = model.trim()
                     prefs.remove(PRIVATE_GATEWAY_TOKEN)
+                    prefs[CREDENTIAL_REVISION] = (prefs[CREDENTIAL_REVISION] ?: 0) + 1
                 }
             }
         }
@@ -447,11 +501,17 @@ class SettingsRepository @Inject constructor(
             val dataStore = getVaultDataStore(vaultId)
             if (token.isBlank()) {
                 // Remove the legacy plaintext copy first so it cannot be re-migrated.
-                dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
+                dataStore.edit {
+                    it.remove(PRIVATE_GATEWAY_TOKEN)
+                    it[CREDENTIAL_REVISION] = (it[CREDENTIAL_REVISION] ?: 0) + 1
+                }
                 privateGatewaySecrets.clear(vaultId)
             } else {
                 privateGatewaySecrets.write(vaultId, token.trim())
-                dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
+                dataStore.edit {
+                    it.remove(PRIVATE_GATEWAY_TOKEN)
+                    it[CREDENTIAL_REVISION] = (it[CREDENTIAL_REVISION] ?: 0) + 1
+                }
             }
         }
     }

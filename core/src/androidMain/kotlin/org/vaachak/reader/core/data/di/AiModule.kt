@@ -19,7 +19,6 @@ object AiModule {
     @Singleton
     fun provideOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
-            // High timeout for AI generation (30s)
             .callTimeout(60, TimeUnit.SECONDS)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
@@ -30,10 +29,10 @@ object AiModule {
     @Singleton
     fun provideCloudflareAiApi(client: OkHttpClient): CloudflareAiApi {
         return Retrofit.Builder()
-            // 1. PLACEHOLDER URL: This satisfies Retrofit but is ignored
-            // because we use @Url in the API call.
+            // Required Retrofit placeholder; @Url supplies the validated user-configured endpoint.
             .baseUrl("https://structure.placeholder/")
-            .client(client)
+            // Never replay reading excerpts to redirect targets or downgrade TLS.
+            .client(client.newBuilder().followRedirects(false).followSslRedirects(false).build())
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(CloudflareAiApi::class.java)

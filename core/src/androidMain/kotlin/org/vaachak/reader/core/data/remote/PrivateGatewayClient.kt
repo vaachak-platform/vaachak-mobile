@@ -1,20 +1,26 @@
 package org.vaachak.reader.core.data.remote
 
-import org.vaachak.reader.core.common.AppCoroutineConfig
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
+import java.io.IOException
 import java.net.Proxy
 import java.net.URI
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
-/** First pilot supports authenticated Tailscale HTTPS, nonstreaming text, and one model alias. */
+/** Existing R7.1 pilot: authenticated Tailscale HTTPS, nonstreaming text, one model alias. */
 object PrivateGatewayEndpoint {
     fun normalizedBase(raw: String): String {
         val uri = try { URI(raw.trim().trimEnd('/')) }
@@ -34,6 +40,11 @@ object PrivateGatewayEndpoint {
     }
 }
 
+/** A successful catalog probe is not evidence of inference, backend or model health. */
+enum class GatewayProbeResult {
+    MODEL_LISTED, MODEL_NOT_LISTED, CATALOG_UNSUPPORTED, CATALOG_UNRECOGNIZED
+}
+
 @Singleton
 class PrivateGatewayClient @Inject constructor(baseClient: OkHttpClient) {
     private val client = baseClient.newBuilder()
@@ -44,31 +55,110 @@ class PrivateGatewayClient @Inject constructor(baseClient: OkHttpClient) {
         .readTimeout(135, TimeUnit.SECONDS)
         .callTimeout(145, TimeUnit.SECONDS)
         .build()
+    private val diagnosticClient = client.newBuilder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
+        .build()
 
-    suspend fun chat(base: String, modelId: String, bearer: String, prompt: String): String =
-        withContext(AppCoroutineConfig.io) {
-            val url = PrivateGatewayEndpoint.normalizedBase(base)
-            val model = PrivateGatewayEndpoint.validatedModel(modelId)
-            require(bearer.isNotBlank()) { "Set the Vaachak gateway key in AI Settings" }
-            require(prompt.isNotBlank() && prompt.length <= 24_000) { "Text exceeds gateway limit" }
-            val payload = JSONObject()
-                .put("model", model)
-                .put("stream", false)
-                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
-            val request = Request.Builder().url("$url/chat/completions")
-                .header("Authorization", "Bearer $bearer")
-                .header("Accept", "application/json")
-                .post(payload.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(request).execute().use { response ->
-                check(response.code == 200) { "Private gateway HTTP ${response.code}" }
-                val body = response.peekBody(131_072L).string()
-                check(body.isNotBlank()) { "Empty gateway response" }
-                val result = JSONObject(body).optJSONArray("choices")
-                    ?.optJSONObject(0)?.optJSONObject("message")?.optString("content")
-                    ?.trim().orEmpty()
-                check(result.isNotEmpty()) { "Gateway returned no text" }
-                result
+    private fun base(raw: String): String = try {
+        PrivateGatewayEndpoint.normalizedBase(raw)
+    } catch (error: IllegalArgumentException) {
+        throw GatewayInputException(AiFailure.URL, error.message ?: "Invalid gateway URL")
+    }
+
+    private fun model(raw: String): String = try {
+        PrivateGatewayEndpoint.validatedModel(raw)
+    } catch (_: IllegalArgumentException) {
+        throw GatewayInputException(AiFailure.MODEL, "Invalid model alias")
+    }
+
+    private fun authorized(url: String, bearer: String): Request.Builder {
+        if (bearer.isBlank()) {
+            throw GatewayInputException(AiFailure.KEY, "Set the Vaachak gateway key in AI Settings")
+        }
+        return Request.Builder().url(url)
+            .header("Authorization", "Bearer $bearer")
+            .header("Accept", "application/json")
+    }
+
+    suspend fun chat(base: String, modelId: String, bearer: String, prompt: String): String {
+        val url = base(base)
+        val model = model(modelId)
+        require(prompt.isNotBlank() && prompt.length <= 24_000) { "Text exceeds gateway limit" }
+        val payload = JSONObject()
+            .put("model", model)
+            .put("stream", false)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt)))
+        val request = authorized("$url/chat/completions", bearer)
+            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+        return client.newCall(request).awaitParsed(::parseChat)
+    }
+
+    /** Optional compatibility probe only. A missing /models route never triggers inference. */
+    suspend fun probe(base: String, modelId: String, bearer: String): GatewayProbeResult {
+        val url = base(base)
+        val model = model(modelId)
+        val request = authorized("$url/models", bearer).get().build()
+        return diagnosticClient.newCall(request).awaitParsed { parseCatalog(it, model) }
+    }
+
+    private fun parseChat(response: Response): String {
+        if (response.code != 200) throw GatewayHttpException(response.code)
+        val body = response.peekBody(131_072L).string()
+        if (body.isBlank()) throw GatewayResponseException("Empty gateway response")
+        val result = try {
+            JSONObject(body).optJSONArray("choices")?.optJSONObject(0)
+                ?.optJSONObject("message")?.optString("content")?.trim().orEmpty()
+        } catch (_: JSONException) {
+            throw GatewayResponseException("Invalid gateway response")
+        }
+        if (result.isEmpty()) throw GatewayResponseException("Gateway returned no text")
+        return result
+    }
+
+    private fun parseCatalog(response: Response, model: String): GatewayProbeResult {
+        if (response.code == 404 || response.code == 405 || response.code == 501) {
+            return GatewayProbeResult.CATALOG_UNSUPPORTED
+        }
+        if (response.code != 200) throw GatewayHttpException(response.code)
+        // Bounded body; reject truncated/oversized or unrecognized catalogs rather than claim success.
+        val bytes = response.peekBody(65_537L).bytes()
+        if (bytes.size > 65_536) return GatewayProbeResult.CATALOG_UNRECOGNIZED
+        val entries = try {
+            JSONObject(bytes.toString(Charsets.UTF_8)).optJSONArray("data")
+        } catch (_: JSONException) {
+            null
+        } ?: return GatewayProbeResult.CATALOG_UNRECOGNIZED
+        for (index in 0 until entries.length()) {
+            val id = entries.optJSONObject(index)?.optString("id").orEmpty()
+            if (id.isBlank()) return GatewayProbeResult.CATALOG_UNRECOGNIZED
+        }
+        return if ((0 until entries.length()).any { entries.optJSONObject(it)?.optString("id") == model }) {
+            GatewayProbeResult.MODEL_LISTED
+        } else {
+            GatewayProbeResult.MODEL_NOT_LISTED
+        }
+    }
+}
+
+/** Cancellation remains connected to the call through response body parsing and closure. */
+internal suspend fun <T> Call.awaitParsed(parse: (Response) -> T): T = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation { cancel() }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            continuation.resumeWithException(e)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            try {
+                val result = response.use { if (continuation.isActive) parse(it) else return }
+                continuation.resume(result)
+            } catch (error: Exception) {
+                continuation.resumeWithException(error)
             }
         }
+    })
 }

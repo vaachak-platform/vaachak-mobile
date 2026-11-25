@@ -227,6 +227,7 @@ fun ReaderScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.cancelReaderAi()
             val json = currentLocator?.toJSON()?.toString() ?: ""
             viewModel.onReaderPause(json)
         }

@@ -4,7 +4,10 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,6 +23,7 @@ import org.vaachak.reader.core.common.AppCoroutineConfig
 import org.vaachak.reader.core.data.local.BookDao
 import org.vaachak.reader.core.data.local.HighlightDao
 import org.vaachak.reader.core.data.repository.AiRepository
+import org.vaachak.reader.core.data.repository.AiVaultScope
 import org.vaachak.reader.core.data.repository.LibraryRepository
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
@@ -287,6 +291,8 @@ class BookshelfViewModel @Inject constructor(
     }
 
     fun clearRecap(uri: String) {
+        recallJob?.cancel()
+        _loadingRecapUri.value = null
         _recapState.value -= uri
     }
 
@@ -296,16 +302,34 @@ class BookshelfViewModel @Inject constructor(
             .onFailure { _snackbarMessage.value = it.message ?: "Failed to import" }
     }
 
+    private var recallJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            var previous = vaultRepository.activeVaultId.value
+            vaultRepository.activeVaultId.collect { active ->
+                if (previous != active) {
+                    recallJob?.cancel()
+                    _loadingRecapUri.value = null
+                    _recapState.value = emptyMap()
+                    previous = active
+                }
+            }
+        }
+    }
+
     fun getQuickRecap(book: BookEntity) {
         if (offlineModeState.value) {
             _snackbarMessage.value = "Offline Mode enabled. Connect to use Recall."
             return
         }
 
-        viewModelScope.launch {
+        val profileId = book.profileId
+        if (profileId != vaultRepository.activeVaultId.value) return
+        recallJob?.cancel()
+        recallJob = viewModelScope.launch(AiVaultScope(profileId)) {
             _loadingRecapUri.value = book.localUri
             try {
-                val profileId = vaultRepository.activeVaultId.first()
                 val highlights = highlightDao
                     .getHighlightsForBook(book.bookHash, profileId)
                     .first()
@@ -313,9 +337,13 @@ class BookshelfViewModel @Inject constructor(
                     .joinToString("\n") { it.text }
 
                 val summary = aiRepository.getRecallSummary(book.title, highlights)
-                _recapState.value += (book.bookHash to summary)
+                if (profileId == vaultRepository.activeVaultId.value) _recapState.value += (book.bookHash to summary)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _snackbarMessage.value = "Failed to generate recall."
             } finally {
-                _loadingRecapUri.value = null
+                if (kotlinx.coroutines.currentCoroutineContext()[Job]?.isActive == true) _loadingRecapUri.value = null
             }
         }
     }
@@ -326,10 +354,11 @@ class BookshelfViewModel @Inject constructor(
             return
         }
 
-        viewModelScope.launch {
+        val profileId = vaultRepository.activeVaultId.value
+        recallJob?.cancel()
+        recallJob = viewModelScope.launch(AiVaultScope(profileId)) {
             _loadingRecapUri.value = "GLOBAL"
             try {
-                val profileId = vaultRepository.activeVaultId.first()
                 val activeBooks = bookDao
                     .getAllBooksSortedByRecent(profileId)
                     .first()
@@ -364,11 +393,13 @@ class BookshelfViewModel @Inject constructor(
                     "My Active Reading List",
                     allHighlights.joinToString("\n\n")
                 )
-                _recapState.value += ("GLOBAL" to summary)
+                if (profileId == vaultRepository.activeVaultId.value) _recapState.value += ("GLOBAL" to summary)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 _snackbarMessage.value = "Failed to generate global recall."
             } finally {
-                _loadingRecapUri.value = null
+                if (kotlinx.coroutines.currentCoroutineContext()[Job]?.isActive == true) _loadingRecapUri.value = null
             }
         }
     }
