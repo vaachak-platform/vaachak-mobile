@@ -67,13 +67,25 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Runner resource diagnostics
+        run: |
+          echo "Available CPUs:"
+          nproc
+          echo "Host memory:"
+          free -h
+          echo "Available storage:"
+          df -h /
+          echo "KVM device:"
+          ls -l /dev/kvm
+
       - name: Android instrumentation and JaCoCo coverage (API 35)
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 35
           target: google_apis
           arch: x86_64
-          ram-size: 2048M
+          ram-size: 4096M
+          cores: 2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           # The runner executes ONE shell command, not a multiline Bash block.
