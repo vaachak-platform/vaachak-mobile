@@ -205,6 +205,85 @@ class ComicShelfStoreTest {
         assertEquals(1, store.list(vault).size)
     }
 
+    @Test fun originalArchiveRelinkPreservesIdentityProgressAndOverride() {
+        val bytes = cbz("01.png" to byteArrayOf(1, 2), "02.png" to byteArrayOf(3, 4))
+        source.writeBytes(bytes)
+        provider.displayName = "Original.cbz"
+        val added = store.importComic(vault, uri("original.cbz"))
+        store.setPage(vault, added.id, 1)
+        val override = ComicViewOverride(ComicViewMode.WEBTOON, ComicZoomFit.WIDTH)
+        store.setViewOverride(vault, added.id, override)
+        val before = store.list(vault).single()
+        source.writeBytes(cbz("different.png" to byteArrayOf(5)))
+        assertThrows(Exception::class.java) { store.relinkArchive(vault, added.id, uri("wrong.cbz")) }
+        assertEquals(before, store.list(vault).single())
+        source.writeBytes(bytes)
+        val recovered = store.relinkArchive(vault, added.id, uri("renamed.cbz"))
+        assertEquals(before.copy(uri = recovered.uri), recovered)
+        assertEquals(listOf("01.png", "02.png"), store.pageNames(recovered))
+        assertArrayEquals(byteArrayOf(3, 4), store.readPage(recovered, "02.png"))
+        store.setViewOverride(vault, added.id, null)
+        assertEquals(null, store.list(vault).single().viewOverride)
+        assertTrue(store.list(otherVault).isEmpty())
+        store.remove(vault, added.id)
+        assertTrue(source.exists())
+    }
+
+    @Test fun readingPrivateCbzOutsideComicsRootIsRejected() {
+        source.writeBytes(cbz("01.png" to byteArrayOf(1, 2, 3)))
+        val comic = ComicShelfStore.Comic("outside", "Outside fixture", Uri.fromFile(source).toString(),
+            1, 0, "CBZ")
+        assertThrows(IOException::class.java) { store.pageNames(comic) }
+        assertThrows(IOException::class.java) { store.readPage(comic, "01.png") }
+        assertTrue(source.isFile)
+    }
+
+    @Test fun privateCbzFromAnotherVaultCannotBeReadEvenWithSeededMetadata() {
+        val dir = File(context.noBackupFilesDir, "comics/${hash(otherVault)}").apply { mkdirs() }
+        val archive = File(dir, "owned.cbz").apply { writeBytes(cbz("01.png" to byteArrayOf(1, 2))) }
+        seed(otherVault, record("a", "Owner", Uri.fromFile(archive).toString(), 1, 0))
+        seed(vault, record("a", "Foreign", Uri.fromFile(archive).toString(), 1, 0))
+        val foreign = store.list(vault).single()
+        assertThrows(IOException::class.java) { store.pageNames(foreign) }
+        assertThrows(IOException::class.java) { store.readPage(foreign, "01.png") }
+        val owned = store.list(otherVault).single()
+        assertEquals(listOf("01.png"), store.pageNames(owned))
+        assertArrayEquals(byteArrayOf(1, 2), store.readPage(owned, "01.png"))
+        store.remove(vault, "a")
+        assertTrue(archive.isFile)
+        assertEquals(owned, store.list(otherVault).single())
+    }
+
+    @Test fun invalidRelinkRequestsLeaveLegacyRecordsUntouched() {
+        seed(vault, record("old", "Old", "content://old/old.cbz", 1, 0),
+            record("folder", "Folder", "content://old/folder", 1, 0, "FOLDER"))
+        val before = store.list(vault)
+        source.writeBytes(cbz("01.png" to byteArrayOf(1)))
+        assertThrows(IllegalArgumentException::class.java) { store.relinkArchive(vault, "old", Uri.fromFile(source)) }
+        assertThrows(IOException::class.java) { store.relinkArchive(vault, "absent", uri("a.cbz")) }
+        assertThrows(IllegalArgumentException::class.java) { store.relinkArchive(vault, "folder", uri("a.cbz")) }
+        assertThrows(IllegalStateException::class.java) { store.relinkArchive(vault, "old", uri("a.cbz")) }
+        store.setViewOverride(vault, "absent", ComicViewOverride(ComicViewMode.WEBTOON, ComicZoomFit.WIDTH))
+        assertEquals(before, store.list(vault))
+    }
+
+    @Test fun queuedReaderWritesRetainFinalChoiceAndProgressAcrossStoreInstances() {
+        seed(vault, record("a", "Alpha", "content://archive/a.cbz", 4, 0))
+        seed(otherVault, record("a", "Private", "content://archive/b.cbz", 4, 0))
+        val first = ComicViewOverride(ComicViewMode.WEBTOON, ComicZoomFit.WIDTH)
+        val second = ComicViewOverride(ComicViewMode.PAGED_RTL, ComicZoomFit.PAGE)
+        val reopened = ComicShelfStore(context)
+        val writes = listOf(store.queueViewOverride(vault, "a", first),
+            reopened.queuePage(vault, "a", 1), reopened.queueViewOverride(vault, "a", second),
+            store.queuePage(vault, "a", 3), reopened.queueViewOverride(vault, "a", null))
+        writes.forEach { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
+        val saved = ComicShelfStore(context).list(vault).single()
+        assertEquals(null, saved.viewOverride)
+        assertEquals(3, saved.lastPage)
+        assertEquals(0, store.list(otherVault).single().lastPage)
+        assertEquals(null, store.list(otherVault).single().viewOverride)
+    }
+
     private fun record(id: String, title: String, uri: String, count: Int, page: Int, format: String = "CBZ") =
         JSONObject().put("id", id).put("title", title).put("uri", uri)
             .put("pageCount", count).put("lastPage", page).put("format", format)

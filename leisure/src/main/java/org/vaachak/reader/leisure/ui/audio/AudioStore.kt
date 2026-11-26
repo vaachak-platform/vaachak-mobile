@@ -61,6 +61,51 @@ internal class AudioStore(private val root: File) {
         save(vault, current.copy(books = current.books + book))
         return book
     }
+    /** Called only after the importer has verified every staged track against its saved hash. */
+    @Synchronized fun restoreVerified(vault: String, expected: AudioBook, stage: File): AudioBook {
+        val lease = AudioMediaAccess.acquire(vault, expected.id)
+            ?: error("Close playback before restoring audio")
+        try {
+            val current = load(vault).find(expected.id) ?: error("Audiobook no longer exists")
+            check(current.tracks == expected.tracks) { "Audiobook changed during recovery" }
+            check(AudioPlayback.state.value?.let { it.vault == vault && it.id == current.id } != true) {
+                "Close playback before restoring audio"
+            }
+            require(stage.canonicalFile.parentFile == directory(vault).canonicalFile && stage.name.startsWith("pending-"))
+            val pairs = current.tracks.map { track ->
+                val from = File(stage, track.file)
+                val to = mediaFile(vault, current.id, track.file)
+                check(from.isFile && from.length() > 0L && from.canonicalFile.parentFile == stage.canonicalFile)
+                from to to
+            }
+            // The metadata is unchanged. Each replacement is atomic and contains the exact original bytes.
+            // If an interrupted repair has restored only some tracks, retrying the same originals is safe.
+            pairs.forEach { (from, to) ->
+                check(to.parentFile!!.isDirectory || to.parentFile!!.mkdirs())
+                java.nio.file.Files.move(from.toPath(), to.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
+            changes.value += 1
+            return current
+        } finally {
+            AudioMediaAccess.release(lease)
+        }
+    }
+
+    /** Read-only reconciliation; never delete an active import or an orphan on inference alone. */
+    @Synchronized fun recoverySummary(vault: String): String {
+        val library = load(vault)
+        val missing = library.books.count { book -> book.tracks.any { track ->
+            val file = mediaFile(vault, book.id, track.file)
+            !file.isFile || file.length() == 0L
+        } }
+        val known = library.books.map { it.id }.toSet()
+        val folder = directory(vault)
+        val children = if (folder.exists()) checkNotNull(folder.listFiles()) else emptyArray()
+        val residual = children.count { child -> child.isDirectory && child.name !in known }
+        return "$missing audiobook(s) with missing media; $residual unreferenced or staging folder(s). No files deleted."
+    }
+
     @Synchronized fun setDefaults(vault: String, settings: AudioPreferences) {
         save(vault, load(vault).copy(defaults = settings))
     }
@@ -73,10 +118,16 @@ internal class AudioStore(private val root: File) {
     @Synchronized fun remove(vault: String, id: String) {
         val current = load(vault)
         val book = current.find(id) ?: return
-        save(vault, current.copy(books = current.books.filterNot { it.id == id }))
-        val media = mediaFile(vault, id, book.tracks.first().file).parentFile
-        if (media != null && !media.deleteRecursively()) {
-            android.util.Log.w("AudioStore", "Removed title has residual private media")
+        val lease = AudioMediaAccess.acquire(vault, id)
+            ?: error("Close playback or recovery before removing audio")
+        try {
+            val media = mediaFile(vault, id, book.tracks.first().file).parentFile
+            save(vault, current.copy(books = current.books.filterNot { it.id == id }))
+            if (media != null && !media.deleteRecursively()) {
+                android.util.Log.w("AudioStore", "Removed title has residual private media")
+            }
+        } finally {
+            AudioMediaAccess.release(lease)
         }
     }
     private fun update(vault: String, id: String, transform: (AudioBook) -> AudioBook) {

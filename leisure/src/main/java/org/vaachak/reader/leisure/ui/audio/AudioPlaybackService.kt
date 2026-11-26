@@ -60,6 +60,24 @@ internal object AudioPlayback {
     }
 }
 
+/** Process-local exclusive reservation for a title, including asynchronous player opening.
+ * No filesystem I/O occurs while holding this monitor; callers never wait for recovery.
+ */
+internal object AudioMediaAccess {
+    class Lease internal constructor(internal val vault: String, internal val id: String)
+    private val active = mutableMapOf<Pair<String, String>, Lease>()
+    @Synchronized fun acquire(vault: String, id: String): Lease? {
+        val key = vault to id
+        if (key in active) return null
+        return Lease(vault, id).also { active[key] = it }
+    }
+    @Synchronized fun release(lease: Lease?) {
+        if (lease == null) return
+        val key = lease.vault to lease.id
+        if (active[key] === lease) active.remove(key)
+    }
+}
+
 /** One serial worker across service instances preserves queued progress before a later reopen. */
 private object AudioDisk {
     val executor = Executors.newSingleThreadExecutor()
@@ -78,6 +96,7 @@ class AudioPlaybackService : MediaSessionService() {
     private var book: AudioBook? = null
     private var timeline: AudioTimeline? = null
     private var preferences = AudioPreferences()
+    private var mediaLease: AudioMediaAccess.Lease? = null
     private var opening = false
     private var generation = 0L
     private var lastSave = 0L
@@ -199,6 +218,13 @@ class AudioPlaybackService : MediaSessionService() {
             return
         }
         clearActive()
+        val lease = AudioMediaAccess.acquire(vault, id)
+        if (lease == null) {
+            AudioPlayback.error(vault, "Audiobook media is being restored. Try again after recovery.")
+            stopSelf()
+            return
+        }
+        mediaLease = lease
         activeVault = vault
         opening = true
         val token = ++generation
@@ -213,7 +239,7 @@ class AudioPlaybackService : MediaSessionService() {
             handler.post {
                 if (!destroyed && token == generation && vault == vaultRepository.activeVaultId.value) {
                     result.fold(onSuccess = { (selected, defaults, paths) -> activate(vault, selected, defaults, paths) },
-                        onFailure = { AudioPlayback.error(vault, "Audiobook unavailable. Remove it and import the original files again."); stopPlayback() })
+                        onFailure = { AudioPlayback.error(vault, "Audiobook unavailable. Use Restore original files on its shelf entry."); stopPlayback() })
                 }
             }
         }
@@ -307,6 +333,8 @@ class AudioPlaybackService : MediaSessionService() {
         book = null; timeline = null; activeVault = null
         sleepDeadline = 0L; sleepChapter = null
         player.stop(); player.clearMediaItems()
+        AudioMediaAccess.release(mediaLease)
+        mediaLease = null
         opening = false
         AudioPlayback.show(null)
     }
@@ -323,6 +351,8 @@ class AudioPlaybackService : MediaSessionService() {
         player.removeListener(listener)
         session.release()
         player.release()
+        AudioMediaAccess.release(mediaLease)
+        mediaLease = null
         AudioPlayback.show(null)
         super.onDestroy()
     }

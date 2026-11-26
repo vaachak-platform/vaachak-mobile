@@ -19,6 +19,8 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.ByteArrayOutputStream
@@ -121,6 +123,98 @@ class ComicReaderCoverageInstrumentedTest {
             assertEquals(1, vertical)
             assertFalse(menu)
         }
+    }
+
+    @Test fun newReaderModeAndResetActionsAreReachable() {
+        var menu by mutableStateOf(false)
+        val actions = mutableListOf<String>()
+        compose.setContent {
+            MaterialTheme {
+                ComicReaderChrome(comic = comic, index = 1, pageCount = 3, vertical = false,
+                    modeMenu = menu, onBack = {}, modifier = Modifier.fillMaxSize(),
+                    onModeMenuChange = { menu = it }, onReadingDirection = {}, onVertical = {},
+                    onFitChange = {}, onPrevious = {}, onNext = {},
+                    onVerticalPager = { actions += "pager"; menu = false },
+                    onWebtoon = { actions += "webtoon"; menu = false },
+                    onReset = { actions += "reset"; menu = false })
+            }
+        }
+        for (choice in listOf("Vertical pager", "Webtoon", "Reset to global defaults")) {
+            compose.onNodeWithContentDescription("Comic reading and zoom options").performClick()
+            compose.onNodeWithText(choice).performClick()
+        }
+        compose.runOnIdle { assertEquals(listOf("pager", "webtoon", "reset"), actions) }
+    }
+
+    @Test fun realReaderChangesModeFitAndResetsOverride() {
+        val image = png()
+        val choices = mutableListOf<ComicViewOverride?>()
+        compose.setContent {
+            MaterialTheme {
+                ComicReader(comic = comic.copy(viewOverride = ComicViewOverride(ComicViewMode.PAGED_RTL, ComicZoomFit.PAGE)),
+                    pageNames = { listOf("1.png", "2.png", "3.png") }, pageBytes = { image },
+                    preferences = ComicPreferences(), onBack = {}, onPageChange = {},
+                    modifier = Modifier.fillMaxSize(), onViewOverride = { choices += it })
+            }
+        }
+        awaitPage()
+        compose.onNodeWithContentDescription("Comic page image; pinch to zoom, double tap to magnify")
+            .performTouchInput { click(center) }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithContentDescription("Comic reading and zoom options").fetchSemanticsNodes().isNotEmpty()
+        }
+        fun select(label: String) {
+            compose.onNodeWithContentDescription("Comic reading and zoom options").performClick()
+            compose.onNodeWithText(label).performClick()
+        }
+        select("Pages · Left to right")
+        select("Manga · Right to left")
+        select("Vertical pager")
+        select("Fit width · pan taller pages")
+        select("Continuous vertical scroll")
+        select("Webtoon")
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithContentDescription("Webtoon page 1").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Next comic page").assertIsNotEnabled()
+        select("Reset to global defaults")
+        awaitPage()
+        compose.runOnIdle {
+            assertEquals(listOf(
+                ComicViewOverride(ComicViewMode.PAGED_LTR, ComicZoomFit.PAGE),
+                ComicViewOverride(ComicViewMode.PAGED_RTL, ComicZoomFit.PAGE),
+                ComicViewOverride(ComicViewMode.VERTICAL_PAGER, ComicZoomFit.PAGE),
+                ComicViewOverride(ComicViewMode.VERTICAL_PAGER, ComicZoomFit.WIDTH),
+                ComicViewOverride(ComicViewMode.CONTINUOUS_VERTICAL, ComicZoomFit.WIDTH),
+                ComicViewOverride(ComicViewMode.WEBTOON, ComicZoomFit.WIDTH), null
+            ), choices)
+        }
+    }
+
+    @Test fun verticalPagerTapZonesTurnByHeight() {
+        var previous = 0
+        var next = 0
+        var toggles = 0
+        val bitmap = Bitmap.createBitmap(120, 200, Bitmap.Config.ARGB_8888)
+        compose.setContent {
+            MaterialTheme {
+                ZoomableComicPage(bitmap = bitmap, pageKey = "vertical-pager", fit = ComicZoomFit.PAGE,
+                    tapToTurn = true, rtl = false, verticalPager = true, onPrevious = { previous++ },
+                    onNext = { next++ }, onToggleChrome = { toggles++ }, modifier = Modifier.fillMaxSize())
+            }
+        }
+        val page = compose.onNodeWithContentDescription("Comic page image; pinch to zoom, double tap to magnify")
+        page.performTouchInput { click(Offset(center.x, center.y * .24f)) }
+        compose.waitUntil(10_000) { previous == 1 }
+        page.performTouchInput { click(Offset(center.x, center.y * 1.76f)) }
+        compose.waitUntil(10_000) { next == 1 }
+        page.performTouchInput { click(center) }
+        compose.waitUntil(10_000) { toggles == 1 }
+        page.performTouchInput { swipeUp() }
+        compose.waitUntil(10_000) { next == 2 }
+        page.performTouchInput { swipeDown() }
+        compose.waitUntil(10_000) { previous == 2 }
+        compose.runOnIdle { assertEquals(2, previous); assertEquals(2, next); assertEquals(1, toggles) }
     }
 
     @Test fun verticalChromeHasNoPageTurnAndEmptyChromeIsLoading() {

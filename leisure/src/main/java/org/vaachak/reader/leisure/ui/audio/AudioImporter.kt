@@ -21,15 +21,22 @@ internal class AudioImporter(private val context: Context, private val store: Au
     private val metadataReader: AudioMetadataReader = PlatformAudioMetadataReader) {
     suspend fun documents(vault: String, uris: List<Uri>): AudioBook = withContext(AppCoroutineConfig.io) {
         require(uris.size in 1..MAX_AUDIO_TRACKS && uris.distinct().size == uris.size)
-        val sources = uris.map { uri ->
+        importSources(vault, documentSources(uris), null)
+    }
+    private fun documentSources(uris: List<Uri>): List<AudioInput> {
+        require(uris.size in 1..MAX_AUDIO_TRACKS && uris.distinct().size == uris.size)
+        return uris.map { uri ->
             require(uri.scheme == "content")
             val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { if (it.moveToFirst()) it.getString(0) else null } ?: error("File name unavailable")
             source(uri, name)
         }
-        importSources(vault, sources, null)
     }
     suspend fun folder(vault: String, uri: Uri): AudioBook = withContext(AppCoroutineConfig.io) {
+        val (inputs, title) = folderSources(uri)
+        importSources(vault, inputs, title)
+    }
+    private suspend fun folderSources(uri: Uri): Pair<List<AudioInput>, String?> {
         require(uri.scheme == "content")
         val tree = DocumentFile.fromTreeUri(context, uri) ?: error("Folder unavailable")
         val files = mutableListOf<AudioInput>()
@@ -48,7 +55,7 @@ internal class AudioImporter(private val context: Context, private val store: Au
             }
         }
         walk(tree, 0, "")
-        importSources(vault, files, tree.name)
+        return files to tree.name
     }
     private fun source(uri: Uri, name: String): AudioInput = AudioInput(name.take(1024)) {
         require(uri.scheme == "content")
@@ -84,6 +91,34 @@ internal class AudioImporter(private val context: Context, private val store: Au
             }
         }
     }
+    suspend fun restoreDocuments(vault: String, id: String, uris: List<Uri>): AudioBook =
+        withContext(AppCoroutineConfig.io) { restoreSources(vault, id, documentSources(uris)) }
+
+    suspend fun restoreFolder(vault: String, id: String, uri: Uri): AudioBook =
+        withContext(AppCoroutineConfig.io) { restoreSources(vault, id, folderSources(uri).first) }
+
+    /** Verify every original track before publishing any repaired file. */
+    suspend fun restoreSources(vault: String, id: String, inputs: List<AudioInput>): AudioBook = withContext(AppCoroutineConfig.io) {
+        val book = store.load(vault).find(id) ?: error("Audiobook no longer exists")
+        require(inputs.size == book.tracks.size && inputs.all { extension(it.name) in AUDIO_EXTENSIONS })
+        val ordered = inputs.sortedWith { a, b -> audioNaturalOrder.compare(a.name, b.name) }
+        val stage = store.staging(vault)
+        try {
+            var remaining = MAX_BOOK_BYTES
+            ordered.zip(book.tracks).forEach { (input, track) ->
+                val copied = copyAudioInput(input, File(stage, track.file), minOf(remaining, MAX_FILE_BYTES))
+                remaining -= copied.first
+                check(copied.second == track.hash) { "Original audio fingerprints do not match" }
+            }
+            currentCoroutineContext().ensureActive()
+            store.restoreVerified(vault, book, stage)
+        } finally {
+            if (stage.exists() && !stage.deleteRecursively()) {
+                android.util.Log.w("AudioImporter", "Temporary audio cleanup incomplete")
+            }
+        }
+    }
+
     private fun extension(name: String): String = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
     private companion object {
         const val MAX_FILE_BYTES = 8L * 1024 * 1024 * 1024

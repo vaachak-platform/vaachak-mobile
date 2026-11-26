@@ -17,6 +17,10 @@ import org.json.JSONObject
  * Legacy CBZ records from the prior P0-11 test build remain readable.
  */
 class ComicShelfStore(private val context: Context) {
+    private companion object {
+        val mutationLock = Any()
+        val readerWrites = java.util.concurrent.Executors.newSingleThreadExecutor()
+    }
     private val resolver = context.applicationContext.contentResolver
     private val preferences = context.applicationContext.getSharedPreferences(
         "vaachak_comics_v1", Context.MODE_PRIVATE
@@ -30,7 +34,9 @@ class ComicShelfStore(private val context: Context) {
         val lastPage: Int,
         val format: String = "CBZ",
         val sha256: String? = null,
-        val lastOpenedAt: Long = 0L
+        val lastOpenedAt: Long = 0L,
+        val viewOverride: ComicViewOverride? = null,
+        internal val ownerKey: String? = null
     )
 
     fun list(vaultId: String): List<Comic> {
@@ -50,13 +56,15 @@ class ComicShelfStore(private val context: Context) {
                 lastPage = item.getInt("lastPage"),
                 format = item.optString("format", "CBZ").ifBlank { "CBZ" },
                 sha256 = item.optString("sha256").takeIf { it.isNotBlank() },
-                lastOpenedAt = item.optLong("lastOpenedAt", 0L)
+                lastOpenedAt = item.optLong("lastOpenedAt", 0L),
+                viewOverride = ComicViewOverride.decode(item.optJSONObject("viewOverride")),
+                ownerKey = digest(vaultId)
             )
         }
     }
 
     /** Support both formats, rejecting duplicate URI, content, and same-title imports per vault. */
-    fun importComic(vaultId: String, uri: Uri): Comic {
+    fun importComic(vaultId: String, uri: Uri): Comic = synchronized(mutationLock) {
         if (uri.scheme != "content") throw IOException("Choose a comic through the document picker")
         val (displayName, size) = documentInfo(uri)
         if (!ComicDocumentTypes.isComicName(displayName)) {
@@ -82,11 +90,104 @@ class ComicShelfStore(private val context: Context) {
         val existing = list(vaultId)
         checkDuplicate(existing, uri.toString(), null, title)
 
-        return if (format == "CBR") {
+        return@synchronized if (format == "CBR") {
             importCbr(vaultId, uri, title, existing)
         } else {
             importCbzInternal(vaultId, uri, title, existing)
         }
+    }
+
+    /** UI events enqueue in selection order, independently of the reader composition lifetime. */
+    internal fun queueViewOverride(vaultId: String, comicId: String, value: ComicViewOverride?,
+        onFailure: () -> Unit = {}): java.util.concurrent.Future<*> =
+        queueReaderWrite(onFailure) { setViewOverride(vaultId, comicId, value) }
+
+    internal fun queuePage(vaultId: String, comicId: String, page: Int,
+        onFailure: () -> Unit = {}): java.util.concurrent.Future<*> =
+        queueReaderWrite(onFailure) { setPage(vaultId, comicId, page) }
+
+    private fun queueReaderWrite(onFailure: () -> Unit, action: () -> Unit): java.util.concurrent.Future<*> =
+        readerWrites.submit {
+            try { action() }
+            catch (error: Exception) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onFailure() }
+                throw error
+            }
+        }
+
+    fun setViewOverride(vaultId: String, comicId: String, value: ComicViewOverride?) = synchronized(mutationLock) {
+        val current = list(vaultId)
+        if (current.any { it.id == comicId }) {
+            save(vaultId, current.map { if (it.id == comicId) it.copy(viewOverride = value) else it })
+        }
+    }
+
+    /** Select the original archive. The restored private copy is verified before shelf publication. */
+    fun relinkArchive(vaultId: String, comicId: String, uri: Uri): Comic = synchronized(mutationLock) {
+        require(uri.scheme == "content")
+        val record = list(vaultId).firstOrNull { it.id == comicId } ?: throw IOException("Comic no longer exists")
+        require(record.format in setOf("CBZ", "CBR"))
+        withStagedComic(vaultId) { staged ->
+            val hash = resolver.openInputStream(uri)?.use { input ->
+                staged.outputStream().use { output -> ComicFileFingerprint.calculate(input, output).also { output.fd.sync() } }
+            } ?: throw IOException("Cannot open selected archive")
+            restoreStaged(vaultId, record, staged, hash)
+        }
+    }
+
+    fun importImageFolder(vaultId: String, uri: Uri, restoreId: String? = null): Comic = synchronized(mutationLock) {
+        require(uri.scheme == "content")
+        val tree = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, uri) ?: throw IOException("Folder unavailable")
+        val title = tree.name.orEmpty().trim().take(180).ifBlank { "Image folder" }
+        withStagedComic(vaultId) { staged ->
+            ComicFolderArchive.write(tree, resolver, staged)
+            val hash = staged.inputStream().use { ComicFileFingerprint.calculate(it) }
+            val existing = list(vaultId)
+            if (restoreId != null) {
+                val old = existing.firstOrNull { it.id == restoreId && it.format == "FOLDER" }
+                    ?: throw IOException("Comic folder no longer exists")
+                restoreStaged(vaultId, old, staged, hash)
+            } else {
+                checkDuplicate(existing, uri.toString(), hash, title)
+                val pages = staged.inputStream().use { SafeCbzArchive.inspect(it).pages }
+                val target = publishStaged(vaultId, staged, hash, "cbz", replace = false)
+                val record = Comic(digest(uri.toString()), title, Uri.fromFile(target).toString(), pages.size, 0, "FOLDER", hash, ownerKey = digest(vaultId))
+                save(vaultId, existing + record)
+                record
+            }
+        }
+    }
+
+    private fun restoreStaged(vaultId: String, record: Comic, staged: File, hash: String): Comic {
+        check(record.sha256 != null && record.sha256 == hash) { "Original comic fingerprint unavailable or mismatched" }
+        val pages = if (record.format == "CBR") SafeCbrArchive.inspect(staged).pages
+            else staged.inputStream().use { SafeCbzArchive.inspect(it).pages }
+        check(pages.size == record.pageCount) { "Original comic page count changed" }
+        val current = list(vaultId)
+        check(current.none { it.id != record.id && it.sha256 == hash }) { "Comic belongs to another shelf entry" }
+        val target = publishStaged(vaultId, staged, hash, if (record.format == "CBR") "cbr" else "cbz", replace = true)
+        val updated = record.copy(uri = Uri.fromFile(target).toString())
+        save(vaultId, current.map { if (it.id == record.id) updated else it })
+        return updated
+    }
+
+    private fun <T> withStagedComic(vaultId: String, action: (File) -> T): T {
+        val dir = ownedDirectory(vaultId)
+        check(dir.isDirectory || dir.mkdirs())
+        val staged = File.createTempFile("recovery-", ".part", dir)
+        try { return action(staged) } finally {
+            if (staged.exists() && !staged.delete()) android.util.Log.w("ComicShelfStore", "Private staging cleanup incomplete")
+        }
+    }
+
+    private fun publishStaged(vaultId: String, staged: File, hash: String, extension: String, replace: Boolean): File {
+        val target = File(ownedDirectory(vaultId), "$hash.$extension")
+        check(target.canonicalFile.parentFile == ownedDirectory(vaultId).canonicalFile)
+        if (!replace) check(!target.exists()) { "Comic already stored" }
+        if (replace) java.nio.file.Files.move(staged.toPath(), target.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        else check(staged.renameTo(target)) { "Cannot publish comic" }
+        return target
     }
 
     /** Compatibility for the original P0-11 API; this is now format-aware. */
@@ -100,7 +201,7 @@ class ComicShelfStore(private val context: Context) {
             ?: throw IOException("Could not open CBZ comic")
         // Only save if Android can retain access after a process restart.
         resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        val entry = Comic(digest(uri.toString()), title, uri.toString(), pages.size, 0, "CBZ", fingerprint)
+        val entry = Comic(digest(uri.toString()), title, uri.toString(), pages.size, 0, "CBZ", fingerprint, ownerKey = digest(vaultId))
         save(vaultId, existing + entry)
         return entry
     }
@@ -122,7 +223,7 @@ class ComicShelfStore(private val context: Context) {
             if (owned.exists()) throw IOException("This comic is already stored in this profile")
             if (!staged.renameTo(owned)) throw IOException("Could not save CBR to private storage")
             val entry = Comic(digest(uri.toString()), title, Uri.fromFile(owned).toString(),
-                pages.size, 0, "CBR", hash)
+                pages.size, 0, "CBR", hash, ownerKey = digest(vaultId))
             try {
                 save(vaultId, existing + entry)
             } catch (e: Exception) {
@@ -149,30 +250,30 @@ class ComicShelfStore(private val context: Context) {
 
     /** Read using the matching container type; original CBZ records default to CBZ. */
     fun pageNames(comic: Comic): List<String> = if (comic.format == "CBR") {
-        SafeCbrArchive.inspect(ownedFile(comic.uri)).pages
+        SafeCbrArchive.inspect(ownedFile(comic.uri, comic.ownerKey)).pages
     } else {
-        open(comic.uri).use { SafeCbzArchive.inspect(it).pages }
+        openComicZip(comic).use { SafeCbzArchive.inspect(it).pages }
     }
 
     fun readPage(comic: Comic, name: String): ByteArray = if (comic.format == "CBR") {
-        SafeCbrArchive.readPage(ownedFile(comic.uri), name)
+        SafeCbrArchive.readPage(ownedFile(comic.uri, comic.ownerKey), name)
     } else {
-        open(comic.uri).use { SafeCbzArchive.readPage(it, name) }
+        openComicZip(comic).use { SafeCbzArchive.readPage(it, name) }
     }
 
     /** Opening page 1 is a reading session too, even if the page index is zero. */
-    fun markOpened(vaultId: String, comicId: String) {
+    fun markOpened(vaultId: String, comicId: String): Unit = synchronized(mutationLock) {
         val current = list(vaultId)
-        if (current.none { it.id == comicId }) return
+        if (current.none { it.id == comicId }) return@synchronized
         val openedAt = System.currentTimeMillis()
         save(vaultId, current.map { comic ->
             if (comic.id == comicId) comic.copy(lastOpenedAt = openedAt) else comic
         })
     }
 
-    fun setPage(vaultId: String, comicId: String, page: Int) {
+    fun setPage(vaultId: String, comicId: String, page: Int): Unit = synchronized(mutationLock) {
         val current = list(vaultId)
-        if (current.none { it.id == comicId }) return
+        if (current.none { it.id == comicId }) return@synchronized
         save(vaultId, current.map { item ->
             if (item.id == comicId) item.copy(
                 lastPage = page.coerceIn(0, item.pageCount - 1),
@@ -181,16 +282,16 @@ class ComicShelfStore(private val context: Context) {
         })
     }
 
-    fun remove(vaultId: String, comicId: String) {
+    fun remove(vaultId: String, comicId: String): Unit = synchronized(mutationLock) {
         val current = list(vaultId)
-        val removed = current.firstOrNull { it.id == comicId } ?: return
+        val removed = current.firstOrNull { it.id == comicId } ?: return@synchronized
         val others = current.filterNot { it.id == comicId }
         // Persist the removal first; a failed preferences write must not leave a dangling
         // shelf entry pointing to a deleted private file.
         save(vaultId, others)
-        if (removed.format == "CBR") {
+        if (removed.uri.toUri().scheme == "file") {
             // Only delete files under this vault's private directory. Never touch external files.
-            val file = runCatching { ownedFile(removed.uri) }.getOrNull()
+            val file = runCatching { ownedFile(removed.uri, digest(vaultId)) }.getOrNull()
             if (file != null &&
                 file.canonicalFile.parentFile == ownedDirectory(vaultId).canonicalFile &&
                 file.exists() && !file.delete()
@@ -200,22 +301,30 @@ class ComicShelfStore(private val context: Context) {
         }
     }
 
+    private fun openComicZip(comic: Comic): java.io.InputStream =
+        if (comic.uri.toUri().scheme == "file") ownedFile(comic.uri, comic.ownerKey).inputStream() else open(comic.uri)
+
     fun open(uri: String) = resolver.openInputStream(uri.toUri())
         ?: throw IOException("Comic document permission is unavailable; import it again")
 
-    private fun ownedFile(uri: String): File {
+    private fun ownedFile(uri: String, ownerKey: String?): File {
         val parsed = uri.toUri()
         if (parsed.scheme != "file") throw IOException("Expected private comic file")
         val file = File(parsed.path ?: "")
-        val root = File(context.applicationContext.noBackupFilesDir, "comics")
-        if (!file.canonicalFile.toPath().startsWith(root.canonicalFile.toPath())) {
-            throw IOException("Comic location is not private")
+        val root = File(context.applicationContext.noBackupFilesDir.canonicalFile, "comics")
+        val directory = ownerKey?.takeIf { it.matches(Regex("[0-9a-f]{64}")) }?.let { File(root, it) }
+        if (directory == null || directory.canonicalFile != directory.absoluteFile ||
+            file.canonicalFile.parentFile != directory.absoluteFile) {
+            throw IOException("Comic location is not owned by this vault")
         }
-        return file
+        return file.canonicalFile
     }
 
-    private fun ownedDirectory(vaultId: String): File =
-        File(context.applicationContext.noBackupFilesDir, "comics/${digest(vaultId)}")
+    private fun ownedDirectory(vaultId: String): File {
+        val directory = File(context.applicationContext.noBackupFilesDir.canonicalFile, "comics/${digest(vaultId)}")
+        if (directory.canonicalFile != directory.absoluteFile) throw IOException("Invalid private comic directory")
+        return directory
+    }
 
     private fun save(vaultId: String, comics: List<Comic>) {
         val serialized = JSONArray()
@@ -229,6 +338,7 @@ class ComicShelfStore(private val context: Context) {
                 put("format", item.format)
                 if (item.sha256 != null) put("sha256", item.sha256)
                 put("lastOpenedAt", item.lastOpenedAt)
+                item.viewOverride?.let { put("viewOverride", it.encode()) }
             })
         }
         if (!preferences.edit().putString(key(vaultId), serialized.toString()).commit()) {

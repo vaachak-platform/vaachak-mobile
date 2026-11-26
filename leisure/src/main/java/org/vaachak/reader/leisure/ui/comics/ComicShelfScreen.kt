@@ -85,6 +85,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -114,7 +115,7 @@ fun ComicShelfScreen(
     isEink: Boolean,
     onOpenComic: (String) -> Unit,
     modifier: Modifier = Modifier
-) {
+) = androidx.compose.runtime.key(vaultId) {
     val context = LocalContext.current.applicationContext
     val store = remember(context) { ComicShelfStore(context) }
     val scope = rememberCoroutineScope()
@@ -130,31 +131,62 @@ fun ComicShelfScreen(
         }
     }
 
+    var relinkId by rememberSaveable { mutableStateOf<String?>(null) }
+    val folderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        val target = relinkId
+        relinkId = null
+        if (uri != null && !busy) scope.launch {
+            busy = true; message = null
+            try {
+                withContext(AppCoroutineConfig.io) { store.importImageFolder(vaultId, uri, target) }
+                comics = store.list(vaultId)
+                message = if (target == null) "Comic folder imported." else "Comic restored; reading progress retained."
+            } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+            catch (_: Exception) { message = "Image folder could not be imported or verified. Existing shelf retained." }
+            finally { busy = false }
+        }
+    }
+
     // SAF filters by provider MIME, not by filename extension; the importer
     // additionally validates .cbz/.cbr and the archive's real signature.
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
+        if (uri == null) relinkId = null
+        else if (!busy) scope.launch {
             busy = true
             message = null
-            val result = runCatching {
-                withContext(AppCoroutineConfig.io) { store.importComic(vaultId, uri) }
-            }
-            result.onSuccess {
+            val target = relinkId
+            relinkId = null
+            try {
+                val result = withContext(AppCoroutineConfig.io) {
+                    if (target == null) store.importComic(vaultId, uri) else store.relinkArchive(vaultId, target, uri)
+                }
                 comics = store.list(vaultId)
-                message = "Imported ${it.title} (${it.format}, ${it.pageCount} pages)"
-            }.onFailure { message = it.message ?: "Unable to import comic" }
-            busy = false
+                message = if (target == null) "Imported ${result.title} (${result.format}, ${result.pageCount} pages)" else "Comic restored; reading progress retained."
+            } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+            catch (_: Exception) { message = "Comic could not be opened or verified. Existing shelf retained." }
+            finally { busy = false }
         }
     }
 
     ComicShelfContent(
         comics = comics, isEink = isEink, busy = busy, message = message,
-        onImport = { launcher.launch(ComicDocumentTypes.pickerMimeTypes.copyOf()) },
-        onOpen = onOpenComic,
+        onImport = { relinkId = null; launcher.launch(ComicDocumentTypes.pickerMimeTypes.copyOf()) },
+        onFolder = { relinkId = null; folderLauncher.launch(null) },
+        onRelink = { comic ->
+            if (!busy) {
+                relinkId = comic.id
+                if (comic.format == "FOLDER") folderLauncher.launch(null)
+                else launcher.launch(ComicDocumentTypes.pickerMimeTypes.copyOf())
+            }
+        },
+        onOpen = { if (!busy) onOpenComic(it) },
         onRemove = { id ->
-            scope.launch {
-                withContext(AppCoroutineConfig.io) { store.remove(vaultId, id) }
-                comics = store.list(vaultId)
+            if (!busy) scope.launch {
+                try {
+                    withContext(AppCoroutineConfig.io) { store.remove(vaultId, id) }
+                    comics = store.list(vaultId)
+                } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+                catch (_: Exception) { message = "Comic removal could not be completed."; comics = store.list(vaultId) }
             }
         },
         loadCover = coverLoader,
@@ -174,6 +206,22 @@ fun ComicReaderScreen(
     val context = LocalContext.current.applicationContext
     val store = remember(context) { ComicShelfStore(context) }
     val scope = rememberCoroutineScope()
+    var latestWrite by remember(vaultId, comicId) { mutableStateOf<java.util.concurrent.Future<*>?>(null) }
+    var leaving by remember(vaultId, comicId) { mutableStateOf(false) }
+    fun reportWriteFailure() {
+        android.widget.Toast.makeText(context, "Comic reading state could not be saved.", android.widget.Toast.LENGTH_SHORT).show()
+    }
+    fun finishReading() {
+        if (leaving) return
+        leaving = true
+        val pending = latestWrite
+        scope.launch {
+            try { withContext(AppCoroutineConfig.io) { pending?.get() } }
+            catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
+            catch (_: java.util.concurrent.ExecutionException) { /* The worker already reported the failed write. */ }
+            onBack()
+        }
+    }
     val comic = remember(vaultId, comicId) {
         store.list(vaultId).firstOrNull { it.id == comicId }
     }
@@ -196,9 +244,12 @@ fun ComicReaderScreen(
         pageNames = { store.pageNames(comic) },
         pageBytes = { page -> store.readPage(comic, page) },
         preferences = preferences,
-        onBack = onBack,
+        onViewOverride = { value ->
+            if (!leaving) latestWrite = store.queueViewOverride(vaultId, comic.id, value, ::reportWriteFailure)
+        },
+        onBack = ::finishReading,
         onPageChange = { page ->
-            scope.launch { withContext(AppCoroutineConfig.io) { store.setPage(vaultId, comic.id, page) } }
+            if (!leaving) latestWrite = store.queuePage(vaultId, comic.id, page, ::reportWriteFailure)
         },
         modifier = modifier
     )
@@ -215,7 +266,9 @@ internal fun ComicShelfContent(
     onOpen: (String) -> Unit,
     onRemove: (String) -> Unit,
     modifier: Modifier = Modifier,
-    loadCover: (suspend (ComicShelfStore.Comic) -> Bitmap?)? = null
+    loadCover: (suspend (ComicShelfStore.Comic) -> Bitmap?)? = null,
+    onFolder: (() -> Unit)? = null,
+    onRelink: ((ComicShelfStore.Comic) -> Unit)? = null
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(1) } // Books opens Folder by default.
     var query by rememberSaveable { mutableStateOf("") }
@@ -249,6 +302,7 @@ internal fun ComicShelfContent(
             onSortChange = { sort = it; sortMenu = false }
         )
         HorizontalDivider(color = contentColor.copy(alpha = 0.1f))
+        if (onFolder != null && selectedTab == 1) TextButton(onClick = onFolder, enabled = !busy) { Text("Import image folder") }
         if (message != null) {
             Text(message, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
@@ -262,7 +316,7 @@ internal fun ComicShelfContent(
             } else {
                 BoxWithConstraints(Modifier.fillMaxSize()) {
                     val minWidth = if (isEink) 108f else 105f
-                    val columns = (maxWidth.value / minWidth).toInt().coerceIn(2, 8)
+                    val columns = (maxWidth.value / minWidth).toInt().coerceIn(1, 8)
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(columns),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
@@ -270,7 +324,7 @@ internal fun ComicShelfContent(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(visible, key = { it.id }) { comic ->
-                            ComicCoverCard(comic, loadCover, onOpen, onRemove)
+                            ComicCoverCard(comic, loadCover, onOpen, onRemove, onRelink)
                         }
                     }
                 }
@@ -384,11 +438,12 @@ private fun ComicCoverCard(
     comic: ComicShelfStore.Comic,
     loadCover: (suspend (ComicShelfStore.Comic) -> Bitmap?)?,
     onOpen: (String) -> Unit,
-    onRemove: (String) -> Unit
+    onRemove: (String) -> Unit,
+    onRelink: ((ComicShelfStore.Comic) -> Unit)? = null
 ) {
     var bitmap by remember(comic.id) { mutableStateOf<Bitmap?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
-    LaunchedEffect(comic.id, comic.format, loadCover) {
+    LaunchedEffect(comic.id, comic.uri, comic.format, loadCover) {
         if (loadCover != null) {
             bitmap = runCatching { loadCover(comic) }.getOrNull()
         }
@@ -446,6 +501,10 @@ private fun ComicCoverCard(
                         menuExpanded = false
                         onOpen(comic.id)
                     })
+                    if (onRelink != null) DropdownMenuItem(text = { Text("Relink original media") }, onClick = {
+                        menuExpanded = false
+                        onRelink(comic)
+                    })
                     DropdownMenuItem(text = { Text("Remove") }, onClick = {
                         menuExpanded = false
                         onRemove(comic.id)
@@ -498,7 +557,8 @@ internal fun ComicReader(
     preferences: ComicPreferences,
     onBack: () -> Unit,
     onPageChange: (Int) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onViewOverride: ((ComicViewOverride?) -> Unit)? = null
 ) {
     var pages by remember(comic.id) { mutableStateOf<List<String>>(emptyList()) }
     var index by rememberSaveable(comic.id) { mutableIntStateOf(comic.lastPage) }
@@ -506,15 +566,18 @@ internal fun ComicReader(
     var message by remember(comic.id) { mutableStateOf<String?>(null) }
     var chromeVisible by rememberSaveable(comic.id) { mutableStateOf(false) }
     var modeMenu by remember { mutableStateOf(false) }
-    var rtl by rememberSaveable(comic.id) {
-        mutableStateOf(preferences.readingDirection == ComicReadingDirection.RIGHT_TO_LEFT)
-    }
-    var vertical by rememberSaveable(comic.id) {
-        mutableStateOf(preferences.readingMode == ComicReadingMode.VERTICAL_SCROLL)
-    }
-    var fitMode by rememberSaveable(comic.id) {
-        mutableStateOf(if (preferences.pageFit == ComicPageFit.FIT_WIDTH)
-            ComicZoomFit.WIDTH.name else ComicZoomFit.PAGE.name)
+    val defaults = ComicViewOverride.from(preferences)
+    val initial = comic.viewOverride ?: defaults
+    var viewMode by rememberSaveable(comic.id) { mutableStateOf(initial.mode.name) }
+    var fitMode by rememberSaveable(comic.id) { mutableStateOf(initial.fit.name) }
+    val mode = ComicViewMode.valueOf(viewMode)
+    val rtl = mode == ComicViewMode.PAGED_RTL
+    val vertical = mode == ComicViewMode.CONTINUOUS_VERTICAL || mode == ComicViewMode.WEBTOON
+    fun selectView(next: ComicViewMode, nextFit: ComicZoomFit) {
+        viewMode = next.name
+        fitMode = nextFit.name
+        modeMenu = false
+        onViewOverride?.invoke(ComicViewOverride(next, nextFit))
     }
     val fit = ComicZoomFit.valueOf(fitMode)
     ComicImmersiveSystemBars()
@@ -559,6 +622,7 @@ internal fun ComicReader(
             val scroll = rememberLazyListState(initialFirstVisibleItemIndex = index)
             LaunchedEffect(scroll, pages) {
                 if (pages.isNotEmpty()) {
+                    scroll.scrollToItem(index.coerceIn(pages.indices))
                     snapshotFlow { scroll.firstVisibleItemIndex }.distinctUntilChanged().collect { page ->
                         if (page in pages.indices && page != index) {
                             index = page
@@ -570,7 +634,7 @@ internal fun ComicReader(
             LazyColumn(state = scroll, modifier = Modifier.fillMaxSize()) {
                 itemsIndexed(pages) { pageIndex, name ->
                     VerticalComicPage(comic.id, pageBytes, name, pageIndex,
-                        onToggleChrome = { chromeVisible = !chromeVisible })
+                        onToggleChrome = { chromeVisible = !chromeVisible }, webtoon = mode == ComicViewMode.WEBTOON)
                 }
             }
         } else {
@@ -582,6 +646,7 @@ internal fun ComicReader(
                     fit = fit,
                     tapToTurn = preferences.tapToTurn,
                     rtl = rtl,
+                    verticalPager = mode == ComicViewMode.VERTICAL_PAGER,
                     onPrevious = { advance(-1) },
                     onNext = { advance(1) },
                     onToggleChrome = { chromeVisible = !chromeVisible },
@@ -605,13 +670,12 @@ internal fun ComicReader(
                 onBack = onBack,
                 modifier = Modifier.fillMaxSize(),
                 onModeMenuChange = { modeMenu = it },
-                onReadingDirection = { rightToLeft ->
-                    vertical = false
-                    rtl = rightToLeft
-                    modeMenu = false
-                },
-                onVertical = { vertical = true; modeMenu = false },
-                onFitChange = { fitMode = it.name; modeMenu = false },
+                onReadingDirection = { selectView(if (it) ComicViewMode.PAGED_RTL else ComicViewMode.PAGED_LTR, fit) },
+                onVertical = { selectView(ComicViewMode.CONTINUOUS_VERTICAL, fit) },
+                onVerticalPager = { selectView(ComicViewMode.VERTICAL_PAGER, fit) },
+                onWebtoon = { selectView(ComicViewMode.WEBTOON, fit) },
+                onReset = { viewMode = defaults.mode.name; fitMode = defaults.fit.name; modeMenu = false; onViewOverride?.invoke(null) },
+                onFitChange = { selectView(mode, it) },
                 onPrevious = { advance(if (rtl) 1 else -1) },
                 onNext = { advance(if (rtl) -1 else 1) }
             )
@@ -634,7 +698,10 @@ internal fun ComicReaderChrome(
     onVertical: () -> Unit,
     onFitChange: (ComicZoomFit) -> Unit,
     onPrevious: () -> Unit,
-    onNext: () -> Unit
+    onNext: () -> Unit,
+    onVerticalPager: (() -> Unit)? = null,
+    onWebtoon: (() -> Unit)? = null,
+    onReset: (() -> Unit)? = null
 ) {
     Box(modifier) {
             Surface(modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
@@ -664,6 +731,9 @@ internal fun ComicReaderChrome(
                             DropdownMenuItem(text = { Text("Continuous vertical scroll") }, onClick = {
                                 onVertical()
                             })
+                            if (onVerticalPager != null) DropdownMenuItem(text = { Text("Vertical pager") }, onClick = onVerticalPager)
+                            if (onWebtoon != null) DropdownMenuItem(text = { Text("Webtoon") }, onClick = onWebtoon)
+                            if (onReset != null) DropdownMenuItem(text = { Text("Reset to global defaults") }, onClick = onReset)
                             HorizontalDivider()
                             DropdownMenuItem(text = { Text("Fit page · no cropping") }, onClick = {
                                 onFitChange(ComicZoomFit.PAGE)
@@ -716,7 +786,8 @@ internal fun ZoomableComicPage(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onToggleChrome: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    verticalPager: Boolean = false
 ) {
     var zoom by remember(pageKey, fit) { mutableFloatStateOf(1f) }
     var pan by remember(pageKey, fit) { mutableStateOf(Offset.Zero) }
@@ -739,7 +810,17 @@ internal fun ZoomableComicPage(
             modifier = Modifier.fillMaxSize()
                 .transformable(state = gestureState,
                     canPan = { zoom > 1.001f || geometry.maxPanX > 0f || geometry.maxPanY > 0f })
-                .pointerInput(pageKey, tapToTurn, rtl, fit) {
+                .then(if (verticalPager && zoom <= 1.001f && geometry.maxPanY == 0f) {
+                    Modifier.pointerInput(pageKey) {
+                        var distance = 0f
+                        detectVerticalDragGestures(onDragStart = { distance = 0f }, onDragEnd = {
+                            if (distance < -48.dp.toPx()) onNext()
+                            else if (distance > 48.dp.toPx()) onPrevious()
+                        }) { change, amount -> change.consume(); distance += amount }
+                    }
+                } else Modifier)
+
+                .pointerInput(pageKey, tapToTurn, rtl, fit, verticalPager) {
                     detectTapGestures(
                         onDoubleTap = { point ->
                             if (zoom > 1.01f) {
@@ -762,10 +843,11 @@ internal fun ZoomableComicPage(
                             if (zoom > 1.01f || !tapToTurn) {
                                 onToggleChrome()
                             } else {
-                                val third = viewportWidth / 3f
+                                val third = (if (verticalPager) viewportHeight else viewportWidth) / 3f
+                                val coordinate = if (verticalPager) point.y else point.x
                                 when {
-                                    point.x < third -> if (rtl) onNext() else onPrevious()
-                                    point.x > third * 2 -> if (rtl) onPrevious() else onNext()
+                                    coordinate < third -> if (rtl) onNext() else onPrevious()
+                                    coordinate > third * 2 -> if (rtl) onPrevious() else onNext()
                                     else -> onToggleChrome()
                                 }
                             }
@@ -795,7 +877,8 @@ private fun VerticalComicPage(
     pageBytes: (String) -> ByteArray,
     name: String,
     index: Int,
-    onToggleChrome: () -> Unit
+    onToggleChrome: () -> Unit,
+    webtoon: Boolean = false
 ) {
     var bitmap by remember(comicId, name) { mutableStateOf<Bitmap?>(null) }
     var error by remember(comicId, name) { mutableStateOf<String?>(null) }
@@ -806,7 +889,11 @@ private fun VerticalComicPage(
             .onFailure { error = it.message ?: "Page unavailable" }
     }
     val image = bitmap
-    if (image != null) {
+    if (image != null && webtoon) {
+        Image(bitmap = image.asImageBitmap(), contentDescription = "Webtoon page ${index + 1}",
+            contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth()
+                .aspectRatio(image.width.toFloat() / image.height.coerceAtLeast(1)).clickable(onClick = onToggleChrome))
+    } else if (image != null) {
         ZoomableComicPage(
             bitmap = image, pageKey = "${comicId}:$index", fit = ComicZoomFit.PAGE,
             tapToTurn = false, rtl = false, onPrevious = {}, onNext = {},

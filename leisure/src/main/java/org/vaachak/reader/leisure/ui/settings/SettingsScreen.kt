@@ -319,6 +319,12 @@ private fun ComicsSettingsTab(preferences: ComicPreferences, onChange: (ComicPre
         ComicChoice("Continuous vertical scroll", preferences.readingMode == ComicReadingMode.VERTICAL_SCROLL) {
             onChange(preferences.copy(readingMode = ComicReadingMode.VERTICAL_SCROLL))
         }
+        ComicChoice("Vertical pager", preferences.readingMode == ComicReadingMode.VERTICAL_PAGER) {
+            onChange(preferences.copy(readingMode = ComicReadingMode.VERTICAL_PAGER))
+        }
+        ComicChoice("Webtoon", preferences.readingMode == ComicReadingMode.WEBTOON) {
+            onChange(preferences.copy(readingMode = ComicReadingMode.WEBTOON))
+        }
     }
     SettingsGroup(title = "Page scaling") {
         ComicChoice("Fit whole page", preferences.pageFit == ComicPageFit.FIT_PAGE) {
