@@ -1,0 +1,18 @@
+# D89 unified media completion and recovery candidate
+
+Pinned baseline `ed9acc0601e27b309ff3528c8e875851b04b7f22` (PR 93). One feature PR; combined G2 gate. This file is not merge authorization or canonical acceptance evidence.
+
+## Implemented scope
+
+- CBZ/CBR restoration checks original SHA-256 and validated page count before private replacement, retaining ID, title, page, opened time and override. Legacy records lacking fingerprints fail closed. External sources are never deleted.
+- Image-folder import traverses nested non-hidden SAF documents (depth 8, aggregate 5,000 entries) with bounded cursor queries, rejects malformed/incomplete listings, repeated identities and unsafe names, orders images naturally and writes a private bounded ZIP. Recovery verifies the generated archive hash; cross-runtime ZIP encoding compatibility is not guaranteed. No persisted tree grant is required for the private copy. Image payloads are not all decoded during import.
+- Private comic reads check the originating vault's canonical directory. Five effective view modes, title-specific fit and mode, reset and global settings retain existing metadata compatibility. Vertical paging provides tap/swipe at unzoomed, non-pannable fit; webtoon displays width-fitted strips. Explicit reader writes run in UI event order; ordinary Back waits for the latest queued write. Abrupt process death before persistence is not guaranteed safe.
+- Audio restoration stages all tracks and verifies ordered original hashes before publication. Each same-filesystem replacement is atomic; a partial publication failure can leave some tracks repaired, and retrying exact originals is safe. Metadata and progress remain unchanged. Process-local title reservations exclude playback opening/active playback and restoration publication. This review revision extends reservation checks to removal. No multi-process guarantee is claimed.
+- Storage inspection is read-only: missing/empty audio files and unreferenced/staging folder counts. No automatic deletion, inference of orphan ownership or forensic erasure claim. Existing healthy files are not hash-scanned on shelf refresh.
+- Synthetic M4B test asset: 720 seconds of silent AAC with chapter starts at 0/300/600 seconds, generated using FFmpeg. No third-party book content.
+
+## Evidence and open scope
+
+The preceding canonical-path revision passed local consolidated validation on the disposable API 35 AVD: 496 tests (241 Core JVM, 14 Core instrumentation, 147 Leisure JVM, 94 Leisure instrumentation), no failures or skips; local changed-code coverage 84.762% (801/945 executable lines and conditions). Evidence directory `d89-consolidated-evidence-20261125-230933`. This is evidence for the preceding revision only; the removal guard requires fresh validation. The local estimate is not the official Sonar gate.
+
+Synthetic provider and activity-result registry tests exercise real import/restore callbacks, failures, reader persistence, settings, gestures and playback. Actual external SAF grants, folder picker success, CBR restoration device qualification, legacy fingerprint-less recovery, cross-runtime ZIP compatibility, explicit orphan reclamation, process-death/rotation behavior, physical large-text/e-ink/BOOX behavior, long-form codec compatibility, audio interruptions and D88 complexity findings remain open or unqualified. Detekt returned NO-SOURCE. Review each mandatory acceptance criterion before closure; do not silently defer mandatory scope. Preserve existing AI/OPDS/TTS/sync/Room/security/signing paths, baseline tests, 80% minimum and 85% advisory coverage target. No acceptance matrix rows are marked PASS.

@@ -102,11 +102,31 @@ internal fun AudioShelfScreen(vaultId: String) = key(vaultId) {
         launchAudioOperation(scope, action, onSuccess = { selected = it.id; message = "Audiobook imported." },
             onError = { message = importError(it) }, onFinish = { busy = false })
     }
+    var restoring by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    var restoreChoice by remember { mutableStateOf<AudioBook?>(null) }
+    fun runRestore(id: String, action: suspend () -> AudioBook) {
+        if (busy || now?.id == id) return
+        busy = true; message = null
+        launchAudioOperation(scope, action, onSuccess = { message = "Audiobook restored. Listening position retained." },
+            onError = { message = "Restore failed. Select the original tracks in their original order and close playback." },
+            onFinish = { busy = false })
+    }
+
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) runImport { importer.documents(vaultId, uris) }
+        val target = restoring
+        restoring = null
+        if (uris.isNotEmpty()) {
+            if (target == null) runImport { importer.documents(vaultId, uris) }
+            else runRestore(target) { importer.restoreDocuments(vaultId, target, uris) }
+        }
     }
     val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) runImport { importer.folder(vaultId, uri) }
+        val target = restoring
+        restoring = null
+        if (uri != null) {
+            if (target == null) runImport { importer.folder(vaultId, uri) }
+            else runRestore(target) { importer.restoreFolder(vaultId, target, uri) }
+        }
     }
     fun send(book: AudioBook, action: String, value: Long = 0L) = AudioPlayback.send(context, vaultId, action, book.id, value)
     fun updatePreferences(book: AudioBook, prefs: AudioPreferences?) {
@@ -130,6 +150,10 @@ internal fun AudioShelfScreen(vaultId: String) = key(vaultId) {
                 onFolder = { folder.launch(null) })
         }
         if (library != null) {
+            item { TextButton(enabled = !busy, onClick = {
+                launchAudioOperation(scope, { withContext(AppCoroutineConfig.io) { store.recoverySummary(vaultId) } },
+                    onSuccess = { message = it }, onError = { message = "Storage check unavailable. No files deleted." })
+            }) { Text("Check local storage") } }
             if (opened != null) item {
                 AudioPlayerPanel(opened, library.defaults, now?.takeIf { it.id == opened.id },
                     onClose = { selected = null }, onCommand = { action, value -> send(opened, action, value) },
@@ -137,10 +161,24 @@ internal fun AudioShelfScreen(vaultId: String) = key(vaultId) {
             }
             audioShelfItems(library, data.covers, now?.id, query, filter, order,
                 onQuery = { query = it }, onFilter = { filter = it }, onOrder = { order = it },
-                onOpen = ::openBook, onRemove = { remove = it })
+                onOpen = { if (!busy) openBook(it) }, onRemove = { if (!busy) remove = it },
+                onRestore = { if (!busy && now?.id != it.id) restoreChoice = it })
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
+    restoreChoice?.let { book ->
+        AlertDialog(onDismissRequest = { restoreChoice = null }, title = { Text("Restore original audio") },
+            text = { Text("Choose the same original tracks or folder. Listening position and title preferences are kept. Playback must be closed.") },
+            confirmButton = { TextButton(onClick = {
+                restoreChoice = null; restoring = book.id
+                files.launch(arrayOf("audio/*", "application/octet-stream", "video/mp4"))
+            }) { Text("Select files") } },
+            dismissButton = { Column {
+                TextButton(onClick = { restoreChoice = null; restoring = book.id; folder.launch(null) }) { Text("Select folder") }
+                TextButton(onClick = { restoreChoice = null }) { Text("Cancel") }
+            } })
+    }
+
     remove?.let { book ->
         AudioRemoveDialog(onDismiss = { remove = null }, onRemove = {
             remove = null
@@ -173,7 +211,8 @@ internal fun AudioShelfHeader(busy: Boolean, loaded: Boolean, failed: Boolean, m
 
 private fun LazyListScope.audioShelfItems(library: AudioLibrary, covers: Map<String, File>, activeId: String?,
     query: String, filter: String, order: String, onQuery: (String) -> Unit, onFilter: (String) -> Unit,
-    onOrder: (String) -> Unit, onOpen: (AudioBook) -> Unit, onRemove: (AudioBook) -> Unit) {
+    onOrder: (String) -> Unit, onOpen: (AudioBook) -> Unit, onRemove: (AudioBook) -> Unit,
+    onRestore: (AudioBook) -> Unit) {
     val recent = library.recent()
     if (recent.isNotEmpty()) {
         item { Text("Continue listening", style = MaterialTheme.typography.titleLarge, modifier = Modifier.testTag("audio_continue_heading")) }
@@ -198,7 +237,8 @@ private fun LazyListScope.audioShelfItems(library: AudioLibrary, covers: Map<Str
             else -> "Play"
         }
         AudioShelfCard(book, action, covers[book.id], "all", onOpen = { onOpen(book) },
-            onRemove = if (activeId == book.id) null else ({ onRemove(book) }))
+            onRemove = if (activeId == book.id) null else ({ onRemove(book) }),
+            onRestore = if (activeId == book.id) null else ({ onRestore(book) }))
     }
 }
 
@@ -211,7 +251,7 @@ internal fun AudioRemoveDialog(onDismiss: () -> Unit, onRemove: () -> Unit) {
 }
 
 @Composable
-private fun AudioShelfCard(book: AudioBook, action: String, cover: File?, section: String, onOpen: () -> Unit, onRemove: (() -> Unit)?) {
+private fun AudioShelfCard(book: AudioBook, action: String, cover: File?, section: String, onOpen: () -> Unit, onRemove: (() -> Unit)?, onRestore: (() -> Unit)? = null) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (cover != null) AsyncImage(model = cover, contentDescription = null, modifier = Modifier.size(72.dp))
@@ -223,6 +263,7 @@ private fun AudioShelfCard(book: AudioBook, action: String, cover: File?, sectio
                 Button(onClick = onOpen, modifier = Modifier.testTag("audio_${section}_${action.lowercase()}_${book.id}")) { Text(action) }
                 if (onRemove != null) TextButton(onClick = onRemove, modifier = Modifier.testTag("audio_remove_${book.id}")) { Text("Remove") }
             }
+            if (onRestore != null) TextButton(onClick = onRestore, modifier = Modifier.testTag("audio_restore_${book.id}")) { Text("Restore original files") }
         }
     }
 }

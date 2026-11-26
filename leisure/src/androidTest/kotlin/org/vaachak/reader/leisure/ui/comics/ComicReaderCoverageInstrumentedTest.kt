@@ -19,9 +19,15 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -121,6 +127,98 @@ class ComicReaderCoverageInstrumentedTest {
             assertEquals(1, vertical)
             assertFalse(menu)
         }
+    }
+
+    @Test fun newReaderModeAndResetActionsAreReachable() {
+        var menu by mutableStateOf(false)
+        val actions = mutableListOf<String>()
+        compose.setContent {
+            MaterialTheme {
+                ComicReaderChrome(comic = comic, index = 1, pageCount = 3, vertical = false,
+                    modeMenu = menu, onBack = {}, modifier = Modifier.fillMaxSize(),
+                    onModeMenuChange = { menu = it }, onReadingDirection = {}, onVertical = {},
+                    onFitChange = {}, onPrevious = {}, onNext = {},
+                    onVerticalPager = { actions += "pager"; menu = false },
+                    onWebtoon = { actions += "webtoon"; menu = false },
+                    onReset = { actions += "reset"; menu = false })
+            }
+        }
+        for (choice in listOf("Vertical pager", "Webtoon", "Reset to global defaults")) {
+            compose.onNodeWithContentDescription("Comic reading and zoom options").performClick()
+            compose.onNodeWithText(choice).performClick()
+        }
+        compose.runOnIdle { assertEquals(listOf("pager", "webtoon", "reset"), actions) }
+    }
+
+    @Test fun realReaderChangesModeFitAndResetsOverride() {
+        val image = png()
+        val choices = mutableListOf<ComicViewOverride?>()
+        compose.setContent {
+            MaterialTheme {
+                ComicReader(comic = comic.copy(viewOverride = ComicViewOverride(ComicViewMode.PAGED_RTL, ComicZoomFit.PAGE)),
+                    pageNames = { listOf("1.png", "2.png", "3.png") }, pageBytes = { image },
+                    preferences = ComicPreferences(), onBack = {}, onPageChange = {},
+                    modifier = Modifier.fillMaxSize(), onViewOverride = { choices += it })
+            }
+        }
+        awaitPage()
+        compose.onNodeWithContentDescription("Comic page image; pinch to zoom, double tap to magnify")
+            .performTouchInput { click(center) }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithContentDescription("Comic reading and zoom options").fetchSemanticsNodes().isNotEmpty()
+        }
+        fun select(label: String) {
+            compose.onNodeWithContentDescription("Comic reading and zoom options").performClick()
+            compose.onNodeWithText(label).performClick()
+        }
+        select("Pages · Left to right")
+        select("Manga · Right to left")
+        select("Vertical pager")
+        select("Fit width · pan taller pages")
+        select("Continuous vertical scroll")
+        select("Webtoon")
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithContentDescription("Webtoon page 1").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Next comic page").assertIsNotEnabled()
+        select("Reset to global defaults")
+        awaitPage()
+        compose.runOnIdle {
+            assertEquals(listOf(
+                ComicViewOverride(ComicViewMode.PAGED_LTR, ComicZoomFit.PAGE),
+                ComicViewOverride(ComicViewMode.PAGED_RTL, ComicZoomFit.PAGE),
+                ComicViewOverride(ComicViewMode.VERTICAL_PAGER, ComicZoomFit.PAGE),
+                ComicViewOverride(ComicViewMode.VERTICAL_PAGER, ComicZoomFit.WIDTH),
+                ComicViewOverride(ComicViewMode.CONTINUOUS_VERTICAL, ComicZoomFit.WIDTH),
+                ComicViewOverride(ComicViewMode.WEBTOON, ComicZoomFit.WIDTH), null
+            ), choices)
+        }
+    }
+
+    @Test fun verticalPagerTapZonesTurnByHeight() {
+        var previous = 0
+        var next = 0
+        var toggles = 0
+        val bitmap = Bitmap.createBitmap(120, 200, Bitmap.Config.ARGB_8888)
+        compose.setContent {
+            MaterialTheme {
+                ZoomableComicPage(bitmap = bitmap, pageKey = "vertical-pager", fit = ComicZoomFit.PAGE,
+                    tapToTurn = true, rtl = false, verticalPager = true, onPrevious = { previous++ },
+                    onNext = { next++ }, onToggleChrome = { toggles++ }, modifier = Modifier.fillMaxSize())
+            }
+        }
+        val page = compose.onNodeWithContentDescription("Comic page image; pinch to zoom, double tap to magnify")
+        page.performTouchInput { click(Offset(center.x, center.y * .24f)) }
+        compose.waitUntil(10_000) { previous == 1 }
+        page.performTouchInput { click(Offset(center.x, center.y * 1.76f)) }
+        compose.waitUntil(10_000) { next == 1 }
+        page.performTouchInput { click(center) }
+        compose.waitUntil(10_000) { toggles == 1 }
+        page.performTouchInput { swipeUp() }
+        compose.waitUntil(10_000) { next == 2 }
+        page.performTouchInput { swipeDown() }
+        compose.waitUntil(10_000) { previous == 2 }
+        compose.runOnIdle { assertEquals(2, previous); assertEquals(2, next); assertEquals(1, toggles) }
     }
 
     @Test fun verticalChromeHasNoPageTurnAndEmptyChromeIsLoading() {
@@ -275,6 +373,158 @@ class ComicReaderCoverageInstrumentedTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Comic image dimensions are invalid").assertExists()
+    }
+
+    @Test fun delayedVerticalReaderRestoresPositionWithoutPrematureScroll() {
+        val image = png()
+        val release = CountDownLatch(1)
+        val changed = mutableListOf<Int>()
+
+        try {
+            compose.setContent {
+                MaterialTheme {
+                    ComicReader(
+                        comic = comic.copy(lastPage = 1),
+                        pageNames = {
+                            check(release.await(20, TimeUnit.SECONDS))
+                            listOf("1.png", "2.png", "3.png")
+                        },
+                        pageBytes = { image },
+                        preferences = ComicPreferences(
+                            readingMode = ComicReadingMode.VERTICAL_SCROLL
+                        ),
+                        onBack = {},
+                        onPageChange = { changed += it }
+                    )
+                }
+            }
+
+            compose.onNodeWithText("Opening page…").assertExists()
+
+            assertTrue(
+                compose.onAllNodesWithContentDescription(
+                    "Comic page image; pinch to zoom, double tap to magnify"
+                ).fetchSemanticsNodes().isEmpty()
+            )
+        } finally {
+            release.countDown()
+        }
+
+        awaitPage()
+
+        compose.runOnIdle {
+            assertEquals(
+                "Initial loading must not rewrite saved progress",
+                emptyList<Int>(), changed
+            )
+        }
+
+        compose.onAllNodesWithContentDescription(
+            "Comic page image; pinch to zoom, double tap to magnify"
+        ).onFirst().performTouchInput { click(center) }
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("2 / 3")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.runOnIdle {
+            assertTrue(changed.isEmpty())
+        }
+
+        compose.onNode(hasScrollAction()).performScrollToIndex(0)
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("1 / 3")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.runOnIdle {
+            assertEquals(listOf(0), changed)
+        }
+    }
+
+    @Test fun verticalReaderRestoresLastPageWithoutBackfill() {
+        val image = png()
+        val changed = mutableListOf<Int>()
+
+        compose.setContent {
+            MaterialTheme {
+                ComicReader(
+                    comic = comic.copy(lastPage = 2),
+                    pageNames = { listOf("1.png", "2.png", "3.png") },
+                    pageBytes = { image },
+                    preferences = ComicPreferences(
+                        readingMode = ComicReadingMode.VERTICAL_SCROLL
+                    ),
+                    onBack = {},
+                    onPageChange = { changed += it }
+                )
+            }
+        }
+
+        awaitPage()
+
+        compose.runOnIdle {
+            assertEquals(
+                "Restoring the last page must not move progress backwards",
+                emptyList<Int>(), changed
+            )
+        }
+
+        compose.onAllNodesWithContentDescription(
+            "Comic page image; pinch to zoom, double tap to magnify"
+        ).onFirst().performTouchInput { click(center) }
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("3 / 3")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onNodeWithContentDescription("Next comic page")
+            .assertIsNotEnabled()
+
+        compose.runOnIdle {
+            assertTrue(changed.isEmpty())
+        }
+
+        compose.onNode(hasScrollAction()).performScrollToIndex(0)
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("1 / 3")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.runOnIdle {
+            assertEquals(listOf(0), changed)
+        }
+    }
+
+    @Test fun emptyWebtoonShowsRecoverableArchiveError() {
+        compose.setContent {
+            MaterialTheme {
+                ComicReader(
+                    comic = comic,
+                    pageNames = { emptyList() },
+                    pageBytes = { byteArrayOf() },
+                    preferences = ComicPreferences(
+                        readingMode = ComicReadingMode.WEBTOON
+                    ),
+                    onBack = {},
+                    onPageChange = {}
+                )
+            }
+        }
+
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithText(
+                "No supported comic images were found"
+            ).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onNodeWithText(
+            "No supported comic images were found"
+        ).assertExists()
     }
 
     @Test fun verticalReaderDisplaysMultiplePagesAndDisablesPaging() {

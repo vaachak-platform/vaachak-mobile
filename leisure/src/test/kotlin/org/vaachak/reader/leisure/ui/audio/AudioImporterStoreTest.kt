@@ -122,6 +122,120 @@ class AudioImporterStoreTest {
         assertTrue(runCatching { store.load(vault) }.isFailure)
         assertEquals("invalid-json",File(dir,"library.json").readText())
     }
+    @Test fun restoresMissingAudioWithoutChangingIdentityProgressOrPreferences() = runBlocking {
+        val book = importer.documents(vault, listOf(uri("ten"), uri("two")))
+        store.progress(vault, book.id, 12345L, 123L, false)
+        store.setTitlePreferences(vault, book.id, AudioPreferences(1.5f, 10, 60))
+        val before = store.load(vault)
+        val missing = store.mediaFile(vault, book.id, book.tracks.first().file)
+        assertTrue(missing.delete())
+        assertTrue(store.recoverySummary(vault).startsWith("1 audiobook"))
+        assertTrue(runCatching { importer.restoreDocuments(vault, book.id, listOf(uri("single"), uri("ten"))) }.isFailure)
+        assertFalse(missing.exists())
+        assertEquals(before, store.load(vault))
+        val restored = importer.restoreDocuments(vault, book.id, listOf(uri("ten"), uri("two")))
+        assertEquals(before.find(book.id), restored)
+        assertEquals(before, store.load(vault))
+        assertTrue(missing.isFile)
+        assertTrue(store.recoverySummary(vault).startsWith("0 audiobook"))
+        assertTrue(runCatching { importer.restoreDocuments("different", book.id, listOf(uri("two"), uri("ten"))) }.isFailure)
+    }
+
+    @Test fun folderRestoreRetainsTrackOrderAndMetadata() = runBlocking {
+        val folder = DocumentsContract.buildTreeDocumentUri(AUTHORITY,"root")
+        val book = importer.folder(vault, folder)
+        store.mediaFile(vault, book.id, book.tracks.last().file).delete()
+        assertEquals(book, importer.restoreFolder(vault, book.id, folder))
+        assertEquals(book, store.load(vault).find(book.id))
+    }
+
+    @Test fun invalidRestoreInputsAndStageCannotPublishMedia() = runBlocking {
+        val book = importer.documents(vault, listOf(uri("ten")))
+        val file = store.mediaFile(vault, book.id, book.tracks.single().file)
+        val bytes = file.readBytes()
+        val before = store.load(vault)
+        assertTrue(runCatching { importer.restoreDocuments(vault, book.id, emptyList()) }.isFailure)
+        assertTrue(runCatching { importer.restoreDocuments(vault, book.id, listOf(uri("ten"), uri("ten"))) }.isFailure)
+        assertTrue(runCatching { importer.restoreSources(vault, book.id, emptyList()) }.isFailure)
+        assertTrue(runCatching { importer.restoreSources(vault, book.id, listOf(AudioInput("bad.exe") { bytes.inputStream() })) }.isFailure)
+        assertTrue(runCatching { store.restoreVerified(vault, book, root) }.isFailure)
+        val stage = store.staging(vault)
+        try {
+            assertTrue(runCatching { store.restoreVerified(vault, book, stage) }.isFailure)
+            File(stage, book.tracks.single().file).writeBytes(byteArrayOf())
+            assertTrue(runCatching { store.restoreVerified(vault, book, stage) }.isFailure)
+            assertTrue(runCatching { store.restoreVerified("other", book, stage) }.isFailure)
+            assertEquals(before, store.load(vault))
+            assertArrayEquals(bytes, file.readBytes())
+        } finally { stage.deleteRecursively() }
+        assertFalse(File(root, "store").walkTopDown().any { it.name.startsWith("pending-") })
+    }
+
+    @Test fun storageSummaryReportsEmptyFilesAndRetainsUnreferencedDirectories() = runBlocking {
+        assertTrue(store.recoverySummary("uncreated").startsWith("0 audiobook"))
+        val book = importer.documents(vault, listOf(uri("ten")))
+        val file = store.mediaFile(vault, book.id, book.tracks.single().file)
+        val orphan = store.staging(vault)
+        val marker = File(orphan, "retain.txt").apply { writeText("retain") }
+        val before = store.load(vault)
+        try {
+            file.writeBytes(byteArrayOf())
+            val summary = store.recoverySummary(vault)
+            assertTrue(summary.startsWith("1 audiobook"))
+            assertTrue(summary.contains("1 unreferenced or staging folder(s)"))
+            assertEquals("retain", marker.readText())
+            assertEquals(before, store.load(vault))
+            assertTrue(file.isFile)
+            assertEquals(0L, file.length())
+        } finally { orphan.deleteRecursively() }
+    }
+
+    @Test fun restoreCannotPublishWhilePlaybackOpeningOrActiveHoldsTitle() = runBlocking {
+        val book = importer.documents(vault, listOf(uri("ten")))
+        val file = store.mediaFile(vault, book.id, book.tracks.single().file)
+        assertTrue(file.delete())
+        val lease = checkNotNull(AudioMediaAccess.acquire(vault, book.id))
+        try {
+            assertNull(AudioMediaAccess.acquire(vault, book.id))
+            assertTrue(runCatching { importer.restoreDocuments(vault, book.id, listOf(uri("ten"))) }.isFailure)
+            assertFalse(file.exists())
+            assertEquals(book, store.load(vault).find(book.id))
+            val other = checkNotNull(AudioMediaAccess.acquire("other", book.id))
+            AudioMediaAccess.release(other)
+        } finally { AudioMediaAccess.release(lease) }
+        val next = checkNotNull(AudioMediaAccess.acquire(vault, book.id))
+        try {
+            AudioMediaAccess.release(lease) // A stale owner cannot release a later reservation.
+            assertNull(AudioMediaAccess.acquire(vault, book.id))
+        } finally { AudioMediaAccess.release(next) }
+        assertEquals(book, importer.restoreDocuments(vault, book.id, listOf(uri("ten"))))
+        assertTrue(file.isFile)
+        val after = checkNotNull(AudioMediaAccess.acquire(vault, book.id))
+        AudioMediaAccess.release(after)
+        AudioMediaAccess.release(null)
+    }
+
+    @Test fun removalCannotDeleteReservedTitleAndCanRetryAfterRelease() = runBlocking {
+        val book = importer.documents(vault, listOf(uri("ten")))
+        val file = store.mediaFile(vault, book.id, book.tracks.single().file)
+        val bytes = file.readBytes()
+        val before = store.load(vault)
+        val lease = checkNotNull(AudioMediaAccess.acquire(vault, book.id))
+        try {
+            assertTrue(runCatching { store.remove(vault, book.id) }.isFailure)
+            assertEquals(before, store.load(vault))
+            assertArrayEquals(bytes, file.readBytes())
+            store.remove("other", book.id)
+            assertEquals(before, store.load(vault))
+        } finally { AudioMediaAccess.release(lease) }
+        store.remove(vault, book.id)
+        assertNull(store.load(vault).find(book.id))
+        assertFalse(file.exists())
+        val next = checkNotNull(AudioMediaAccess.acquire(vault, book.id))
+        AudioMediaAccess.release(next)
+        store.remove(vault, book.id)
+    }
+
     private fun uri(id: String): Uri = DocumentsContract.buildDocumentUri(AUTHORITY,id)
     private companion object { const val AUTHORITY = "vaachak.audio.fixture" }
 }

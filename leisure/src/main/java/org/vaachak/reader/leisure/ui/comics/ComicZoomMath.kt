@@ -4,7 +4,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** IMAGE scaling modes; no mode stretches or changes the artwork's aspect ratio. */
-internal enum class ComicZoomFit { PAGE, WIDTH, FILL }
+enum class ComicZoomFit { PAGE, WIDTH, FILL }
 
 /** Viewport calculations are pure Kotlin so edge cases can be tested without Compose. */
 internal object ComicZoomMath {

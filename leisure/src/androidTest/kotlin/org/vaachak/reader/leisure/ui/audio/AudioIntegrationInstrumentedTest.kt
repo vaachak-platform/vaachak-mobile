@@ -133,6 +133,81 @@ class AudioIntegrationInstrumentedTest {
         assertTrue("Transport stage '$stage' failed; state=${AudioPlayback.state.value}; error=${AudioPlayback.error.value}", reached)
     }
 
+    @Test fun longM4bSeekAndChapterResume() = runBlocking {
+        assertTrue(context.packageName.endsWith(".debug"))
+        val store = AudioStore.get(context)
+        val input = AudioInput("synthetic-seek.m4b") {
+            InstrumentationRegistry.getInstrumentation().context.assets.open("d89-synthetic-seek.m4b")
+        }
+        val book = AudioImporter(context, store).importSources("default", listOf(input), "Synthetic M4B")
+        try {
+            assertTrue(book.duration in 719000L..721000L)
+            assertEquals(listOf(0L, 300000L, 600000L), AudioTimeline(book.tracks).chapters.map { it.start })
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                fun send(action: String, value: Long = 0L) = scenario.onActivity {
+                    AudioPlayback.send(it, "default", action, book.id, value)
+                }
+                send("open")
+                awaitTransport("M4B starts") { AudioPlayback.state.value?.let { it.id == book.id && it.playing } == true }
+                send("seek", 600000L)
+                awaitTransport("M4B long seek") { AudioPlayback.state.value?.let { it.id == book.id && it.position in 599000L..610000L } == true }
+                send("toggle")
+                awaitTransport("M4B pause") { AudioPlayback.state.value?.let { it.id == book.id && !it.playing } == true }
+                send("stop")
+                awaitTransport("M4B stop") { AudioPlayback.state.value == null }
+                val saved = store.load("default").find(book.id)!!.position
+                assertTrue(saved >= 599000L)
+                send("open")
+                awaitTransport("M4B resumes") { AudioPlayback.state.value?.let { it.id == book.id && it.playing && it.position >= saved - 500 } == true }
+                send("stop")
+                awaitTransport("M4B final stop") { AudioPlayback.state.value == null }
+            }
+        } finally {
+            AudioPlayback.stopForProfilePicker(context)
+            store.remove("default", book.id)
+        }
+    }
+
+    @Test fun serviceAndRestoreExcludeEachOtherForTheSameTitle() = runBlocking {
+        assertTrue(context.packageName.endsWith(".debug"))
+        val store = AudioStore.get(context)
+        val bytes = wav(40, (System.nanoTime() % 1000).toShort())
+        val importer = AudioImporter(context, store)
+        val book = importer.importSources("default", listOf(source("lease.wav", bytes)), "Recovery lease fixture")
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                fun send(action: String) = scenario.onActivity {
+                    AudioPlayback.send(it, "default", action, book.id)
+                }
+                val lease = checkNotNull(AudioMediaAccess.acquire("default", book.id))
+                try {
+                    send("open")
+                    awaitTransport("open rejected during reservation") {
+                        AudioPlayback.error.value?.message?.contains("being restored") == true
+                    }
+                    assertNull(AudioPlayback.state.value)
+                } finally { AudioMediaAccess.release(lease) }
+                send("open")
+                awaitTransport("open after release") { AudioPlayback.state.value?.let { it.id == book.id && it.playing } == true }
+                assertTrue(runCatching {
+                    importer.restoreSources("default", book.id, listOf(source("lease.wav", bytes)))
+                }.isFailure)
+                assertEquals(book.id, AudioPlayback.state.value?.id)
+                assertTrue(runCatching { store.remove("default", book.id) }.isFailure)
+                assertNotNull(store.load("default").find(book.id))
+                assertArrayEquals(bytes, store.mediaFile("default", book.id, book.tracks.single().file).readBytes())
+                send("stop")
+                awaitTransport("release after stop") { AudioPlayback.state.value == null }
+                val restored = importer.restoreSources("default", book.id, listOf(source("lease.wav", bytes)))
+                assertEquals(book.id, restored.id)
+                assertArrayEquals(bytes, store.mediaFile("default", book.id, book.tracks.single().file).readBytes())
+            }
+        } finally {
+            AudioPlayback.stopForProfilePicker(context)
+            store.remove("default", book.id)
+        }
+    }
+
     @Test fun serviceTransportSettingsSleepCompletionAndRejectedOpen() = runBlocking {
         assertTrue(context.packageName.endsWith(".debug"))
         val store = AudioStore.get(context)

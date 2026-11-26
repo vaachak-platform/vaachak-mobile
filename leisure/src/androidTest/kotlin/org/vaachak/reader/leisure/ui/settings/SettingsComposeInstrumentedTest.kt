@@ -71,6 +71,10 @@ class SettingsComposeInstrumentedTest {
             assertFalse(current.tapToTurn)
             assertFalse(current.preloadNextPage)
         }
+        compose.onNodeWithText("Vertical pager").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(ComicReadingMode.VERTICAL_PAGER, current.readingMode) }
+        compose.onNodeWithText("Webtoon").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(ComicReadingMode.WEBTOON, current.readingMode) }
         // Exercise reverse choices and preserve the explicit user setting.
         compose.onNodeWithText("Left to right").performScrollTo().performClick()
         compose.onNodeWithText("One page at a time").performScrollTo().performClick()
