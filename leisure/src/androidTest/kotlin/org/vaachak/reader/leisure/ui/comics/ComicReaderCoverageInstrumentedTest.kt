@@ -19,11 +19,15 @@ import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -369,6 +373,158 @@ class ComicReaderCoverageInstrumentedTest {
                 .fetchSemanticsNodes().isNotEmpty()
         }
         compose.onNodeWithText("Comic image dimensions are invalid").assertExists()
+    }
+
+    @Test fun delayedVerticalReaderRestoresPositionWithoutPrematureScroll() {
+        val image = png()
+        val release = CountDownLatch(1)
+        val changed = mutableListOf<Int>()
+
+        try {
+            compose.setContent {
+                MaterialTheme {
+                    ComicReader(
+                        comic = comic.copy(lastPage = 1),
+                        pageNames = {
+                            check(release.await(20, TimeUnit.SECONDS))
+                            listOf("1.png", "2.png", "3.png")
+                        },
+                        pageBytes = { image },
+                        preferences = ComicPreferences(
+                            readingMode = ComicReadingMode.VERTICAL_SCROLL
+                        ),
+                        onBack = {},
+                        onPageChange = { changed += it }
+                    )
+                }
+            }
+
+            compose.onNodeWithText("Opening page…").assertExists()
+
+            assertTrue(
+                compose.onAllNodesWithContentDescription(
+                    "Comic page image; pinch to zoom, double tap to magnify"
+                ).fetchSemanticsNodes().isEmpty()
+            )
+        } finally {
+            release.countDown()
+        }
+
+        awaitPage()
+
+        compose.runOnIdle {
+            assertEquals(
+                "Initial loading must not rewrite saved progress",
+                emptyList<Int>(), changed
+            )
+        }
+
+        compose.onAllNodesWithContentDescription(
+            "Comic page image; pinch to zoom, double tap to magnify"
+        ).onFirst().performTouchInput { click(center) }
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("2 / 3")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.runOnIdle {
+            assertTrue(changed.isEmpty())
+        }
+
+        compose.onNode(hasScrollAction()).performScrollToIndex(0)
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("1 / 3")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.runOnIdle {
+            assertEquals(listOf(0), changed)
+        }
+    }
+
+    @Test fun verticalReaderRestoresLastPageWithoutBackfill() {
+        val image = png()
+        val changed = mutableListOf<Int>()
+
+        compose.setContent {
+            MaterialTheme {
+                ComicReader(
+                    comic = comic.copy(lastPage = 2),
+                    pageNames = { listOf("1.png", "2.png", "3.png") },
+                    pageBytes = { image },
+                    preferences = ComicPreferences(
+                        readingMode = ComicReadingMode.VERTICAL_SCROLL
+                    ),
+                    onBack = {},
+                    onPageChange = { changed += it }
+                )
+            }
+        }
+
+        awaitPage()
+
+        compose.runOnIdle {
+            assertEquals(
+                "Restoring the last page must not move progress backwards",
+                emptyList<Int>(), changed
+            )
+        }
+
+        compose.onAllNodesWithContentDescription(
+            "Comic page image; pinch to zoom, double tap to magnify"
+        ).onFirst().performTouchInput { click(center) }
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("3 / 3")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onNodeWithContentDescription("Next comic page")
+            .assertIsNotEnabled()
+
+        compose.runOnIdle {
+            assertTrue(changed.isEmpty())
+        }
+
+        compose.onNode(hasScrollAction()).performScrollToIndex(0)
+
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("1 / 3")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.runOnIdle {
+            assertEquals(listOf(0), changed)
+        }
+    }
+
+    @Test fun emptyWebtoonShowsRecoverableArchiveError() {
+        compose.setContent {
+            MaterialTheme {
+                ComicReader(
+                    comic = comic,
+                    pageNames = { emptyList() },
+                    pageBytes = { byteArrayOf() },
+                    preferences = ComicPreferences(
+                        readingMode = ComicReadingMode.WEBTOON
+                    ),
+                    onBack = {},
+                    onPageChange = {}
+                )
+            }
+        }
+
+        compose.waitUntil(20_000) {
+            compose.onAllNodesWithText(
+                "No supported comic images were found"
+            ).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        compose.onNodeWithText(
+            "No supported comic images were found"
+        ).assertExists()
     }
 
     @Test fun verticalReaderDisplaysMultiplePagesAndDisablesPaging() {

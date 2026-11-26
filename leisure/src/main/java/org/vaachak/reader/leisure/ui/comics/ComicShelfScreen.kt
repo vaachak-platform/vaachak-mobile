@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -73,6 +74,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,6 +95,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.vaachak.reader.core.common.AppCoroutineConfig
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -589,8 +592,8 @@ internal fun ComicReader(
             if (loaded.isEmpty()) {
                 message = "No supported comic images were found"
             } else {
-                pages = loaded
                 index = index.coerceIn(0, loaded.lastIndex)
+                pages = loaded.toList()
             }
         }.onFailure { message = it.message ?: "Comic cannot be opened; please import again" }
     }
@@ -617,24 +620,81 @@ internal fun ComicReader(
         }
     }
 
+    // Capture the page list in composition, rather than reading mutable
+    // state later from the lazy item provider during measurement.
+    val loadedPages = pages
+
     Box(modifier.fillMaxSize().background(Color.Black)) {
-        if (vertical) {
-            val scroll = rememberLazyListState(initialFirstVisibleItemIndex = index)
-            LaunchedEffect(scroll, pages) {
-                if (pages.isNotEmpty()) {
-                    scroll.scrollToItem(index.coerceIn(pages.indices))
-                    snapshotFlow { scroll.firstVisibleItemIndex }.distinctUntilChanged().collect { page ->
-                        if (page in pages.indices && page != index) {
+        if (loadedPages.isEmpty()) {
+            Box(
+                Modifier.fillMaxSize().clickable {
+                    chromeVisible = !chromeVisible
+                },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(message ?: "Opening page…", color = Color.White)
+            }
+        } else if (vertical) {
+            key(comic.id, loadedPages) {
+                val scroll = rememberLazyListState(
+                    initialFirstVisibleItemIndex =
+                        index.coerceIn(loadedPages.indices)
+                )
+
+                // The initial list position is supplied at creation.
+                // Do not force a scroll while the provider is being mounted.
+                LaunchedEffect(scroll, loadedPages) {
+                    snapshotFlow {
+                        if (scroll.layoutInfo.visibleItemsInfo.isEmpty()) {
+                            null
+                        } else {
+                            scroll.firstVisibleItemIndex
+                        }
+                    }.distinctUntilChanged().collect { page ->
+                        if (page != null &&
+                            page in loadedPages.indices &&
+                            page != index
+                        ) {
                             index = page
                             onPageChange(page)
                         }
                     }
                 }
-            }
-            LazyColumn(state = scroll, modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(pages) { pageIndex, name ->
-                    VerticalComicPage(comic.id, pageBytes, name, pageIndex,
-                        onToggleChrome = { chromeVisible = !chromeVisible }, webtoon = mode == ComicViewMode.WEBTOON)
+
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val viewportHeight = maxHeight
+
+                    LazyColumn(
+                        state = scroll,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        itemsIndexed(loadedPages) { pageIndex, name ->
+                            // Keep the last page independently reachable.
+                            // The container grows for tall images but never
+                            // stretches a short image to fill the viewport.
+                            val pageModifier =
+                                if (pageIndex == loadedPages.lastIndex) {
+                                    Modifier.fillMaxWidth()
+                                        .heightIn(min = viewportHeight)
+                                } else {
+                                    Modifier.fillMaxWidth()
+                                }
+
+                            Box(
+                                modifier = pageModifier,
+                                contentAlignment = Alignment.TopCenter
+                            ) {
+                                VerticalComicPage(
+                                    comic.id, pageBytes, name, pageIndex,
+                                    onToggleChrome = {
+                                        chromeVisible = !chromeVisible
+                                    },
+                                    loadingHeight = viewportHeight,
+                                    webtoon = mode == ComicViewMode.WEBTOON
+                                )
+                            }
+                        }
+                    }
                 }
             }
         } else {
@@ -878,6 +938,7 @@ private fun VerticalComicPage(
     name: String,
     index: Int,
     onToggleChrome: () -> Unit,
+    loadingHeight: Dp,
     webtoon: Boolean = false
 ) {
     var bitmap by remember(comicId, name) { mutableStateOf<Bitmap?>(null) }
@@ -902,7 +963,11 @@ private fun VerticalComicPage(
                 image.width.toFloat() / image.height.coerceAtLeast(1))
         )
     } else {
-        Box(Modifier.fillMaxWidth().height(300.dp), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.fillMaxWidth()
+                .height(loadingHeight.coerceAtLeast(300.dp)),
+            contentAlignment = Alignment.Center
+        ) {
             Text(error ?: "Loading page ${index + 1}…", color = Color.White)
         }
     }
