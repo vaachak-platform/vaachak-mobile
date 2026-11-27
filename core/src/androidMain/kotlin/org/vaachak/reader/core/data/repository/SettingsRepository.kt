@@ -350,18 +350,23 @@ class SettingsRepository @Inject constructor(
         }
     }
 
+    private fun validatedReplacement(slot: AiManagedSlot, action: AiManagementAction, replacement: String): String {
+        val value = replacement.trim()
+        if (action == AiManagementAction.REPLACE) {
+            require(value.isNotBlank() && value.toByteArray(Charsets.UTF_8).size <= 4096 &&
+                value.none { it.isWhitespace() || it.isISOControl() }) { "Invalid AI credential" }
+            if (slot == AiManagedSlot.GATEWAY) require(value.length <= 512) { "Invalid gateway credential" }
+        } else require(replacement.isEmpty()) { "Unexpected replacement" }
+        return value
+    }
+
     /** Credential mutations require the eligible active vault. */
     suspend fun manageAiCredential(expectedVault: String, slot: AiManagedSlot, action: AiManagementAction,
                                    replacement: String = ""): Unit = withContext(AppCoroutineConfig.io) {
         aiManagementMutex.withLock {
             requireAiVault(expectedVault)
             if (!aiRuntime.eligible()) throw GatewayCredentialUnavailableException("Unlock your secure device and return to Vaachak.")
-            val value = replacement.trim()
-            if (action == AiManagementAction.REPLACE) {
-                require(value.isNotBlank() && value.toByteArray(Charsets.UTF_8).size <= 4096 &&
-                    value.none { it.isWhitespace() || it.isISOControl() }) { "Invalid AI credential" }
-                if (slot == AiManagedSlot.GATEWAY) require(value.length <= 512) { "Invalid gateway credential" }
-            } else require(replacement.isEmpty()) { "Unexpected replacement" }
+            val value = validatedReplacement(slot, action, replacement)
             val store = getVaultDataStore(expectedVault)
             val before = store.data.first()
             val vaultEpoch = vaultRepository.aiVaultEpoch.value
@@ -413,6 +418,20 @@ class SettingsRepository @Inject constructor(
         store.edit { it.remove(legacy); it[version] = AiCutover.V3.name; it.bumpCredentialRevision() }
     }
 
+    private fun applyAiConfiguration(prefs: MutablePreferences, update: AiConfigurationUpdate, validatedModel: String?) {
+        prefs[AI_TEXT_PROVIDER] = update.provider.name
+        if (!update.preserveInactive || update.provider == AiTextProvider.GEMINI) {
+            prefs[CF_URL] = update.cloudflareUrl.trim()
+            prefs[AUTO_SAVE_RECAPS_KEY] = update.autoSaveRecaps
+            if (validatedModel != null) prefs[GEMINI_MODEL] = validatedModel
+        }
+        if (!update.preserveInactive || update.provider == AiTextProvider.PRIVATE_GATEWAY) {
+            prefs[PRIVATE_GATEWAY_URL] = update.gatewayUrl.trim()
+            prefs[PRIVATE_GATEWAY_MODEL] = update.gatewayModel.trim()
+        }
+        prefs.bumpCredentialRevision()
+    }
+
     /** Pinned nonsecret settings transaction: never decrypt or rewrite a retained secret. */
     suspend fun saveAiConfiguration(expectedVault: String, update: AiConfigurationUpdate) = withContext(AppCoroutineConfig.io) {
         val validatedModel = update.geminiModel?.let(org.vaachak.reader.core.data.remote.GeminiTextModels::normalize)
@@ -420,17 +439,7 @@ class SettingsRepository @Inject constructor(
             credentialMutex.withLock {
                 requireAiVault(expectedVault)
                 getVaultDataStore(expectedVault).edit {
-                    it[AI_TEXT_PROVIDER] = update.provider.name
-                    if (!update.preserveInactive || update.provider == AiTextProvider.GEMINI) {
-                        it[CF_URL] = update.cloudflareUrl.trim()
-                        it[AUTO_SAVE_RECAPS_KEY] = update.autoSaveRecaps
-                        if (validatedModel != null) it[GEMINI_MODEL] = validatedModel
-                    }
-                    if (!update.preserveInactive || update.provider == AiTextProvider.PRIVATE_GATEWAY) {
-                        it[PRIVATE_GATEWAY_URL] = update.gatewayUrl.trim()
-                        it[PRIVATE_GATEWAY_MODEL] = update.gatewayModel.trim()
-                    }
-                    it.bumpCredentialRevision()
+                    applyAiConfiguration(it, update, validatedModel)
                 }
                 Unit
             }

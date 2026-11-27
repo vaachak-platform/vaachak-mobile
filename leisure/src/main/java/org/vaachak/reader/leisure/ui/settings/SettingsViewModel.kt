@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -204,12 +206,16 @@ class SettingsViewModel @Inject constructor(
 
     fun credentialStatuses(vault: String) = settingsRepo.aiCredentialStatuses(vault)
 
-    suspend fun manageCredential(vault: String, slot: AiManagedSlot, action: AiManagementAction, value: String) =
-        settingsRepo.manageAiCredential(vault, slot, action, value)
+    fun manageCredential(vault: String, slot: AiManagedSlot, action: AiManagementAction, value: String) =
+        viewModelScope.async(start = CoroutineStart.LAZY) {
+            settingsRepo.manageAiCredential(vault, slot, action, value)
+        }
 
-    suspend fun saveConfiguration(vault: String, request: AiConfigSaveRequest) =
-        settingsRepo.saveAiConfiguration(vault, AiConfigurationUpdate(request.gateway.provider,
-            request.cloudflareUrl, request.gateway.url, request.gateway.model, request.autoSaveRecaps, request.geminiModel, preserveInactive = true))
+    fun saveConfiguration(vault: String, request: AiConfigSaveRequest) =
+        viewModelScope.async(start = CoroutineStart.LAZY) {
+            settingsRepo.saveAiConfiguration(vault, AiConfigurationUpdate(request.gateway.provider,
+                request.cloudflareUrl, request.gateway.url, request.gateway.model, request.autoSaveRecaps, request.geminiModel, preserveInactive = true))
+        }
 
     private val themeFlow = combine(
         settingsRepo.themeMode,

@@ -99,16 +99,24 @@ internal fun AiCredentialPanel(slot: AiManagedSlot, status: AiCredentialStatus?,
         if (message.isNotBlank()) Text(message, style = MaterialTheme.typography.bodySmall)
     }
     confirmation?.let { action ->
-        val replacing = action == AiManagementAction.REPLACE
-        AlertDialog(onDismissRequest = { confirmation = null },
-            title = { Text(if (replacing) "Replace saved credential?" else "Remove saved credential?") },
-            text = { Text(if (replacing) "Replace the saved credential for this provider in this reader profile."
-                else "AI features requiring this credential will be unavailable until a new credential is saved.") },
-            confirmButton = { TextButton(enabled = !busy && !ownBusy && (!replacing || draft.isNotBlank()),
-                onClick = {
-                    confirmation = null
-                    execute(action, if (replacing) draft else "")
-                }) { Text(if (replacing) "Replace" else "Remove") } },
-            dismissButton = { TextButton(onClick = { confirmation = null }) { Text("Keep") } })
+        CredentialConfirmation(action, busy || ownBusy, draft,
+            onDismiss = { confirmation = null },
+            onConfirm = { value ->
+                confirmation = null
+                execute(action, value)
+            })
     }
+}
+
+@Composable
+private fun CredentialConfirmation(action: AiManagementAction, busy: Boolean, draft: String,
+    onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    val replacing = action == AiManagementAction.REPLACE
+    AlertDialog(onDismissRequest = onDismiss,
+        title = { Text(if (replacing) "Replace saved credential?" else "Remove saved credential?") },
+        text = { Text(if (replacing) "Replace the saved credential for this provider in this reader profile."
+            else "AI features requiring this credential will be unavailable until a new credential is saved.") },
+        confirmButton = { TextButton(enabled = !busy && (!replacing || draft.isNotBlank()),
+            onClick = { onConfirm(if (replacing) draft else "") }) { Text(if (replacing) "Replace" else "Remove") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Keep") } })
 }

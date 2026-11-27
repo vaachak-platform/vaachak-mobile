@@ -103,12 +103,12 @@ fun AiConfigScreen(provider: AiTextProvider, onBack: () -> Unit, viewModel: Sett
             var message by remember { mutableStateOf("") }
             AiConfigForm(state = state.copy(aiConfig = editor.configuration, isOfflineMode = editor.offline), onBack = onBack, statuses = statuses,
                 savedGeminiModel = editor.geminiModel, provider = provider,
-                onManage = { slot, action, value -> viewModel.manageCredential(vaultId, slot, action, value) },
+                onManage = { slot, action, value -> viewModel.manageCredential(vaultId, slot, action, value).awaitAiOperation() },
                 onSave = { request ->
                     if (!saving) {
                         saving = true
                         scope.launch {
-                            try { viewModel.saveConfiguration(vaultId, request); onBack() }
+                            try { viewModel.saveConfiguration(vaultId, request).awaitAiOperation(); onBack() }
                             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                             catch (_: Exception) { message = "Could not save AI configuration. Check the vault and retry." }
                             finally { saving = false }

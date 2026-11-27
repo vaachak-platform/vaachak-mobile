@@ -212,7 +212,7 @@ class SettingsViewModelTest {
     fun `save changes forwards model with nonsecret configuration to pinned vault`() = runTest(testDispatcher) {
         coEvery { settingsRepo.saveAiConfiguration("profile_1", any()) } returns Unit
         viewModel.saveConfiguration("profile_1", AiConfigSaveRequest("", "https://fixture.invalid/image", "", false,
-            AiGatewayUpdate(AiTextProvider.GEMINI, "", "local-chat", ""), "gemini-b"))
+            AiGatewayUpdate(AiTextProvider.GEMINI, "", "local-chat", ""), "gemini-b")).awaitAiOperation()
         coVerify(exactly = 1) {
             settingsRepo.saveAiConfiguration("profile_1", match {
                 it.preserveInactive && it.geminiModel == "gemini-b" && it.provider == AiTextProvider.GEMINI &&

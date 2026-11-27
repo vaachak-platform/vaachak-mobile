@@ -16,10 +16,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.vaachak.reader.core.data.repository.AiRepository
 import org.vaachak.reader.core.data.repository.AiVaultScope
 import org.vaachak.reader.core.data.repository.SettingsRepository
@@ -33,10 +36,25 @@ class GeminiModelViewModel @Inject constructor(
     private val ai: AiRepository
 ) : ViewModel() {
     val savedModel = settings.geminiModel
-    suspend fun save(vault: String, model: String) = settings.saveGeminiModel(vault, model)
-    suspend fun discover(vault: String) = withContext(AiVaultScope(vault)) { ai.discoverSavedGeminiModels() }
-    suspend fun test(vault: String) = withContext(AiVaultScope(vault)) { ai.testSavedGemini() }
-    suspend fun testImage(vault: String) = withContext(AiVaultScope(vault)) { ai.testSavedCloudflare() }
+    fun save(vault: String, model: String) = viewModelScope.async(start = CoroutineStart.LAZY) {
+        settings.saveGeminiModel(vault, model)
+    }
+    fun discover(vault: String) = viewModelScope.async(AiVaultScope(vault), start = CoroutineStart.LAZY) {
+        ai.discoverSavedGeminiModels()
+    }
+    fun test(vault: String) = viewModelScope.async(AiVaultScope(vault), start = CoroutineStart.LAZY) {
+        ai.testSavedGemini()
+    }
+    fun testImage(vault: String) = viewModelScope.async(AiVaultScope(vault), start = CoroutineStart.LAZY) {
+        ai.testSavedCloudflare()
+    }
+}
+
+/** Preserve screen-scope cancellation even though the operation belongs to the ViewModel. */
+internal suspend fun <T> Deferred<T>.awaitAiOperation(): T = try {
+    await()
+} finally {
+    cancel()
 }
 
 /** The form owns the draft; both save buttons use the same selection. */
@@ -69,7 +87,7 @@ internal fun GeminiModelPanel(vault: String, enabled: Boolean, editor: GeminiMod
         busy = true
         editor.onBusy(true)
         scope.launch {
-            try { viewModel.save(vault, draft); message = "Model saved. Inference not yet verified." }
+            try { viewModel.save(vault, draft).awaitAiOperation(); message = "Model saved. Inference not yet verified." }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { message = "Could not save model. Check vault and model ID." }
             finally { busy = false; editor.onBusy(false) }
@@ -80,7 +98,7 @@ internal fun GeminiModelPanel(vault: String, enabled: Boolean, editor: GeminiMod
             busy = true
             models = emptyList()
             try {
-                val result = viewModel.discover(vault)
+                val result = viewModel.discover(vault).awaitAiOperation()
                 models = result.models
                 message = result.message
                 menu = models.isNotEmpty()
@@ -95,7 +113,7 @@ internal fun GeminiModelPanel(vault: String, enabled: Boolean, editor: GeminiMod
     Button(enabled = enabled && !busy && saved.isNotBlank() && draft == saved, onClick = {
         scope.launch {
             busy = true
-            try { message = viewModel.test(vault) }
+            try { message = viewModel.test(vault).awaitAiOperation() }
             finally { busy = false }
         }
     }) { Text("Test saved Gemini (uses quota)") }
@@ -114,7 +132,7 @@ internal fun CloudflareDiagnosticPanel(vault: String, enabled: Boolean, viewMode
     Button(enabled = enabled && !busy, onClick = {
         scope.launch {
             busy = true
-            try { message = viewModel.testImage(vault) }
+            try { message = viewModel.testImage(vault).awaitAiOperation() }
             finally { busy = false }
         }
     }) { Text("Test saved Cloudflare (uses quota)") }
