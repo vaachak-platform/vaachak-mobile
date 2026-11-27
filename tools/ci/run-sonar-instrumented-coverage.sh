@@ -13,7 +13,7 @@ fi
 echo "=== CI emulator configuration ==="
 
 adb devices -l
-emulator -version
+# Emulator version is recorded by the pinned runner at launch.
 
 api="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
 abi="$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
@@ -37,7 +37,7 @@ echo "CPU information:"
 adb shell cat /proc/cpuinfo | grep -c '^processor' || true
 
 echo "Memory information:"
-adb shell cat /proc/meminfo | head -n 3
+adb shell cat /proc/meminfo | sed -n '1,3p'
 
 echo "Data partition:"
 adb shell df -h /data
