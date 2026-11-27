@@ -1,0 +1,13 @@
+name = "vaachak-visualize-review"
+main = "src/index.js"
+compatibility_date = "2026-11-26"
+workers_dev = true
+[vars]
+IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+[ai]
+binding = "image-ai"
+[[ratelimits]]
+name = "IMAGE_LIMIT"
+namespace_id = "1001" # Replace with an unused account-local namespace ID before deploy.
+simple = { limit = 5, period = 60 }
+# API_KEY must be a Worker secret, never a variable in this file.

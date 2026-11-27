@@ -22,6 +22,9 @@ import org.vaachak.reader.core.data.repository.GatewayCredentialUnavailableExcep
 import org.vaachak.reader.core.data.repository.SettingsRepository
 import org.vaachak.reader.core.data.repository.SyncRepository
 import org.vaachak.reader.core.data.repository.VaultRepository
+import org.vaachak.reader.core.data.repository.AiManagedSlot
+import org.vaachak.reader.core.data.repository.AiManagementAction
+import org.vaachak.reader.core.data.repository.AiConfigurationUpdate
 import org.vaachak.reader.core.domain.model.AiConfig
 import org.vaachak.reader.core.domain.model.AiTextProvider
 import org.vaachak.reader.core.domain.model.ComicPreferences
@@ -38,7 +41,7 @@ import org.vaachak.reader.leisure.utils.EinkHelper
 import javax.inject.Inject
 
 /** Gateway fields are kept together to prevent positional mix-ups. */
-data class AiGatewayUpdate(
+class AiGatewayUpdate(
     val provider: AiTextProvider,
     val url: String,
     val model: String,
@@ -46,12 +49,13 @@ data class AiGatewayUpdate(
 )
 
 /** Single AI configuration request; no long parameter list at the UI boundary. */
-data class AiConfigSaveRequest(
+class AiConfigSaveRequest(
     val geminiKey: String,
     val cloudflareUrl: String,
     val cloudflareToken: String,
     val autoSaveRecaps: Boolean,
-    val gateway: AiGatewayUpdate
+    val gateway: AiGatewayUpdate,
+    val geminiModel: String? = null
 )
 
 private data class AccountState(
@@ -62,9 +66,8 @@ private data class AccountState(
 )
 
 private data class AiState(
-    val gemini: String,
+    val enabled: Boolean,
     val cfUrl: String,
-    val token: String,
     val autoSave: Boolean,
     val gateway: AiGatewayState
 )
@@ -189,14 +192,24 @@ class SettingsViewModel @Inject constructor(
     }
 
     private val aiFlow = combine(
-        settingsRepo.geminiKey,
+        settingsRepo.isAiEnabled,
         settingsRepo.cfUrl,
-        settingsRepo.cfToken,
         settingsRepo.isAutoSaveRecapsEnabled,
         aiGatewayFlow
-    ) { gemini, cfUrl, token, autoSave, gateway ->
-        AiState(gemini, cfUrl, token, autoSave, gateway)
+    ) { enabled, cfUrl, autoSave, gateway ->
+        AiState(enabled, cfUrl, autoSave, gateway)
     }.distinctUntilChanged()
+
+    fun aiEditorSnapshot(vault: String) = settingsRepo.aiEditorSnapshot(vault)
+
+    fun credentialStatuses(vault: String) = settingsRepo.aiCredentialStatuses(vault)
+
+    suspend fun manageCredential(vault: String, slot: AiManagedSlot, action: AiManagementAction, value: String) =
+        settingsRepo.manageAiCredential(vault, slot, action, value)
+
+    suspend fun saveConfiguration(vault: String, request: AiConfigSaveRequest) =
+        settingsRepo.saveAiConfiguration(vault, AiConfigurationUpdate(request.gateway.provider,
+            request.cloudflareUrl, request.gateway.url, request.gateway.model, request.autoSaveRecaps, request.geminiModel, preserveInactive = true))
 
     private val themeFlow = combine(
         settingsRepo.themeMode,
@@ -241,11 +254,8 @@ class SettingsViewModel @Inject constructor(
             isOfflineMode = acc.offline,
             catalogs = content.feeds,
             aiConfig = AiConfig(
-                isEnabled = ai.gemini.isNotBlank() ||
-                    (ai.gateway.provider == AiTextProvider.PRIVATE_GATEWAY && ai.gateway.url.isNotBlank()),
-                geminiKey = ai.gemini,
+                isEnabled = ai.enabled,
                 cloudflareUrl = ai.cfUrl,
-                authToken = ai.token,
                 autoSaveRecaps = ai.autoSave,
                 textProvider = ai.gateway.provider,
                 gatewayUrl = ai.gateway.url,
@@ -341,14 +351,15 @@ class SettingsViewModel @Inject constructor(
     }
 
     /** Typed submission keeps legacy four-field callers working while avoiding long parameter lists. */
-    fun saveAiConfig(request: AiConfigSaveRequest, onSaved: () -> Unit = {}) {
+    fun saveAiConfig(request: AiConfigSaveRequest, expectedVault: String? = null, onSaved: () -> Unit = {}) {
         saveAiConfigInternal(
             gemini = request.geminiKey,
             cfUrl = request.cloudflareUrl,
             token = request.cloudflareToken,
             autoSave = request.autoSaveRecaps,
             gateway = request.gateway,
-            onSaved = onSaved
+            onSaved = onSaved,
+            expectedVault = expectedVault
         )
     }
 
@@ -358,21 +369,23 @@ class SettingsViewModel @Inject constructor(
         token: String,
         autoSave: Boolean,
         gateway: AiGatewayUpdate?,
-        onSaved: () -> Unit
+        onSaved: () -> Unit,
+        expectedVault: String? = null
     ) = viewModelScope.launch {
         try {
             val currentTheme = settingsRepo.themeMode.first()
-            settingsRepo.saveSettings(
-                gemini = gemini,
-                cfUrl = cfUrl,
-                cfToken = token,
-                isEnk = currentTheme == ThemeMode.E_INK
-            )
+            if (gateway == null) {
+                settingsRepo.saveSettings(gemini, cfUrl, token, currentTheme == ThemeMode.E_INK)
+            } else {
+                settingsRepo.saveAiEditorSettings(gemini, cfUrl, token, currentTheme == ThemeMode.E_INK, expectedVault)
+            }
             settingsRepo.setAutoSaveRecaps(autoSave)
             if (gateway != null) saveGatewayUpdate(gateway)
             _activeEditSection.value = SettingsSection.NONE
             _errorMessage.value = null
             onSaved()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (error: GatewayCredentialUnavailableException) {
             // Only the safe, static Keystore guidance is exposed; never a key or endpoint.
             _errorMessage.value = error.message
@@ -385,8 +398,7 @@ class SettingsViewModel @Inject constructor(
     private suspend fun saveGatewayUpdate(gateway: AiGatewayUpdate) {
         settingsRepo.setAiTextProvider(gateway.provider)
         // A blank field retains the prior token; removal is a separate explicit action.
-        val savedToken = gateway.token.ifBlank { settingsRepo.loadPrivateGatewayToken() }
-        settingsRepo.savePrivateGatewaySettings(gateway.url, gateway.model, savedToken)
+        settingsRepo.savePrivateGatewaySettings(gateway.url, gateway.model, gateway.token)
     }
 
     fun toggleOfflineMode(enabled: Boolean) {

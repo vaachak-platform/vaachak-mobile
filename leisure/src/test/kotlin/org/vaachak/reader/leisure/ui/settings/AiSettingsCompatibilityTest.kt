@@ -63,9 +63,8 @@ class AiSettingsCompatibilityTest {
         every { settings.deviceName } returns flowOf("test device")
         every { settings.lastSyncTimestamp } returns flowOf(0L)
         every { settings.isOfflineModeEnabled } returns flowOf(false)
-        every { settings.geminiKey } returns flowOf("")
+        every { settings.isAiEnabled } returns flowOf(true)
         every { settings.cfUrl } returns flowOf("")
-        every { settings.cfToken } returns flowOf("")
         every { settings.isAutoSaveRecapsEnabled } returns flowOf(false)
         every { settings.aiTextProvider } returns flowOf(AiTextProvider.PRIVATE_GATEWAY)
         every { settings.privateGatewayUrl } returns flowOf("https://reader.tailnet.ts.net:8443/v1")
@@ -99,7 +98,7 @@ class AiSettingsCompatibilityTest {
 
     @Test
     fun `extended save updates provider and gateway and invokes callback after save`() = runTest(dispatcherRule.dispatcher) {
-        coEvery { settings.loadPrivateGatewayToken() } returns "previous-secret"
+
         var saves = 0
         viewModel.saveAiConfig(
             AiConfigSaveRequest(
@@ -123,7 +122,7 @@ class AiSettingsCompatibilityTest {
 
     @Test
     fun `blank token keeps prior gateway token`() = runTest(dispatcherRule.dispatcher) {
-        coEvery { settings.loadPrivateGatewayToken() } returns "retained-secret"
+
         viewModel.saveAiConfig(
             AiConfigSaveRequest(
                 geminiKey = "", cloudflareUrl = "", cloudflareToken = "", autoSaveRecaps = false,
@@ -136,7 +135,7 @@ class AiSettingsCompatibilityTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) {
-            settings.savePrivateGatewaySettings("https://private.example", "model", "retained-secret")
+            settings.savePrivateGatewaySettings("https://private.example", "model", "")
         }
     }
 

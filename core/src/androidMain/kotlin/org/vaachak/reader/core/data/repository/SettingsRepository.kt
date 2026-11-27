@@ -3,6 +3,11 @@ package org.vaachak.reader.core.data.repository
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.flowOn
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -21,6 +26,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -48,13 +54,15 @@ import javax.inject.Singleton
 class SettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val vaultRepository: VaultRepository,
-    private val privateGatewaySecrets: PrivateGatewaySecrets
+    private val privateGatewaySecrets: PrivateGatewaySecrets,
+    private val aiRuntime: AiCredentialRuntime
 ) {
 
     companion object {
         // --- APP GLOBAL SETTINGS ---
         val IS_AI_ENABLED = booleanPreferencesKey("is_ai_enabled")
         val GEMINI_KEY = stringPreferencesKey("gemini_api_key")
+        val GEMINI_MODEL = stringPreferencesKey("gemini_model_id")
         val CF_URL = stringPreferencesKey("cloudflare_url")
         val CF_TOKEN = stringPreferencesKey("cloudflare_token")
         // Non-secret revision used to notify consumers when encrypted files change.
@@ -137,10 +145,11 @@ class SettingsRepository @Inject constructor(
     // --- 1. THE THREAD-SAFE VAULT CACHE ---
     private val activeVaults = mutableMapOf<String, DataStore<Preferences>>()
     private val vaultMutex = Mutex()
-    private val gatewayMigrationMutex = Mutex()
     private val credentialMutex = Mutex()
+    private val aiManagementMutex = Mutex()
+    private val grants = AiManagementGrantLedger(SystemClock::elapsedRealtime)
 
-    private enum class CredentialSlot { GEMINI, CLOUDFLARE, SYNC_PASSWORD }
+    private enum class CredentialSlot { SYNC_PASSWORD }
 
     /** Reserved namespace prevents collisions with existing Gateway vault files. */
     private fun credentialId(vaultId: String, slot: CredentialSlot): String =
@@ -212,9 +221,44 @@ class SettingsRepository @Inject constructor(
 
     // --- APP FLOWS ---
     val isAiEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[IS_AI_ENABLED] ?: false }
-    val geminiKey: Flow<String> = credentialFlow(GEMINI_KEY, CredentialSlot.GEMINI)
+    internal val geminiKey: Flow<String> = managedCredentialFlow(AiManagedSlot.GEMINI)
+    val geminiModel: Flow<String> = vaultPreferencesFlow.map { it[GEMINI_MODEL].orEmpty() }
+
+    /** Never combine a new vault identity with routing fields from an old vault. */
+    fun aiEditorSnapshot(expectedVault: String): Flow<AiEditorSnapshot?> =
+        vaultRepository.persistedVaultIdentity.flatMapLatest { active ->
+            if (active != expectedVault) kotlinx.coroutines.flow.flowOf<AiEditorSnapshot?>(null)
+            else getVaultDataStore(active).data.map { prefs ->
+                AiEditorSnapshot(
+                    configuration = org.vaachak.reader.core.domain.model.AiConfig(
+                        isEnabled = prefs[IS_AI_ENABLED] ?: false,
+                        cloudflareUrl = prefs[CF_URL].orEmpty(),
+                        autoSaveRecaps = prefs[AUTO_SAVE_RECAPS_KEY] ?: true,
+                        textProvider = if (prefs[AI_TEXT_PROVIDER] == "PRIVATE_GATEWAY")
+                            AiTextProvider.PRIVATE_GATEWAY else AiTextProvider.GEMINI,
+                        gatewayUrl = prefs[PRIVATE_GATEWAY_URL].orEmpty(),
+                        gatewayModel = prefs[PRIVATE_GATEWAY_MODEL].orEmpty().ifBlank { "local-chat" }
+                    ),
+                    geminiModel = prefs[GEMINI_MODEL].orEmpty(),
+                    offline = prefs[OFFLINE_MODE_KEY] ?: true
+                )
+            }
+        }.distinctUntilChanged().flowOn(AppCoroutineConfig.io)
+
+    suspend fun saveGeminiModel(expectedVault: String, model: String) = withContext(AppCoroutineConfig.io) {
+        val validated = org.vaachak.reader.core.data.remote.GeminiTextModels.normalize(model)
+        vaultRepository.aiMutationMutex.withLock {
+            credentialMutex.withLock {
+            if (vaultRepository.persistedVaultIdentity.first() != expectedVault) {
+                throw CancellationException("AI vault changed")
+            }
+            getVaultDataStore(expectedVault).edit { it[GEMINI_MODEL] = validated; it.bumpCredentialRevision() }
+            Unit
+            }
+        }
+    }
     val cfUrl: Flow<String> = vaultPreferencesFlow.map { it[CF_URL] ?: "" }
-    val cfToken: Flow<String> = credentialFlow(CF_TOKEN, CredentialSlot.CLOUDFLARE)
+    internal val cfToken: Flow<String> = managedCredentialFlow(AiManagedSlot.CLOUDFLARE)
 
     // Interpret unknown/obsolete provider IDs as Gemini instead of crashing
     // when a user's saved preferences are from another application version.
@@ -231,32 +275,204 @@ class SettingsRepository @Inject constructor(
         it[PRIVATE_GATEWAY_MODEL] ?: ""
     }
 
-    /**
-     * Migrate pre-existing plaintext DataStore credentials into no-backup encrypted storage.
-     * If encryption fails the old value is left intact, so a failed upgrade never loses
-     * the credential. The vault ID is captured once to avoid crossing profiles mid-call.
-     */
-    suspend fun loadPrivateGatewayToken(): String = withContext(AppCoroutineConfig.io) {
-        gatewayMigrationMutex.withLock { loadGatewayTokenLocked(vaultRepository.activeVaultId.first()) }
+    private enum class AiCutover { V3, MIGRATING, REPLACING, RETIRING, REMOVING, REMOVED }
+
+    private fun marker(slot: AiManagedSlot) = stringPreferencesKey("ai_credential_v3_${slot.name.lowercase()}")
+    private fun legacyPreference(slot: AiManagedSlot) = when (slot) {
+        AiManagedSlot.GEMINI -> GEMINI_KEY
+        AiManagedSlot.CLOUDFLARE -> CF_TOKEN
+        AiManagedSlot.GATEWAY -> PRIVATE_GATEWAY_TOKEN
+    }
+    private fun legacyId(vault: String, slot: AiManagedSlot): String = when (slot) {
+        AiManagedSlot.GATEWAY -> vault
+        else -> "vaachak_credential_v1:${slot.name}:\u0000$vault"
+    }
+    private fun hasLegacy(vault: String, slot: AiManagedSlot, prefs: Preferences): Boolean =
+        !prefs[legacyPreference(slot)].isNullOrEmpty() || privateGatewaySecrets.hasStoredCredential(legacyId(vault, slot))
+
+    private fun status(vault: String, slot: AiManagedSlot, prefs: Preferences): AiCredentialStatus {
+        return when (prefs[marker(slot)]) {
+            AiCutover.V3.name -> when (aiRuntime.storage.presence(vault, slot)) {
+                AiPersistentCredentialStorage.Presence.SAVED -> AiCredentialStatus.SAVED
+                AiPersistentCredentialStorage.Presence.UNAVAILABLE -> AiCredentialStatus.UNAVAILABLE
+                else -> AiCredentialStatus.RECOVERY_REQUIRED
+            }
+            AiCutover.REMOVED.name -> AiCredentialStatus.MISSING
+            AiCutover.REMOVING.name -> AiCredentialStatus.REMOVAL_PENDING
+            AiCutover.RETIRING.name -> AiCredentialStatus.CLEANUP_REQUIRED
+            AiCutover.REPLACING.name -> AiCredentialStatus.RECOVERY_REQUIRED
+            AiCutover.MIGRATING.name -> AiCredentialStatus.MIGRATION_REQUIRED
+            null -> if (hasLegacy(vault, slot, prefs)) AiCredentialStatus.MIGRATION_REQUIRED else AiCredentialStatus.MISSING
+            else -> AiCredentialStatus.RECOVERY_REQUIRED
+        }
     }
 
-    private suspend fun loadGatewayTokenLocked(vaultId: String): String {
-        val dataStore = getVaultDataStore(vaultId)
-        val legacy = dataStore.data.first()[PRIVATE_GATEWAY_TOKEN]
-        if (legacy != null) {
-            if (legacy.isNotEmpty()) privateGatewaySecrets.write(vaultId, legacy)
-            dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
-            if (legacy.isEmpty()) return ""
+    fun aiCredentialStatuses(expectedVault: String): Flow<Map<AiManagedSlot, AiCredentialStatus>> =
+        vaultRepository.persistedVaultIdentity.flatMapLatest { active ->
+            if (active != expectedVault) kotlinx.coroutines.flow.flowOf(emptyMap())
+            else combine(getVaultDataStore(active).data, aiRuntime.eligibility()) { prefs, _ ->
+                AiManagedSlot.entries.associateWith { status(active, it, prefs) }
+            }
+        }.flowOn(AppCoroutineConfig.io)
+
+    private fun readManaged(vault: String, slot: AiManagedSlot, prefs: Preferences): String {
+        if (!aiRuntime.eligible()) throw GatewayCredentialUnavailableException("Unlock your secure device and return to Vaachak.")
+        return when (prefs[marker(slot)]) {
+            AiCutover.V3.name -> aiRuntime.storage.read(vault, slot)
+                ?: throw GatewayCredentialUnavailableException("Saved AI credential requires recovery in AI Settings.")
+            AiCutover.REMOVED.name -> ""
+            null -> if (!hasLegacy(vault, slot, prefs)) "" else throw GatewayCredentialUnavailableException(
+                "Saved AI credential needs one-time PIN migration in AI Settings.")
+            else -> throw GatewayCredentialUnavailableException("Saved AI credential needs recovery in AI Settings.")
         }
-        return privateGatewaySecrets.read(vaultId)
     }
-    /** A fixed-vault network snapshot. Existing key storage and migration paths are reused. */
+
+    // Internal compatibility reads for core contracts; no UI collects decrypted secrets.
+    private fun managedCredentialFlow(slot: AiManagedSlot): Flow<String> =
+        vaultRepository.persistedVaultIdentity.flatMapLatest { vault ->
+            getVaultDataStore(vault).data.map { readManaged(vault, slot, it) }
+        }
+
+    internal suspend fun loadPrivateGatewayToken(): String = withContext(AppCoroutineConfig.io) {
+        credentialMutex.withLock {
+            val vault = vaultRepository.persistedVaultIdentity.first()
+            readManaged(vault, AiManagedSlot.GATEWAY, getVaultDataStore(vault).data.first())
+        }
+    }
+
+    private fun MutablePreferences.bumpCredentialRevision() {
+        this[CREDENTIAL_REVISION] = (this[CREDENTIAL_REVISION] ?: 0) + 1
+    }
+
+    private suspend fun requireAiVault(expected: String) {
+        if (vaultRepository.persistedVaultIdentity.first() != expected) throw CancellationException("AI vault changed")
+    }
+
+    private suspend fun requireManagementContext(binding: AiManagementBinding) {
+        requireAiVault(binding.vault)
+        if (!aiRuntime.eligible() || aiRuntime.managementEpoch() != binding.hostEpoch) {
+            throw CancellationException("AI management context changed")
+        }
+    }
+
+    /** Routine mutations require the eligible active vault; legacy migration also requires native authentication. */
+    suspend fun manageAiCredential(expectedVault: String, slot: AiManagedSlot, action: AiManagementAction,
+                                   replacement: String = ""): Unit = withContext(AppCoroutineConfig.io) {
+        aiManagementMutex.withLock {
+            requireAiVault(expectedVault)
+            if (!aiRuntime.eligible()) throw GatewayCredentialUnavailableException("Unlock your secure device and return to Vaachak.")
+            val value = replacement.trim()
+            if (action == AiManagementAction.REPLACE) {
+                require(value.isNotBlank() && value.toByteArray(Charsets.UTF_8).size <= 4096 &&
+                    value.none { it.isWhitespace() || it.isISOControl() }) { "Invalid AI credential" }
+                if (slot == AiManagedSlot.GATEWAY) require(value.length <= 512) { "Invalid gateway credential" }
+            } else require(replacement.isEmpty()) { "Unexpected replacement" }
+            val store = getVaultDataStore(expectedVault)
+            val before = store.data.first()
+            val vaultEpoch = vaultRepository.aiVaultEpoch.value
+            val binding = AiManagementBinding(expectedVault, slot, action,
+                (before[CREDENTIAL_REVISION] ?: 0).toLong(), aiRuntime.managementEpoch())
+            val challenge = grants.begin(binding)
+            try {
+                val authenticated = action != AiManagementAction.MIGRATE || coroutineScope {
+                    val auth = async { aiRuntime.authenticateMigration() }
+                    val watcher = launch {
+                        combine(vaultRepository.persistedVaultIdentity, store.data, vaultRepository.aiVaultEpoch) { active, prefs, currentEpoch ->
+                            currentEpoch != vaultEpoch || active != expectedVault || !sameAiRouting(before, prefs) ||
+                                before[CREDENTIAL_REVISION] != prefs[CREDENTIAL_REVISION]
+                        }.first { it }
+                        auth.cancel(CancellationException("AI configuration changed"))
+                    }
+                    try { auth.await() } finally { watcher.cancel() }
+                }
+                if (!authenticated) throw GatewayCredentialUnavailableException("Credential management was not authenticated; no change made.")
+                vaultRepository.aiMutationMutex.withLock {
+                    credentialMutex.withLock {
+                        requireManagementContext(binding)
+                        val now = store.data.first()
+                        if (vaultRepository.aiVaultEpoch.value != vaultEpoch || !sameAiRouting(before, now) || before[CREDENTIAL_REVISION] != now[CREDENTIAL_REVISION]) {
+                            throw CancellationException("AI configuration changed")
+                        }
+                        val grant = grants.complete(challenge, binding)
+                            ?: throw GatewayCredentialUnavailableException("Credential operation expired; retry.")
+                        publishCredential(store, now, binding, grant, value)
+                    }
+                }
+            } finally { grants.revoke() }
+        }
+    }
+
+    private suspend fun publishCredential(store: DataStore<Preferences>, before: Preferences,
+        binding: AiManagementBinding, grant: AiManagementGrantLedger.Grant, replacement: String) {
+        val slot = binding.slot
+        val vault = binding.vault
+        val version = marker(slot)
+        val legacy = legacyPreference(slot)
+        if (binding.action == AiManagementAction.REMOVE) {
+            store.edit { it[version] = AiCutover.REMOVING.name; it.bumpCredentialRevision() }
+            requireManagementContext(binding)
+            aiRuntime.storage.removeVerified(binding, grants, grant) { aiRuntime.eligible() && aiRuntime.managementEpoch() == binding.hostEpoch }
+            requireManagementContext(binding)
+            privateGatewaySecrets.retireAiCredential(legacyId(vault, slot))
+            requireManagementContext(binding)
+            store.edit { it.remove(legacy); it[version] = AiCutover.REMOVED.name; it.bumpCredentialRevision() }
+            return
+        }
+        val prior = before[version]
+        // RETIRING proves that a new envelope was verified before metadata commit.
+        // Resume cleanup without rereading or resurrecting obsolete ciphertext.
+        if (binding.action == AiManagementAction.MIGRATE && prior == AiCutover.RETIRING.name) {
+            check(grants.consume(grant, binding)) { "Management authentication required" }
+            check(!aiRuntime.storage.read(vault, slot).isNullOrBlank()) { "AI credential recovery required" }
+        } else {
+            val value = if (binding.action == AiManagementAction.MIGRATE) {
+                check(prior == null || prior == AiCutover.MIGRATING.name) { "Migration not available" }
+                val plaintext = before[legacy].orEmpty()
+                val encrypted = privateGatewaySecrets.read(legacyId(vault, slot))
+                check(plaintext.isEmpty() || encrypted.isEmpty() || plaintext == encrypted) { "Conflicting legacy credentials; replace explicitly" }
+                encrypted.ifEmpty { plaintext }.also { check(it.isNotBlank()) { "No legacy AI credential" } }
+            } else replacement
+            val pending = if (binding.action == AiManagementAction.MIGRATE) AiCutover.MIGRATING else AiCutover.REPLACING
+            store.edit { it[version] = pending.name; it.bumpCredentialRevision() }
+            requireManagementContext(binding)
+            aiRuntime.storage.writeVerified(binding, value, grants, grant) { aiRuntime.eligible() && aiRuntime.managementEpoch() == binding.hostEpoch }
+            requireManagementContext(binding)
+            store.edit { it[version] = AiCutover.RETIRING.name; it.bumpCredentialRevision() }
+        }
+        requireManagementContext(binding)
+        privateGatewaySecrets.retireAiCredential(legacyId(vault, slot))
+        requireManagementContext(binding)
+        store.edit { it.remove(legacy); it[version] = AiCutover.V3.name; it.bumpCredentialRevision() }
+    }
+
+    /** Pinned nonsecret settings transaction: never decrypt or rewrite a retained secret. */
+    suspend fun saveAiConfiguration(expectedVault: String, update: AiConfigurationUpdate) = withContext(AppCoroutineConfig.io) {
+        val validatedModel = update.geminiModel?.let(org.vaachak.reader.core.data.remote.GeminiTextModels::normalize)
+        vaultRepository.aiMutationMutex.withLock {
+            credentialMutex.withLock {
+                requireAiVault(expectedVault)
+                getVaultDataStore(expectedVault).edit {
+                    it[AI_TEXT_PROVIDER] = update.provider.name
+                    if (!update.preserveInactive || update.provider == AiTextProvider.GEMINI) {
+                        it[CF_URL] = update.cloudflareUrl.trim()
+                        it[AUTO_SAVE_RECAPS_KEY] = update.autoSaveRecaps
+                        if (validatedModel != null) it[GEMINI_MODEL] = validatedModel
+                    }
+                    if (!update.preserveInactive || update.provider == AiTextProvider.PRIVATE_GATEWAY) {
+                        it[PRIVATE_GATEWAY_URL] = update.gatewayUrl.trim()
+                        it[PRIVATE_GATEWAY_MODEL] = update.gatewayModel.trim()
+                    }
+                    it.bumpCredentialRevision()
+                }
+                Unit
+            }
+        }
+    }
+
+    /** A fixed-vault request; legacy material is never used as network fallback. */
     internal suspend fun loadAiRequest(kind: AiRequestKind, expectedVault: String?): AiRequestConfig =
         withContext(AppCoroutineConfig.io) {
-            // Existing writers take one lock only; the network snapshot takes both in this fixed order.
-            credentialMutex.withLock {
-                gatewayMigrationMutex.withLock { loadAiRequestLocked(kind, expectedVault) }
-            }
+            credentialMutex.withLock { loadAiRequestLocked(kind, expectedVault) }
         }
 
     private suspend fun loadAiRequestLocked(kind: AiRequestKind, expectedVault: String?): AiRequestConfig {
@@ -270,11 +486,15 @@ class SettingsRepository @Inject constructor(
         val provider = if (before[AI_TEXT_PROVIDER] == "PRIVATE_GATEWAY") {
             AiTextProvider.PRIVATE_GATEWAY
         } else AiTextProvider.GEMINI
-        val credential = when {
-            kind == AiRequestKind.IMAGE -> readAndMigrateCredentialLocked(vaultId, CF_TOKEN, CredentialSlot.CLOUDFLARE)
-            provider == AiTextProvider.PRIVATE_GATEWAY -> loadGatewayTokenLocked(vaultId)
-            else -> readAndMigrateCredentialLocked(vaultId, GEMINI_KEY, CredentialSlot.GEMINI)
+        val epoch = aiRuntime.requestEpoch()
+        val vaultEpoch = vaultRepository.aiVaultEpoch.value
+        val slot = when {
+            kind == AiRequestKind.IMAGE -> AiManagedSlot.CLOUDFLARE
+            provider == AiTextProvider.PRIVATE_GATEWAY -> AiManagedSlot.GATEWAY
+            else -> AiManagedSlot.GEMINI
         }
+        val credential = readManaged(vaultId, slot, before)
+        if (aiRuntime.requestEpoch() != epoch || !aiRuntime.eligible()) throw CancellationException("AI host changed")
         val after = store.data.first()
         // Allow the existing legacy migration to update credential revision, but never mix endpoints.
         if (!sameAiRouting(before, after) || vaultRepository.persistedVaultIdentity.first() != vaultId) {
@@ -282,11 +502,15 @@ class SettingsRepository @Inject constructor(
         }
         if (after[OFFLINE_MODE_KEY] ?: true) throw AiOfflineException()
         val url = if (kind == AiRequestKind.IMAGE) after[CF_URL].orEmpty() else after[PRIVATE_GATEWAY_URL].orEmpty()
-        val invalidated = combine(vaultRepository.persistedVaultIdentity, store.data) { active, prefs ->
-            active != vaultId || !sameAiRouting(after, prefs) ||
+        val invalidated = combine(vaultRepository.persistedVaultIdentity, store.data, aiRuntime.invalidated(epoch), vaultRepository.aiVaultEpoch) { active, prefs, hostInvalid, currentEpoch ->
+            currentEpoch != vaultEpoch || hostInvalid || active != vaultId || !sameAiRouting(after, prefs) ||
                 after[CREDENTIAL_REVISION] != prefs[CREDENTIAL_REVISION]
         }
-        return AiRequestConfig(provider, url, after[PRIVATE_GATEWAY_MODEL].orEmpty(), credential, invalidated)
+        val model = if (provider == AiTextProvider.GEMINI) after[GEMINI_MODEL].orEmpty()
+        else after[PRIVATE_GATEWAY_MODEL].orEmpty()
+        return AiRequestConfig(provider, url, model, credential, invalidated) {
+            aiRuntime.requestEpoch() == epoch && aiRuntime.eligible() && vaultRepository.aiVaultEpoch.value == vaultEpoch
+        }
     }
 
     private fun sameAiRouting(left: Preferences, right: Preferences): Boolean =
@@ -294,7 +518,8 @@ class SettingsRepository @Inject constructor(
             left[AI_TEXT_PROVIDER] == right[AI_TEXT_PROVIDER] &&
             left[CF_URL] == right[CF_URL] &&
             left[PRIVATE_GATEWAY_URL] == right[PRIVATE_GATEWAY_URL] &&
-            left[PRIVATE_GATEWAY_MODEL] == right[PRIVATE_GATEWAY_MODEL]
+            left[PRIVATE_GATEWAY_MODEL] == right[PRIVATE_GATEWAY_MODEL] &&
+            left[GEMINI_MODEL] == right[GEMINI_MODEL]
 
     val isEinkEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[IS_EINK_ENABLED] ?: false }
     val isAutoSaveRecapsEnabled: Flow<Boolean> = vaultPreferencesFlow.map { it[AUTO_SAVE_RECAPS_KEY] ?: true }
@@ -465,98 +690,55 @@ class SettingsRepository @Inject constructor(
     suspend fun setAiEnabled(enabled: Boolean) { editCurrentVault { it[IS_AI_ENABLED] = enabled } }
 
     suspend fun setAiTextProvider(provider: AiTextProvider) {
-        editCurrentVault { prefs ->
-            prefs[AI_TEXT_PROVIDER] = if (provider == AiTextProvider.PRIVATE_GATEWAY) {
-                "PRIVATE_GATEWAY"
-            } else {
-                "GEMINI"
+        editAiRouting { it[AI_TEXT_PROVIDER] = provider.name }
+    }
+
+    private suspend fun editAiRouting(update: (MutablePreferences) -> Unit) {
+        val vault = vaultRepository.persistedVaultIdentity.first()
+        vaultRepository.aiMutationMutex.withLock {
+            credentialMutex.withLock {
+                requireAiVault(vault)
+                getVaultDataStore(vault).edit { update(it); it.bumpCredentialRevision() }
             }
         }
     }
 
-    suspend fun savePrivateGatewaySettings(url: String, model: String, token: String) =
-        withContext(AppCoroutineConfig.io) {
-            gatewayMigrationMutex.withLock {
-                val vaultId = vaultRepository.activeVaultId.first()
-                val dataStore = getVaultDataStore(vaultId)
-                // Never persist the gateway credential as plaintext in a preferences file.
-                if (token.isBlank()) {
-                    dataStore.edit { it.remove(PRIVATE_GATEWAY_TOKEN) }
-                    privateGatewaySecrets.clear(vaultId)
-                } else {
-                    privateGatewaySecrets.write(vaultId, token.trim())
-                }
-                dataStore.edit { prefs ->
-                    prefs[PRIVATE_GATEWAY_URL] = url.trim()
-                    prefs[PRIVATE_GATEWAY_MODEL] = model.trim()
-                    prefs.remove(PRIVATE_GATEWAY_TOKEN)
-                    prefs[CREDENTIAL_REVISION] = (prefs[CREDENTIAL_REVISION] ?: 0) + 1
-                }
-            }
-        }
-
-    suspend fun savePrivateGatewayToken(token: String) = withContext(AppCoroutineConfig.io) {
-        gatewayMigrationMutex.withLock {
-            val vaultId = vaultRepository.activeVaultId.first()
-            val dataStore = getVaultDataStore(vaultId)
-            if (token.isBlank()) {
-                // Remove the legacy plaintext copy first so it cannot be re-migrated.
-                dataStore.edit {
-                    it.remove(PRIVATE_GATEWAY_TOKEN)
-                    it[CREDENTIAL_REVISION] = (it[CREDENTIAL_REVISION] ?: 0) + 1
-                }
-                privateGatewaySecrets.clear(vaultId)
-            } else {
-                privateGatewaySecrets.write(vaultId, token.trim())
-                dataStore.edit {
-                    it.remove(PRIVATE_GATEWAY_TOKEN)
-                    it[CREDENTIAL_REVISION] = (it[CREDENTIAL_REVISION] ?: 0) + 1
-                }
-            }
-        }
-    }
-
-    suspend fun saveSettings(
-        gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean, isAiEnabled: Boolean? = null
-    ): Unit = withContext(AppCoroutineConfig.io) {
+    /** Compatibility writers require the eligible active vault; blank metadata fields retain secrets. */
+    suspend fun savePrivateGatewaySettings(url: String, model: String, token: String) {
+        val vault = vaultRepository.persistedVaultIdentity.first()
+        if (token.isNotBlank()) manageAiCredential(vault, AiManagedSlot.GATEWAY, AiManagementAction.REPLACE, token)
         credentialMutex.withLock {
-            val vaultId = vaultRepository.activeVaultId.first()
-            val store = getVaultDataStore(vaultId)
-            val prefs = store.data.first()
-            val geminiValue = gemini.trim()
-            val cloudflareValue = cfToken.trim()
-            // A locked migration can leave a legacy secret hidden from the UI;
-            // refuse an accidental empty overwrite rather than deleting user data.
-            if ((prefs[GEMINI_KEY]?.isNotEmpty() == true && geminiValue.isEmpty()) ||
-                (prefs[CF_TOKEN]?.isNotEmpty() == true && cloudflareValue.isEmpty())) {
-                throw GatewayCredentialUnavailableException(
-                    "Unlock your device and retry migrating the existing AI credentials."
-                )
+            requireAiVault(vault)
+            getVaultDataStore(vault).edit {
+                it[PRIVATE_GATEWAY_URL] = url.trim(); it[PRIVATE_GATEWAY_MODEL] = model.trim(); it.bumpCredentialRevision()
             }
-            val geminiId = credentialId(vaultId, CredentialSlot.GEMINI)
-            val cloudflareId = credentialId(vaultId, CredentialSlot.CLOUDFLARE)
-            // Authentication/invalidated-key check before clearing any existing ciphertext.
-            privateGatewaySecrets.read(geminiId)
-            privateGatewaySecrets.read(cloudflareId)
-            if (geminiValue.isEmpty()) privateGatewaySecrets.clear(geminiId)
-            else privateGatewaySecrets.write(geminiId, geminiValue)
-            if (cloudflareValue.isEmpty()) privateGatewaySecrets.clear(cloudflareId)
-            else privateGatewaySecrets.write(cloudflareId, cloudflareValue)
-            check(privateGatewaySecrets.read(geminiId) == geminiValue) {
-                "Encrypted credential verification failed"
-            }
-            check(privateGatewaySecrets.read(cloudflareId) == cloudflareValue) {
-                "Encrypted credential verification failed"
-            }
-            store.edit { updated ->
-                updated.remove(GEMINI_KEY)
-                updated.remove(CF_TOKEN)
-                updated[CF_URL] = cfUrl
-                updated[IS_EINK_ENABLED] = isEnk
-                if (isAiEnabled != null) updated[IS_AI_ENABLED] = isAiEnabled
-                updated[CREDENTIAL_REVISION] = (updated[CREDENTIAL_REVISION] ?: 0) + 1
-            }
-            Unit
+        }
+    }
+
+    suspend fun savePrivateGatewayToken(token: String) {
+        val vault = vaultRepository.persistedVaultIdentity.first()
+        manageAiCredential(vault, AiManagedSlot.GATEWAY,
+            if (token.isBlank()) AiManagementAction.REMOVE else AiManagementAction.REPLACE, token.trim())
+    }
+
+    suspend fun saveAiEditorSettings(gemini: String, cfUrl: String, cfToken: String,
+                                    isEnk: Boolean, expectedVault: String? = null) {
+        val vault = expectedVault ?: vaultRepository.persistedVaultIdentity.first()
+        requireAiVault(vault)
+        if (gemini.isNotBlank()) manageAiCredential(vault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, gemini)
+        if (cfToken.isNotBlank()) manageAiCredential(vault, AiManagedSlot.CLOUDFLARE, AiManagementAction.REPLACE, cfToken)
+        credentialMutex.withLock {
+            requireAiVault(vault)
+            getVaultDataStore(vault).edit { it[CF_URL] = cfUrl.trim(); it[IS_EINK_ENABLED] = isEnk; it.bumpCredentialRevision() }
+        }
+    }
+
+    suspend fun saveSettings(gemini: String, cfUrl: String, cfToken: String, isEnk: Boolean, isAiEnabled: Boolean? = null) {
+        val vault = vaultRepository.persistedVaultIdentity.first()
+        saveAiEditorSettings(gemini, cfUrl, cfToken, isEnk, vault)
+        if (isAiEnabled != null) credentialMutex.withLock {
+            requireAiVault(vault)
+            getVaultDataStore(vault).edit { it[IS_AI_ENABLED] = isAiEnabled }
         }
     }
 
@@ -565,7 +747,7 @@ class SettingsRepository @Inject constructor(
     suspend fun setContrast(value: Float) { editCurrentVault { it[CONTRAST_KEY] = value } }
     suspend fun setUseEmbeddedDictionary(enabled: Boolean) { editCurrentVault { it[USE_EMBEDDED_DICT] = enabled } }
     suspend fun setDictionaryFolder(uri: String) { editCurrentVault { it[DICTIONARY_FOLDER_KEY] = uri } }
-    suspend fun setOfflineMode(enabled: Boolean) { editCurrentVault { it[OFFLINE_MODE_KEY] = enabled } }
+    suspend fun setOfflineMode(enabled: Boolean) { editAiRouting { it[OFFLINE_MODE_KEY] = enabled } }
 
     fun validateStarDictFolder(uriString: String): Boolean {
         return try {

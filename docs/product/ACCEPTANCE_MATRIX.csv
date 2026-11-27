@@ -23,3 +23,10 @@ P2-02,P2,State,"Honest provider connection and active label, retry not misleadin
 P2-03,P2,Media,"M4B long seeks, rotation, low memory, Bluetooth and headphone interruption",Device,PENDING
 P3-01,P3,Future gateway,Versioned task contracts and central provider routing only when qualified,Separate release gate,PENDING
 P3-02,P3,Future media AI,OCR/vision/audio transcription opt-in only after explicit design approval,Separate release gate,PENDING
+D90-01,P0,Credentials,"Locked is distinct from missing; explicit keep replace remove; migration preserves ciphertext",Unit + device,PENDING
+D90-02,P0,Authentication,"Native device PIN for legacy migration; prompt-free first save and confirmed replace/remove in active eligible profile; cancellation preserves existing credential; prompt-free AI after normal unlock restart reboot; lock background and vault invalidation",Instrumentation + device,PENDING
+D90-03,P0,Gemini,"Per-vault model discovery selection and all four text actions; 402 quota retirement; no fallback",Fake HTTP + device,PENDING
+D90-04,P0,Cloudflare,"Versioned Worker and bounded typed image response; off-main decode and no replay",Worker tests + fake HTTP + device,PENDING
+D90-05,P1,Diagnostics,"Explicit synthetic text/image test; separate catalog and inference; redacted results",Unit + UI + device,PENDING
+D90-06,P0,Security,"AI-only versioned key policy and API 30-34 compatibility review; durable migration; secure-lock denial; unchanged sync and OPDS; documented hotspot disposition",Security + instrumentation + device,PENDING
+D90-07,P0,Provider configuration,"Exactly two distinct menu destinations; External Gemini and Cloudflare panels only; Internal AI-G732 panel only; no duplicate provider selector; opening/back does not change routing; Gemini recap control; one nonsecret save includes selected model; discard hidden drafts and preserve inactive settings; no duplicate offline toggle",Unit + UI + device,PENDING

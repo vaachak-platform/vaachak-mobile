@@ -22,7 +22,8 @@ sealed class Screen(val route: String) {
         }
     }
 
-    data object AiConfig : Screen("ai_config")
+    data object AiConfig : Screen("ai_config") // External route retained for existing navigation clients.
+    data object InternalAiConfig : Screen("ai_config/internal")
     data object SyncSettings : Screen("sync_settings")
     data object Appearance : Screen("settings/appearance")
     data object AppAppearance : Screen("settings/app_appearance")

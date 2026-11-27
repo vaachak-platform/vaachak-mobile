@@ -8,7 +8,11 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -79,9 +83,15 @@ class VaultRepository(
      * Updates the DataStore to point to the newly selected user's profile.
      * The rest of the app (Bookshelf, Settings) will instantly react to this change.
      */
+    /** Serialize committed profile switches with authenticated AI credential publication. */
+    internal val aiMutationMutex = Mutex()
+    private val _aiVaultEpoch = MutableStateFlow(0L)
+    internal val aiVaultEpoch = _aiVaultEpoch.asStateFlow()
+
     suspend fun setActiveVaultId(profileId: String) {
-        globalDataStore.edit { prefs ->
-            prefs[ACTIVE_VAULT_ID] = profileId
+        aiMutationMutex.withLock {
+            _aiVaultEpoch.value++
+            globalDataStore.edit { prefs -> prefs[ACTIVE_VAULT_ID] = profileId }
         }
     }
 }

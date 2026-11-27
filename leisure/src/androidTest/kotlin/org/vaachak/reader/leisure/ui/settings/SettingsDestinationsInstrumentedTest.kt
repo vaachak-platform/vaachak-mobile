@@ -24,6 +24,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.vaachak.reader.core.domain.model.AiConfig
+import org.vaachak.reader.core.domain.model.AiTextProvider
 import org.vaachak.reader.core.domain.model.ComicPreferences
 import org.vaachak.reader.leisure.navigation.Screen
 import org.vaachak.reader.leisure.testing.ComposeTestHostActivity
@@ -85,16 +87,31 @@ class SettingsDestinationsInstrumentedTest {
         compose.onNodeWithContentDescription(
             "Intelligence features are disabled while Offline Mode is active."
         ).assertExists()
-        compose.onNodeWithContentDescription(
-            "Gemini Integration, Manage API keys for Global Recall and Smart Summaries"
-        ).assertExists()
-        compose.onNodeWithContentDescription(
-            "Cloudflare Visualize, Configure the direct image provider"
-        ).assertExists()
-        compose.onNodeWithContentDescription(
-            "Private Text Gateway, Optional self-hosted text provider settings"
-        ).performScrollTo().performClick()
-        compose.onNodeWithText("Destination: ${Screen.AiConfig.route}").assertExists()
+        assertProviderMenu()
+        compose.onNodeWithContentDescription("External Providers, Gemini text and Cloudflare Visualize").performScrollTo().performClick()
+        compose.onNodeWithText("External Providers").assertExists()
+        compose.onNodeWithTag("ai_config_gemini_panel").assertExists()
+        compose.onNodeWithTag("ai_config_cloudflare_panel").assertExists()
+        compose.onNodeWithTag("ai_config_internal_panel").assertDoesNotExist()
+        compose.onNodeWithTag("ai_config_provider_gateway").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(requireNotNull(navController).popBackStack()) }
+        select(Tid.Settings.tabIntelligence)
+        assertProviderMenu()
+        compose.onNodeWithContentDescription("Internal — AI-G732, Private Tailscale text gateway").performScrollTo().performClick()
+        compose.onNodeWithText("Internal — AI-G732").assertExists()
+        compose.onNodeWithTag("ai_config_internal_panel").assertExists()
+        compose.onNodeWithTag("ai_config_gemini_panel").assertDoesNotExist()
+        compose.onNodeWithTag("ai_config_cloudflare_panel").assertDoesNotExist()
+        compose.onNodeWithTag("ai_config_auto_save").assertDoesNotExist()
+        compose.onNodeWithTag("ai_config_provider_gemini").assertDoesNotExist()
+    }
+
+    private fun assertProviderMenu() {
+        compose.onNodeWithContentDescription("External Providers, Gemini text and Cloudflare Visualize").assertExists()
+        compose.onNodeWithContentDescription("Internal — AI-G732, Private Tailscale text gateway").assertExists()
+        compose.onNodeWithContentDescription("Gemini Integration, Manage API keys for Global Recall and Smart Summaries").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Cloudflare Visualize, Configure the direct image provider").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Private Text Gateway, Optional self-hosted text provider settings").assertDoesNotExist()
     }
 
     private fun select(tag: String) {
@@ -130,10 +147,20 @@ class SettingsDestinationsInstrumentedTest {
                         listOf(
                             Screen.SyncSettings.route,
                             Screen.Bookshelf.route,
-                            Screen.CatalogManage.route,
-                            Screen.AiConfig.route
+                            Screen.CatalogManage.route
                         ).forEach { route ->
                             composable(route) { Text("Destination: $route") }
+                        }
+                        // Use the production route registration and real editor with a fixed saved
+                        // provider, deliberately different from the External destination.
+                        aiProviderDestinations(controller) { provider, back ->
+                            AiConfigForm(
+                                state = SettingsUiState(isOfflineMode = offline,
+                                    aiConfig = AiConfig(textProvider = AiTextProvider.PRIVATE_GATEWAY)),
+                                provider = provider, onBack = back, statuses = emptyMap(),
+                                onManage = { _, _, _ -> error("Unexpected credential operation") },
+                                onSave = { error("Opening a configuration page must not save") }
+                            )
                         }
                     }
                 }

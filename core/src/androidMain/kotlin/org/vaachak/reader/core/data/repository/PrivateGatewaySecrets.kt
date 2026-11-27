@@ -231,6 +231,19 @@ class PrivateGatewaySecrets @Inject constructor(
         durableFile.ensureDurable(vaultFile(vaultId))
     }
 
+    /** AI migration metadata lookup; never decrypt just to report presence. */
+    @Synchronized
+    internal fun hasStoredCredential(id: String): Boolean = vaultFile(id).exists()
+
+    /** Retire only the exact AI slot. Shared sync/OPDS aliases are never deleted. */
+    @Synchronized
+    internal fun retireAiCredential(id: String) {
+        require(!id.startsWith("vaachak_credential_v1:") ||
+            id.startsWith("vaachak_credential_v1:GEMINI:") ||
+            id.startsWith("vaachak_credential_v1:CLOUDFLARE:"))
+        durableFile.remove(vaultFile(id))
+    }
+
     @Synchronized
     fun clear(vaultId: String) {
         val file = vaultFile(vaultId)

@@ -81,9 +81,8 @@ class SettingsViewModelTest {
         every { settingsRepo.lastSyncTimestamp } returns flowOf(0L)
         every { settingsRepo.isOfflineModeEnabled } returns flowOf(false)
 
-        every { settingsRepo.geminiKey } returns flowOf("")
+        every { settingsRepo.isAiEnabled } returns flowOf(true)
         every { settingsRepo.cfUrl } returns flowOf("")
-        every { settingsRepo.cfToken } returns flowOf("")
         every { settingsRepo.isAutoSaveRecapsEnabled } returns flowOf(false)
         every { settingsRepo.aiTextProvider } returns flowOf(AiTextProvider.PRIVATE_GATEWAY)
         every { settingsRepo.privateGatewayUrl } returns flowOf("https://reader.tailnet.ts.net:8443/v1")
@@ -178,7 +177,7 @@ class SettingsViewModelTest {
 
     @Test
     fun `empty gateway token keeps previously stored token`() = runTest(testDispatcher) {
-        coEvery { settingsRepo.loadPrivateGatewayToken() } returns "previous-token"
+
 
         viewModel.saveAiConfig(
             AiConfigSaveRequest(
@@ -193,7 +192,7 @@ class SettingsViewModelTest {
 
         coVerify(exactly = 1) {
             settingsRepo.savePrivateGatewaySettings(
-                "https://private.example", "gateway-model", "previous-token"
+                "https://private.example", "gateway-model", ""
             )
         }
     }
@@ -208,4 +207,20 @@ class SettingsViewModelTest {
             settingsRepo.savePrivateGatewaySettings(any(), any(), any())
         }
     }
+
+    @Test
+    fun `save changes forwards model with nonsecret configuration to pinned vault`() = runTest(testDispatcher) {
+        coEvery { settingsRepo.saveAiConfiguration("profile_1", any()) } returns Unit
+        viewModel.saveConfiguration("profile_1", AiConfigSaveRequest("", "https://fixture.invalid/image", "", false,
+            AiGatewayUpdate(AiTextProvider.GEMINI, "", "local-chat", ""), "gemini-b"))
+        coVerify(exactly = 1) {
+            settingsRepo.saveAiConfiguration("profile_1", match {
+                it.preserveInactive && it.geminiModel == "gemini-b" && it.provider == AiTextProvider.GEMINI &&
+                    it.cloudflareUrl == "https://fixture.invalid/image" && !it.autoSaveRecaps
+            })
+        }
+        coVerify(exactly = 0) { settingsRepo.saveGeminiModel(any(), any()) }
+        coVerify(exactly = 0) { settingsRepo.manageAiCredential(any(), any(), any(), any()) }
+    }
+
 }

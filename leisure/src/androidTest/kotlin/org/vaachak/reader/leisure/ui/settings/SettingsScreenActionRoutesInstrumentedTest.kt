@@ -135,7 +135,9 @@ class SettingsScreenActionRoutesInstrumentedTest {
             RouteCase(Tid.Settings.tabContent,
                 "Manage Catalogs, Add or remove OPDS feeds", "catalog_manage"),
             RouteCase(Tid.Settings.tabIntelligence,
-                "Gemini Integration, Manage API keys for Global Recall and Smart Summaries", Screen.AiConfig.route)
+                "External Providers, Gemini text and Cloudflare Visualize", Screen.AiConfig.route),
+            RouteCase(Tid.Settings.tabIntelligence,
+                "Internal — AI-G732, Private Tailscale text gateway", Screen.InternalAiConfig.route)
         )
         var controller: NavHostController? = null
         val density = wideTestDensity()

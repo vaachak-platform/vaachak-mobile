@@ -25,16 +25,11 @@ package org.vaachak.reader.core.data.remote
 import okhttp3.ResponseBody
 import org.vaachak.reader.core.domain.model.AiImageRequest
 import retrofit2.Response
-import retrofit2.http.Body
-import retrofit2.http.Header
-import retrofit2.http.POST
-import retrofit2.http.Url
 
 interface CloudflareAiApi {
-    @POST
     suspend fun generateImage(
-        @Url fullUrl: String, // <--- This overrides the placeholder URL
-        @Body request: AiImageRequest,
-        @Header("Authorization") token: String
-    ): Response<ResponseBody> // <--- Returns RAW BYTES, not JSON
+        fullUrl: String,
+        request: AiImageRequest,
+        token: String
+    ): Response<ResponseBody>
 }

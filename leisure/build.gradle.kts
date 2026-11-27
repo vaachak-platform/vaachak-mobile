@@ -238,6 +238,8 @@ dependencies {
     testImplementation(libs.robolectric)
 
     androidTestImplementation(libs.androidx.junit)
+    // D90 synthetic UI repository responses; test APK only.
+    androidTestImplementation("io.mockk:mockk-android:${libs.versions.mockk.get()}")
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

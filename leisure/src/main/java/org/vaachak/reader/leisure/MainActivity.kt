@@ -97,7 +97,7 @@ import org.vaachak.reader.leisure.ui.catalog.CatalogManagerScreen
 import org.vaachak.reader.leisure.ui.highlights.AllHighlightsScreen
 import org.vaachak.reader.leisure.ui.login.LoginScreen
 import org.vaachak.reader.leisure.ui.reader.ReaderScreen
-import org.vaachak.reader.leisure.ui.settings.AiConfigScreen
+import org.vaachak.reader.leisure.ui.settings.aiProviderDestinations
 import org.vaachak.reader.leisure.ui.settings.AppAppearanceScreen
 import org.vaachak.reader.leisure.ui.settings.DefaultAppearanceScreen
 import org.vaachak.reader.leisure.ui.settings.DictionarySettingsScreen
@@ -119,6 +119,34 @@ import java.util.zip.ZipFile
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
+    @javax.inject.Inject
+    lateinit var aiCredentialRuntime: org.vaachak.reader.core.data.repository.AiCredentialRuntime
+
+    override fun onResume() {
+        super.onResume()
+        aiCredentialRuntime.hostResumed(this)
+    }
+
+    override fun onPause() {
+        aiCredentialRuntime.hostPaused(this)
+        super.onPause()
+    }
+
+    override fun onStop() {
+        aiCredentialRuntime.hostStopped(this)
+        super.onStop()
+    }
+
+    override fun onUserLeaveHint() {
+        aiCredentialRuntime.hostUserLeft(this)
+        super.onUserLeaveHint()
+    }
+
+    override fun onDestroy() {
+        aiCredentialRuntime.hostDestroyed(this)
+        super.onDestroy()
+    }
+
 
     // OPTIMIZATION: Ultra-lightweight ViewModel for routing and theme
     private val rootViewModel: RootViewModel by viewModels()
@@ -320,7 +348,7 @@ class MainActivity : AppCompatActivity() {
                                 composable(Screen.Login.route) { LoginScreen(navController = navController) }
                                 composable(Screen.ReaderProfiles.route) { ReaderProfilesScreen(navController = navController) }
                                 composable(Screen.CatalogManage.route) { CatalogManagerScreen(onBack = { navController.popBackStack() }) }
-                                composable(Screen.AiConfig.route) { AiConfigScreen(onBack = { navController.popBackStack() }) }
+                                aiProviderDestinations(navController)
                                 composable(Screen.SyncSettings.route) { SyncSettingsScreen(navController = navController) }
                                 composable(Screen.Appearance.route) { DefaultAppearanceScreen(onBack = { navController.popBackStack() }) }
                                 composable(Screen.TTS.route) { TtsSettingsScreen(onBack = { navController.popBackStack() }) }

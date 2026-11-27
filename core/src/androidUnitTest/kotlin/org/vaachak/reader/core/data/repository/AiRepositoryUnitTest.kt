@@ -9,6 +9,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
@@ -33,7 +34,7 @@ class AiRepositoryUnitTest {
     private val settings = mockk<SettingsRepository>()
     private val cloudflare = mockk<CloudflareAiApi>()
     private val gateway = mockk<PrivateGatewayClient>()
-    private val repository = AiRepository(settings, cloudflare, gateway)
+    private val repository = AiRepository(settings, cloudflare, gateway, mockk<org.vaachak.reader.core.data.remote.GeminiRestClient>())
 
     private fun configure(
         offline: Boolean = false,
@@ -116,6 +117,20 @@ class AiRepositoryUnitTest {
         coVerify(exactly = 0) { cloudflare.generateImage(any(), any(), any()) }
     }
 
+    @Test fun lockedImageCredentialIsNotReportedAsMissing() = runBlocking {
+        configure()
+        coEvery { settings.loadAiRequest(AiRequestKind.IMAGE, any()) } throws
+            GatewayCredentialUnavailableException("private secret")
+        val result = repository.visualizeText("scene")
+        assertEquals(
+            "Error: Saved Cloudflare credential unavailable. Check migration, recovery or device lock in AI Settings.",
+            result
+        )
+        assertFalse(result.contains("private secret"))
+        assertFalse(result.contains("not configured", ignoreCase = true))
+        coVerify(exactly = 0) { cloudflare.generateImage(any(), any(), any()) }
+    }
+
     @Test fun imageRequestRequiresBothUrlAndToken() = runBlocking {
         configure(cfUrl = " ")
         assertEquals(
@@ -130,13 +145,15 @@ class AiRepositoryUnitTest {
         coVerify(exactly = 0) { cloudflare.generateImage(any(), any(), any()) }
     }
 
+    @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
     @Test fun cloudflareImageStaysIndependentOfBothTextProviderChoices() = runBlocking {
         for (provider in AiTextProvider.entries) {
             configure(provider = provider, cfUrl = " https://cloudflare.example/image ", cfToken = " image-secret ")
+            val bytes = Base64.decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGMU0bBhYGBgYmBgYGBgAAAFogB8q5SvRgAAAABJRU5ErkJggg==", Base64.NO_WRAP)
             coEvery { cloudflare.generateImage(any(), any(), any()) } returns
-                Response.success("raw-image".toResponseBody())
+                Response.success(bytes.toResponseBody("image/png".toMediaType()))
             assertEquals(
-                Base64.encodeToString("raw-image".toByteArray(), Base64.DEFAULT),
+                Base64.encodeToString(bytes, Base64.NO_WRAP),
                 repository.visualizeText("mountain")
             )
         }

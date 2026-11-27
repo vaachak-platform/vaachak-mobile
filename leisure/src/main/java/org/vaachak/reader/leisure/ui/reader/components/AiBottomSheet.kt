@@ -23,9 +23,7 @@
 package org.vaachak.reader.leisure.ui.reader.components
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.text.method.LinkMovementMethod
-import android.util.Base64
 import android.widget.TextView
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -60,7 +58,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -74,7 +71,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.text.HtmlCompat
 import org.vaachak.reader.leisure.ui.testability.Tid
 import org.vaachak.reader.leisure.ui.testability.tid
-import timber.log.Timber
+import org.vaachak.reader.core.data.remote.AiImagePayload
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -243,18 +242,15 @@ private fun AiImageResult(responseText: String, isEink: Boolean) {
             modifier = Modifier.fillMaxWidth()
         )
     } else {
-        // Attempt to decode
-        val bitmap: Bitmap? = remember(responseText) {
-            try {
-                val imageBytes = Base64.decode(responseText, Base64.DEFAULT)
-                BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            } catch (e: Exception) {
-                Timber.e(e, "Bitmap decode failed: ${e.message}")
-                null
+        val result by androidx.compose.runtime.key(responseText) {
+            produceState<Pair<Boolean, Bitmap?>>(initialValue = false to null, responseText) {
+                value = true to AiImagePayload.decodeForDisplay(responseText)
             }
         }
-
-        if (bitmap != null) {
+        val bitmap = result.second
+        if (!result.first) {
+            AiLoadingState(false, isEink)
+        } else if (bitmap != null) {
             Card(
                 border = if (isEink) BorderStroke(1.dp, Color.Black) else null,
                 colors = CardDefaults.cardColors(containerColor = Color.Transparent)

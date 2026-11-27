@@ -38,13 +38,17 @@ class AiRequestLifecycleTest {
     private val base = "https://reader.example.ts.net:8443/v1"
     private val settings: SettingsRepository
 
+    private val ai = AiCredentialRuntimeFixture()
+
     init {
         every { vault.activeVaultId } returns identity
         every { vault.persistedVaultIdentity } returns identity
         every { secrets.write(any(), any()) } answers { tokens[firstArg()] = secondArg(); Unit }
         every { secrets.read(any()) } answers { tokens[firstArg()].orEmpty() }
         every { secrets.clear(any()) } answers { tokens.remove(firstArg()); Unit }
-        settings = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets)
+        configureAiVault(vault, identity)
+        configureLegacyAiStorage(secrets, tokens)
+        settings = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets, ai.runtime)
     }
 
     private suspend fun configureGateway(token: String) {
@@ -117,7 +121,7 @@ class AiRequestLifecycleTest {
         configureGateway("synthetic-key")
         val gateway = mockk<PrivateGatewayClient>()
         val cloudflare = mockk<CloudflareAiApi>()
-        val repository = AiRepository(settings, cloudflare, gateway)
+        val repository = AiRepository(settings, cloudflare, gateway, mockk<org.vaachak.reader.core.data.remote.GeminiRestClient>())
         val outcomes = mapOf(
             GatewayProbeResult.MODEL_LISTED to GatewayDiagnostic.MODEL_LISTED,
             GatewayProbeResult.MODEL_NOT_LISTED to GatewayDiagnostic.MODEL_NOT_LISTED,

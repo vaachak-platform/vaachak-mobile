@@ -1,17 +1,29 @@
 package org.vaachak.reader.leisure.ui.audio
 
 import android.content.Context
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.vaachak.reader.core.data.repository.VaultRepository
 import org.vaachak.reader.leisure.MainActivity
+import org.vaachak.reader.leisure.RootViewModel
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.nio.ByteBuffer
@@ -61,19 +73,63 @@ class AudioIntegrationInstrumentedTest {
             assertFalse(reopened.mediaFile("vault-A", book.id, book.tracks.first().file).exists())
         } finally { root.deleteRecursively() }
     }
+    // Read a private snapshot, never open a second DataStore on the live app file.
+    // A fresh CI install may have no persisted selection; an onboarded reader has a UUID.
+    private suspend fun persistedFixtureVault(): String {
+        val source = File(context.filesDir, "datastore/vault_prefs.preferences_pb")
+        if (!source.exists()) return VaultRepository.DEFAULT_VAULT_ID
+        val snapshot = File.createTempFile("audio-vault-", ".preferences_pb", context.cacheDir)
+        val job = SupervisorJob()
+        val scope = CoroutineScope(Dispatchers.IO + job)
+        try {
+            source.copyTo(snapshot, overwrite = true)
+            val preferences = PreferenceDataStoreFactory.create(scope = scope) { snapshot }
+            val vault = withTimeout(10000L) {
+                preferences.data.first()[VaultRepository.ACTIVE_VAULT_ID]
+                    ?: VaultRepository.DEFAULT_VAULT_ID
+            }
+            check(vault.isNotBlank()) { "Persisted audio fixture vault is blank" }
+            return vault
+        } finally {
+            withContext(NonCancellable) {
+                job.cancelAndJoin()
+                check(snapshot.delete() || !snapshot.exists()) { "Audio vault snapshot cleanup failed" }
+            }
+        }
+    }
+
+    // Wait for the real activity-scoped repository flow rather than its startup placeholder.
+    private suspend fun awaitFixtureVault(scenario: ActivityScenario<MainActivity>, expected: String) {
+        lateinit var active: StateFlow<String>
+        scenario.onActivity { activity ->
+            active = ViewModelProvider(activity)[RootViewModel::class.java].activeVaultId
+        }
+        val matched = withTimeoutOrNull(20000L) { active.first { it == expected }; true } ?: false
+        assertTrue("Audio fixture vault did not become active", matched)
+        android.util.Log.i("D90AudioFixture", if (expected == VaultRepository.DEFAULT_VAULT_ID)
+            "Active fixture vault: default" else "Active fixture vault: named (identifier redacted)")
+    }
+
+    private fun requireFixtureVault(activity: MainActivity, expected: String) {
+        assertTrue("Active vault changed during audio fixture",
+            ViewModelProvider(activity)[RootViewModel::class.java].activeVaultId.value == expected)
+    }
+
     private suspend fun until(condition: () -> Boolean) = withTimeout(20000L) {
         while (!condition()) delay(100)
     }
     @Test fun actualServicePlaybackPauseSeekAndReopenResume() = runBlocking {
         assertTrue(context.packageName.endsWith(".debug"))
-        // The device runner uses a fresh disposable emulator and a default-vault debug installation.
+        val fixtureVault = persistedFixtureVault()
         val store = AudioStore.get(context)
         val sample = (System.nanoTime() % 1000).toShort()
-        val book = AudioImporter(context, store).importSources("default", listOf(source("fixture.wav", wav(40, sample))), "Audio service fixture")
+        val book = AudioImporter(context, store).importSources(fixtureVault, listOf(source("fixture.wav", wav(40, sample))), "Audio service fixture")
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                awaitFixtureVault(scenario, fixtureVault)
                 fun send(action: String, value: Long = 0L) = scenario.onActivity {
-                    AudioPlayback.send(it, "default", action, book.id, value)
+                    requireFixtureVault(it, fixtureVault)
+                    AudioPlayback.send(it, fixtureVault, action, book.id, value)
                 }
                 send("open")
                 until { AudioPlayback.state.value?.let { it.id == book.id && it.playing } == true }
@@ -81,11 +137,11 @@ class AudioIntegrationInstrumentedTest {
                 until { AudioPlayback.state.value?.let { it.id == book.id && it.position >= 12000 } == true }
                 send("toggle")
                 until { AudioPlayback.state.value?.let { it.id == book.id && !it.playing } == true }
-                until { store.load("default").find(book.id)?.continueListening == true &&
-                    (store.load("default").find(book.id)?.position ?: 0L) >= 12000 }
+                until { store.load(fixtureVault).find(book.id)?.continueListening == true &&
+                    (store.load(fixtureVault).find(book.id)?.position ?: 0L) >= 12000 }
                 send("stop")
                 until { AudioPlayback.state.value == null }
-                val saved = store.load("default").find(book.id)!!.position
+                val saved = store.load(fixtureVault).find(book.id)!!.position
                 send("open")
                 until { AudioPlayback.state.value?.let { it.id == book.id && it.playing && it.position >= saved - 500 } == true }
                 val resumed = AudioPlayback.state.value!!.position
@@ -95,7 +151,7 @@ class AudioIntegrationInstrumentedTest {
             }
         } finally {
             AudioPlayback.stopForProfilePicker(context)
-            store.remove("default", book.id)
+            store.remove(fixtureVault, book.id)
         }
     }
     @Test fun actualMediaMetadataAndBoundedArtwork() = runBlocking {
@@ -135,17 +191,20 @@ class AudioIntegrationInstrumentedTest {
 
     @Test fun longM4bSeekAndChapterResume() = runBlocking {
         assertTrue(context.packageName.endsWith(".debug"))
+        val fixtureVault = persistedFixtureVault()
         val store = AudioStore.get(context)
         val input = AudioInput("synthetic-seek.m4b") {
             InstrumentationRegistry.getInstrumentation().context.assets.open("d89-synthetic-seek.m4b")
         }
-        val book = AudioImporter(context, store).importSources("default", listOf(input), "Synthetic M4B")
+        val book = AudioImporter(context, store).importSources(fixtureVault, listOf(input), "Synthetic M4B")
         try {
             assertTrue(book.duration in 719000L..721000L)
             assertEquals(listOf(0L, 300000L, 600000L), AudioTimeline(book.tracks).chapters.map { it.start })
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                awaitFixtureVault(scenario, fixtureVault)
                 fun send(action: String, value: Long = 0L) = scenario.onActivity {
-                    AudioPlayback.send(it, "default", action, book.id, value)
+                    requireFixtureVault(it, fixtureVault)
+                    AudioPlayback.send(it, fixtureVault, action, book.id, value)
                 }
                 send("open")
                 awaitTransport("M4B starts") { AudioPlayback.state.value?.let { it.id == book.id && it.playing } == true }
@@ -155,7 +214,7 @@ class AudioIntegrationInstrumentedTest {
                 awaitTransport("M4B pause") { AudioPlayback.state.value?.let { it.id == book.id && !it.playing } == true }
                 send("stop")
                 awaitTransport("M4B stop") { AudioPlayback.state.value == null }
-                val saved = store.load("default").find(book.id)!!.position
+                val saved = store.load(fixtureVault).find(book.id)!!.position
                 assertTrue(saved >= 599000L)
                 send("open")
                 awaitTransport("M4B resumes") { AudioPlayback.state.value?.let { it.id == book.id && it.playing && it.position >= saved - 500 } == true }
@@ -164,22 +223,25 @@ class AudioIntegrationInstrumentedTest {
             }
         } finally {
             AudioPlayback.stopForProfilePicker(context)
-            store.remove("default", book.id)
+            store.remove(fixtureVault, book.id)
         }
     }
 
     @Test fun serviceAndRestoreExcludeEachOtherForTheSameTitle() = runBlocking {
         assertTrue(context.packageName.endsWith(".debug"))
+        val fixtureVault = persistedFixtureVault()
         val store = AudioStore.get(context)
         val bytes = wav(40, (System.nanoTime() % 1000).toShort())
         val importer = AudioImporter(context, store)
-        val book = importer.importSources("default", listOf(source("lease.wav", bytes)), "Recovery lease fixture")
+        val book = importer.importSources(fixtureVault, listOf(source("lease.wav", bytes)), "Recovery lease fixture")
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                awaitFixtureVault(scenario, fixtureVault)
                 fun send(action: String) = scenario.onActivity {
-                    AudioPlayback.send(it, "default", action, book.id)
+                    requireFixtureVault(it, fixtureVault)
+                    AudioPlayback.send(it, fixtureVault, action, book.id)
                 }
-                val lease = checkNotNull(AudioMediaAccess.acquire("default", book.id))
+                val lease = checkNotNull(AudioMediaAccess.acquire(fixtureVault, book.id))
                 try {
                     send("open")
                     awaitTransport("open rejected during reservation") {
@@ -190,33 +252,36 @@ class AudioIntegrationInstrumentedTest {
                 send("open")
                 awaitTransport("open after release") { AudioPlayback.state.value?.let { it.id == book.id && it.playing } == true }
                 assertTrue(runCatching {
-                    importer.restoreSources("default", book.id, listOf(source("lease.wav", bytes)))
+                    importer.restoreSources(fixtureVault, book.id, listOf(source("lease.wav", bytes)))
                 }.isFailure)
                 assertEquals(book.id, AudioPlayback.state.value?.id)
-                assertTrue(runCatching { store.remove("default", book.id) }.isFailure)
-                assertNotNull(store.load("default").find(book.id))
-                assertArrayEquals(bytes, store.mediaFile("default", book.id, book.tracks.single().file).readBytes())
+                assertTrue(runCatching { store.remove(fixtureVault, book.id) }.isFailure)
+                assertNotNull(store.load(fixtureVault).find(book.id))
+                assertArrayEquals(bytes, store.mediaFile(fixtureVault, book.id, book.tracks.single().file).readBytes())
                 send("stop")
                 awaitTransport("release after stop") { AudioPlayback.state.value == null }
-                val restored = importer.restoreSources("default", book.id, listOf(source("lease.wav", bytes)))
+                val restored = importer.restoreSources(fixtureVault, book.id, listOf(source("lease.wav", bytes)))
                 assertEquals(book.id, restored.id)
-                assertArrayEquals(bytes, store.mediaFile("default", book.id, book.tracks.single().file).readBytes())
+                assertArrayEquals(bytes, store.mediaFile(fixtureVault, book.id, book.tracks.single().file).readBytes())
             }
         } finally {
             AudioPlayback.stopForProfilePicker(context)
-            store.remove("default", book.id)
+            store.remove(fixtureVault, book.id)
         }
     }
 
     @Test fun serviceTransportSettingsSleepCompletionAndRejectedOpen() = runBlocking {
         assertTrue(context.packageName.endsWith(".debug"))
+        val fixtureVault = persistedFixtureVault()
         val store = AudioStore.get(context)
         val sample = (System.nanoTime() % 1000).toShort()
-        val book = AudioImporter(context,store).importSources("default",listOf(
+        val book = AudioImporter(context,store).importSources(fixtureVault,listOf(
             source("01.wav",wav(12,sample)), source("02.wav",wav(12,(sample+1).toShort()))),"Transport fixture")
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                fun send(action: String, value: Long = 0L, id: String = book.id, vault: String = "default") = scenario.onActivity {
+                awaitFixtureVault(scenario, fixtureVault)
+                fun send(action: String, value: Long = 0L, id: String = book.id, vault: String = fixtureVault) = scenario.onActivity {
+                    requireFixtureVault(it, fixtureVault)
                     AudioPlayback.send(it,vault,action,id,value)
                 }
                 send("open",id=UUID.randomUUID().toString())
@@ -232,7 +297,7 @@ class AudioIntegrationInstrumentedTest {
                 awaitTransport("next chapter") { (AudioPlayback.state.value?.position ?: 0L) >= 12000L }
                 send("previous")
                 awaitTransport("previous chapter") { (AudioPlayback.state.value?.position ?: Long.MAX_VALUE) < 1000L }
-                store.setTitlePreferences("default",book.id,AudioPreferences(2f,5,10))
+                store.setTitlePreferences(fixtureVault,book.id,AudioPreferences(2f,5,10))
                 send("settings")
                 awaitTransport("apply title preferences") { AudioPlayback.state.value?.preferences == AudioPreferences(2f,5,10) }
                 send("forward")
@@ -252,11 +317,11 @@ class AudioIntegrationInstrumentedTest {
                 send("seek",book.duration-100)
                 send("toggle")
                 awaitTransport("reach natural end") { AudioPlayback.state.value?.ended == true }
-                awaitTransport("persist finished status") { store.load("default").find(book.id)?.finished == true }
-                assertFalse(store.load("default").recent().any { it.id==book.id })
+                awaitTransport("persist finished status") { store.load(fixtureVault).find(book.id)?.finished == true }
+                assertFalse(store.load(fixtureVault).recent().any { it.id==book.id })
                 send("toggle")
                 awaitTransport("replay with one toggle") { AudioPlayback.state.value?.let { it.playing && it.position < 5000L } == true }
-                awaitTransport("persist replay progress") { store.load("default").find(book.id)?.let { !it.finished && it.position < 5000L } == true }
+                awaitTransport("persist replay progress") { store.load(fixtureVault).find(book.id)?.let { !it.finished && it.position < 5000L } == true }
                 send("stop",vault="wrong-vault")
                 // Same active book remains; an unauthorized vault cannot change transport.
                 delay(600)
@@ -266,7 +331,7 @@ class AudioIntegrationInstrumentedTest {
             }
         } finally {
             AudioPlayback.stopForProfilePicker(context)
-            store.remove("default",book.id)
+            store.remove(fixtureVault,book.id)
         }
     }
 }

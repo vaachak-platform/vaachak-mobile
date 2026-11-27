@@ -38,6 +38,8 @@ class SettingsRepositoryBranchCoverageUnitTest {
     private val encryptedSecrets = mutableMapOf<String, String>()
     private val repository: SettingsRepository
 
+    private val ai = AiCredentialRuntimeFixture()
+
     init {
         every { vault.activeVaultId } returns activeVaultId
         every { secrets.read(any()) } answers {
@@ -51,7 +53,9 @@ class SettingsRepositoryBranchCoverageUnitTest {
             encryptedSecrets.remove(firstArg<String>())
             Unit
         }
-        repository = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets)
+        configureAiVault(vault, activeVaultId)
+        configureLegacyAiStorage(secrets, encryptedSecrets)
+        repository = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets, ai.runtime)
     }
 
     @Suppress("UNCHECKED_CAST")

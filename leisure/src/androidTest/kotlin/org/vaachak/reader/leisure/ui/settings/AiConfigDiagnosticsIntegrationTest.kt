@@ -17,6 +17,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.vaachak.reader.core.data.repository.AiManagedSlot
+import org.vaachak.reader.core.data.repository.AiManagementAction
+import org.vaachak.reader.core.data.repository.AiCredentialStatus
 import org.vaachak.reader.core.data.repository.GatewayDiagnostic
 import org.vaachak.reader.core.data.repository.GatewayDiagnosticReport
 import org.vaachak.reader.core.domain.model.AiConfig
@@ -35,13 +38,19 @@ class AiConfigDiagnosticsIntegrationTest {
         var calls = 0
         var clears = 0
         var saves = 0
+        var provider by mutableStateOf(AiTextProvider.PRIVATE_GATEWAY)
         compose.setContent {
             MaterialTheme {
-                AiConfigForm(state, onBack = {}, onMaskChange = {}, onClearGatewayKey = { clears++ },
+                androidx.compose.runtime.key(provider) {
+                AiConfigForm(state, provider = provider, onBack = {}, statuses = AiManagedSlot.entries.associateWith { AiCredentialStatus.SAVED },
+                    onManage = { slot, action, _ ->
+                        assertEquals(AiManagedSlot.GATEWAY, slot); assertEquals(AiManagementAction.REMOVE, action); clears++
+                    },
                     onSave = { saves++ }, onTestGateway = {
                         calls++
                         GatewayDiagnosticReport(GatewayDiagnostic.MODEL_LISTED)
                     })
+                }
             }
         }
         val test = compose.onNodeWithTag("ai_config_gateway_test")
@@ -56,11 +65,12 @@ class AiConfigDiagnosticsIntegrationTest {
         compose.onNodeWithTag("ai_config_gateway_model").performScrollTo().performTextReplacement("different-model")
         test.performScrollTo().assertIsNotEnabled()
         compose.onNodeWithTag("ai_config_gateway_model").performScrollTo().performTextReplacement("local-chat")
-        compose.onNodeWithTag("ai_config_gateway_key").performScrollTo().performTextReplacement("new-fixture-token")
+        compose.onNodeWithTag("ai_credential_gateway_draft").performScrollTo().performTextReplacement("new-fixture-token")
         test.performScrollTo().assertIsNotEnabled()
-        compose.onNodeWithTag("ai_config_gateway_key").performScrollTo().performTextReplacement("")
+        compose.onNodeWithTag("ai_credential_gateway_draft").performScrollTo().performTextReplacement("")
         test.performScrollTo().assertIsEnabled().performClick()
-        compose.onNodeWithText("Remove saved Vaachak gateway key").performScrollTo().performClick()
+        compose.onNodeWithTag("ai_credential_gateway_remove").performScrollTo().performClick()
+        compose.onNodeWithText("Remove", substring = false).performClick()
         compose.onNodeWithText("Not tested in this screen.").assertExists()
         compose.runOnIdle { assertEquals(1, clears); assertEquals(2, calls); state = state.copy(isOfflineMode = true) }
         test.performScrollTo().assertIsNotEnabled()
@@ -69,9 +79,9 @@ class AiConfigDiagnosticsIntegrationTest {
         compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
         compose.onNodeWithText("Not tested in this screen.").assertExists()
         compose.runOnIdle { assertEquals(1, saves); assertEquals(3, calls) }
-        compose.onNodeWithTag("ai_config_provider_gemini").performScrollTo().performClick()
+        compose.runOnIdle { provider = AiTextProvider.GEMINI }
         test.assertDoesNotExist()
-        compose.onNodeWithTag("ai_config_provider_gateway").performScrollTo().performClick()
+        compose.runOnIdle { provider = AiTextProvider.PRIVATE_GATEWAY }
         test.performScrollTo().assertIsEnabled()
         compose.runOnIdle { assertEquals(3, calls) }
     }
