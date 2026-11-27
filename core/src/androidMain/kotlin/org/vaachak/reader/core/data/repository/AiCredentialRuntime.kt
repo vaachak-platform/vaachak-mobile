@@ -138,32 +138,32 @@ class AiCredentialRuntime @Inject constructor(@param:ApplicationContext private 
         val epoch = managementEpoch()
         val signal = CancellationSignal()
         try {
-        val ok =
-            withTimeoutOrNull(110_000) {
-                suspendCancellableCoroutine<Boolean> { continuation ->
-                    synchronized(monitor) { prompt = signal }
-                    continuation.invokeOnCancellation { signal.cancel() }
-                    try {
-                        BiometricPrompt.Builder(activity)
-                            .setTitle("Migrate saved AI credential")
-                            .setSubtitle("Confirm your identity to authorize this change")
-                            .setAllowedAuthenticators(DEVICE_CREDENTIAL)
-                            .build().authenticate(signal, activity.mainExecutor,
-                                object : BiometricPrompt.AuthenticationCallback() {
-                                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) {
-                                        val type = result?.authenticationType
-                                        val valid = type == BiometricPrompt.AUTHENTICATION_RESULT_TYPE_DEVICE_CREDENTIAL
-                                        if (continuation.isActive) continuation.resume(valid)
-                                    }
-                                    override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
-                                        if (continuation.isActive) continuation.resume(false)
-                                    }
-                                })
-                    } catch (_: Exception) {
-                        if (continuation.isActive) continuation.resume(false)
+            val ok =
+                withTimeoutOrNull(110_000) {
+                    suspendCancellableCoroutine<Boolean> { continuation ->
+                        synchronized(monitor) { prompt = signal }
+                        continuation.invokeOnCancellation { signal.cancel() }
+                        try {
+                            BiometricPrompt.Builder(activity)
+                                .setTitle("Migrate saved AI credential")
+                                .setSubtitle("Confirm your identity to authorize this change")
+                                .setAllowedAuthenticators(DEVICE_CREDENTIAL)
+                                .build().authenticate(signal, activity.mainExecutor,
+                                    object : BiometricPrompt.AuthenticationCallback() {
+                                        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) {
+                                            val type = result?.authenticationType
+                                            val valid = type == BiometricPrompt.AUTHENTICATION_RESULT_TYPE_DEVICE_CREDENTIAL
+                                            if (continuation.isActive) continuation.resume(valid)
+                                        }
+                                        override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
+                                            if (continuation.isActive) continuation.resume(false)
+                                        }
+                                    })
+                        } catch (_: Exception) {
+                            if (continuation.isActive) continuation.resume(false)
+                        }
                     }
-                }
-            } == true
+                } == true
             if (!ok || managementEpoch() != epoch) return@withContext false
             // The native PIN activity may return before onResume. Never commit in the background.
             withTimeoutOrNull(5_000) {

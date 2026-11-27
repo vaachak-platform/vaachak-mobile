@@ -102,10 +102,11 @@ android {
     }
 
     namespace = "org.vaachak.reader.core"
+    sourceSets.getByName("main").manifest.srcFile("src/androidMain/AndroidManifest.xml")
     compileSdk = 36
 
     defaultConfig {
-        minSdk = 26
+        minSdk = libs.versions.android.minSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
     }
