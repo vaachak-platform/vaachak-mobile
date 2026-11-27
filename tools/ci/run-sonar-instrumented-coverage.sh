@@ -8,8 +8,77 @@ if [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" != "1" ]]; then
   exit 1
 fi
 
-adb shell wm size
-adb shell wm density
+# Validate the CI emulator against the locally qualified
+# Pixel 7 API 35 Google APIs display baseline.
+echo "=== CI emulator configuration ==="
+
+adb devices -l
+emulator -version
+
+api="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+abi="$(adb shell getprop ro.product.cpu.abi | tr -d '\r')"
+boot="$(adb shell getprop sys.boot_completed | tr -d '\r')"
+size="$(adb shell wm size | tr -d '\r')"
+density="$(adb shell wm density | tr -d '\r')"
+
+echo "API: $api"
+echo "ABI: $abi"
+echo "Boot completed: $boot"
+echo "$size"
+echo "$density"
+
+echo "Build fingerprint:"
+adb shell getprop ro.build.fingerprint
+
+echo "Device model:"
+adb shell getprop ro.product.model
+
+echo "CPU information:"
+adb shell cat /proc/cpuinfo | grep -c '^processor' || true
+
+echo "Memory information:"
+adb shell cat /proc/meminfo | head -n 3
+
+echo "Data partition:"
+adb shell df -h /data
+
+if [[ "$api" != "35" ]]; then
+  echo "ERROR: Expected Android API 35." >&2
+  exit 1
+fi
+
+if [[ "$abi" != "x86_64" ]]; then
+  echo "ERROR: Expected x86_64 CI system image." >&2
+  exit 1
+fi
+
+if [[ "$boot" != "1" ]]; then
+  echo "ERROR: Emulator has not completed boot." >&2
+  exit 1
+fi
+
+if [[ "$size" != "Physical size: 1080x2400" ]]; then
+  echo "ERROR: Expected Pixel 7 display without overrides." >&2
+  exit 1
+fi
+
+if [[ "$density" != "Physical density: 420" ]]; then
+  echo "ERROR: Expected Pixel 7 density without overrides." >&2
+  exit 1
+fi
+
+echo "=== Animation configuration ==="
+
+for setting in \
+  window_animation_scale \
+  transition_animation_scale \
+  animator_duration_scale
+do
+  printf '%s: ' "$setting"
+  adb shell settings get global "$setting"
+done
+
+echo "PASS: CI emulator API, ABI, boot and display verified."
 
 # Compile both instrumentation APKs BEFORE provisioning/unlocking the temporary
 # device PIN. Gradle compilation can consume more than the Keystore's 60-second

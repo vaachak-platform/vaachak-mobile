@@ -84,10 +84,16 @@ jobs:
           api-level: 35
           target: google_apis
           arch: x86_64
+          # Match the locally qualified Pixel 7 API 35 AVD.
+          profile: pixel_7
+          avd-name: vaachak-ci-api35
+          force-avd-creation: true
           ram-size: 4096M
-          cores: 2
+          cores: 4
+          heap-size: 228M
+          disk-size: 10G
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none -no-snapshot
           # The runner executes ONE shell command, not a multiline Bash block.
           # Our script compiles both APKs, provisions a temporary CI-only PIN,
           # unlocks the actual keyguard, then runs instrumented JaCoCo coverage.
