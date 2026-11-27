@@ -35,6 +35,7 @@ class AiCredentialRuntimeTest {
         val user = mockk<UserManager>()
         val power = mockk<PowerManager>()
         val receiver = slot<BroadcastReceiver>()
+        val receiverFilter = slot<IntentFilter>()
         val host = mockk<Activity>(relaxed = true)
         val other = mockk<Activity>(relaxed = true)
         val runtime: AiCredentialRuntime
@@ -42,7 +43,15 @@ class AiCredentialRuntimeTest {
             every { context.getSystemService(KeyguardManager::class.java) } returns lock
             every { context.getSystemService(UserManager::class.java) } returns user
             every { context.getSystemService(PowerManager::class.java) } returns power
-            every { context.registerReceiver(capture(receiver), any<IntentFilter>(), any<Int>()) } returns null
+            every {
+                context.registerReceiver(
+                    capture(receiver),
+                    capture(receiverFilter),
+                    null,
+                    null,
+                    Context.RECEIVER_NOT_EXPORTED
+                )
+            } returns null
             every { lock.isDeviceSecure } returns true
             every { lock.isDeviceLocked } returns false
             every { lock.isKeyguardLocked } returns false
@@ -114,12 +123,21 @@ class AiCredentialRuntimeTest {
         val f = Fixture(); val r = f.runtime
         r.hostResumed(f.host)
         val epoch = r.requestEpoch(); val management = r.managementEpoch()
+        assertTrue("Receiver must be registered", f.receiver.isCaptured)
+        assertTrue("Receiver filter must be registered", f.receiverFilter.isCaptured)
+        assertEquals(1, f.receiverFilter.captured.countActions())
+        assertTrue(f.receiverFilter.captured.hasAction(Intent.ACTION_SCREEN_OFF))
+
         f.receiver.captured.onReceive(f.context, Intent(Intent.ACTION_SCREEN_ON))
         assertEquals(epoch, r.requestEpoch())
-        every { f.power.isInteractive } returns false
+        assertEquals(management, r.managementEpoch())
+
         f.receiver.captured.onReceive(f.context, Intent(Intent.ACTION_SCREEN_OFF))
-        assertTrue(r.invalidated(epoch).first())
+        assertTrue(r.requestEpoch() > epoch)
         assertTrue(r.managementEpoch() > management)
+        assertTrue(r.invalidated(epoch).first())
+
+        every { f.power.isInteractive } returns false
         assertFalse(r.eligibility().first())
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {

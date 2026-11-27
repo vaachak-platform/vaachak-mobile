@@ -8,10 +8,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL
 import android.hardware.biometrics.BiometricPrompt
-import android.os.Build
 import android.os.CancellationSignal
 import android.os.PowerManager
 import android.os.UserManager
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.lang.ref.WeakReference
 import javax.inject.Inject
@@ -45,8 +45,12 @@ class AiCredentialRuntime @Inject constructor(@param:ApplicationContext private 
             }
         }
         val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
-        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        else context.registerReceiver(receiver, filter)
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     fun hostResumed(activity: Activity): Unit = synchronized(monitor) {
