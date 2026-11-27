@@ -31,12 +31,16 @@ class SettingsRepositoryAdditionalCoverageTest {
     private val secrets = mockk<PrivateGatewaySecrets>()
     private val repository: SettingsRepository
 
+    private val ai = AiCredentialRuntimeFixture()
+
     init {
         every { vault.activeVaultId } returns vaultId
         every { secrets.read(any()) } returns ""
         every { secrets.write(any(), any()) } returns Unit
         every { secrets.clear(any()) } returns Unit
-        repository = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets)
+        configureAiVault(vault, vaultId)
+        configureLegacyAiStorage(secrets, mutableMapOf<String, String>())
+        repository = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets, ai.runtime)
     }
 
     @Suppress("UNCHECKED_CAST")

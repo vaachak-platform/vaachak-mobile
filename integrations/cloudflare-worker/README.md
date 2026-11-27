@@ -1,0 +1,12 @@
+# D90 reference Cloudflare image Worker (review candidate)
+
+The existing deployed Worker has already produced a 1024 × 1024 JPEG for the owner. This is **new, undeployed** code, not a copy of the deployed version. Its Node tests exercise Worker logic with mocks, not the Cloudflare runtime or the live model.
+
+- HTTPS root `POST`, `Authorization: Bearer <API_KEY>`, `Content-Type: application/json`, `{ "prompt": "..." }`. Older client extra fields are ignored. No client-selected model or step count.
+- Success: raw JPEG/PNG/WebP bytes, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. Signature and size checks are not full image decoding. Failure: fixed JSON error code with non-2xx status. 16 KiB request, 2048-character prompt, 8 MiB decoded response limits.
+- Configure production `API_KEY` as a 64-character hex secret (generate with `openssl rand -hex 32`, store in password manager), `image-ai` as Workers AI binding, `IMAGE_MODEL` as qualified model ID, and `IMAGE_LIMIT` as rate-limit binding. The only qualified *adapter contract* here is FLUX.1 Schnell. Adding other models needs model-specific adapters/tests and a separate live request. No automatic fallback.
+- Example limiter is 5 valid requests per 60 seconds per Cloudflare location, not a global cost ceiling. Confirm account quotas/budget separately. Missing model/limiter/secret fails closed. No logs of raw prompts, token, provider response or exception.
+- Run `npm test` with Node 22+; no npm dependencies. The tests substitute Node's timing-safe digest comparison for the Workers Web Crypto extension. Production deployment requires verifying the extension and binding in the actual runtime.
+- **Do not deploy over the owner's currently working Worker.** Only after D90 review, copy `wrangler.toml.example` to ignored local configuration, set a unique test Worker name and unused rate-limit namespace, verify Cloudflare configuration, add secret through the dashboard or Wrangler secret prompt, deploy to a separate review Worker. Never put secret in command arguments, Git, or Wrangler `[vars]`. Test unauthorized, valid, malformed, rate-limited and authenticated synthetic image calls; then test Android. Retain working deployment until accepted.
+
+References: https://developers.cloudflare.com/workers-ai/models/flux-1-schnell/ ; https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/ ; https://developers.cloudflare.com/workers/runtime-apis/web-crypto/ .

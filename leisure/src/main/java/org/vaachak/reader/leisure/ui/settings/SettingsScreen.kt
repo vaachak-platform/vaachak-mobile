@@ -571,29 +571,24 @@ fun IntelligenceSettingsTab(state: SettingsUiState, navController: NavController
         }
     }
 
-    // Configuration stays reachable while offline; only network operations are blocked.
-    // All three entries share the existing settings destination, without adding
-    // provider switching, silent fallbacks or any embedded private infrastructure.
+    // Opening either settings page does not change the active text provider.
     SettingsGroup(title = "AI Configuration") {
         SettingsTile(
             icon = Icons.Default.AutoAwesome,
-            title = "Gemini Integration",
-            subtitle = "Manage API keys for Global Recall and Smart Summaries",
-            onClick = { navController.navigate(Screen.AiConfig.route) }
-        )
-        SettingsTile(
-            icon = Icons.Default.Image,
-            title = "Cloudflare Visualize",
-            subtitle = "Configure the direct image provider",
+            title = "External Providers",
+            subtitle = "Gemini text and Cloudflare Visualize",
             onClick = { navController.navigate(Screen.AiConfig.route) }
         )
         SettingsTile(
             icon = Icons.Default.CloudQueue,
-            title = "Private Text Gateway",
-            subtitle = "Optional self-hosted text provider settings",
-            onClick = { navController.navigate(Screen.AiConfig.route) }
+            title = "Internal — AI-G732",
+            subtitle = "Private Tailscale text gateway",
+            onClick = { navController.navigate(Screen.InternalAiConfig.route) }
         )
     }
+    Text("Visualize uses saved Cloudflare settings independently of the text provider.",
+        style = MaterialTheme.typography.bodySmall)
+
 }
 
 

@@ -50,7 +50,10 @@ class AiSnapshotAdditionalTest {
         every { secrets.read(any()) } answers { values[firstArg()].orEmpty() }
         every { secrets.write(any(), any()) } answers { values[firstArg()] = secondArg(); Unit }
         every { secrets.clear(any()) } answers { values.remove(firstArg()); Unit }
-        val settings = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets)
+        configureAiVault(vault, id)
+        configureLegacyAiStorage(secrets, values)
+        val ai = AiCredentialRuntimeFixture()
+        val settings = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets, ai.runtime)
         val gateway = "https://fixture.tailnet.ts.net:8443/v1"
         settings.setOfflineMode(false)
         settings.saveSettings("gemini-fixture", "https://fixture.invalid/image", "image-fixture", true)

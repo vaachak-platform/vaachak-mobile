@@ -1,7 +1,9 @@
 package org.vaachak.reader.core.data.repository
 
-import android.util.Base64
-import com.google.ai.client.generativeai.GenerativeModel
+import org.vaachak.reader.core.data.remote.AiImagePayload
+import org.vaachak.reader.core.data.remote.AiImageResponseException
+import org.vaachak.reader.core.data.remote.GeminiRestClient
+import org.vaachak.reader.core.data.remote.GeminiTextModels
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.URI
@@ -36,7 +38,8 @@ class GatewayDiagnosticReport(val status: GatewayDiagnostic, val message: String
 class AiRepository @Inject constructor(
     private val settingsRepo: SettingsRepository,
     private val cloudflareApi: CloudflareAiApi,
-    private val privateGatewayClient: PrivateGatewayClient
+    private val privateGatewayClient: PrivateGatewayClient,
+    private val geminiClient: GeminiRestClient
 ) {
     private suspend fun configuration(kind: AiRequestKind): AiRequestConfig =
         settingsRepo.loadAiRequest(kind, currentCoroutineContext()[AiVaultScope]?.vaultId)
@@ -48,8 +51,8 @@ class AiRepository @Inject constructor(
                 when (config.provider) {
                     AiTextProvider.GEMINI -> {
                         if (config.credential.isBlank()) throw MissingGeminiKey()
-                        GenerativeModel(modelName = "gemini-2.0-flash", apiKey = config.credential)
-                            .generateContent(prompt).text ?: "No answer."
+                        if (!GeminiTextModels.isCandidate(config.model)) throw MissingGeminiModel()
+                        geminiClient.generate(config.model, config.credential, prompt)
                     }
                     AiTextProvider.PRIVATE_GATEWAY -> privateGatewayClient.chat(
                         config.url, config.model, config.credential, prompt
@@ -60,10 +63,51 @@ class AiRepository @Inject constructor(
     }
 
     private class MissingGeminiKey : IllegalStateException()
+    private class MissingGeminiModel : IllegalStateException()
+
+    class GeminiCatalogReport(val models: List<String>, val message: String)
+
+    suspend fun discoverSavedGeminiModels(): GeminiCatalogReport = try {
+        val config = configuration(AiRequestKind.TEXT)
+        when {
+            config.provider != AiTextProvider.GEMINI -> GeminiCatalogReport(emptyList(), "Select and save Gemini first.")
+            config.credential.isBlank() -> GeminiCatalogReport(emptyList(), "Save a Gemini key first.")
+            else -> config.runGuarded {
+                val models = withTimeoutOrNull(150_000L) { geminiClient.listTextCandidates(config.credential) }
+                if (models == null) GeminiCatalogReport(emptyList(), "Gemini catalog timed out.")
+                else GeminiCatalogReport(models, "Catalog retrieved. Inference not verified.")
+            }
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        currentCoroutineContext().ensureActive()
+        GeminiCatalogReport(emptyList(), safeTextError(error))
+    }
+
+    /** Explicit diagnostic; sends only a fixed synthetic passage, never a reader excerpt. */
+    suspend fun testSavedGemini(): String = try {
+        val config = configuration(AiRequestKind.TEXT)
+        if (config.provider != AiTextProvider.GEMINI) "Select and save Gemini first."
+        else config.runGuarded {
+            if (config.credential.isBlank()) throw MissingGeminiKey()
+            if (!GeminiTextModels.isCandidate(config.model)) throw MissingGeminiModel()
+            val answer = withTimeoutOrNull(150_000L) {
+                geminiClient.generate(config.model, config.credential, "Explain the phrase The silence was deafening in two sentences.")
+            }
+            if (answer == null) "Error: Gemini inference timed out." else "Gemini returned a complete text answer."
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        currentCoroutineContext().ensureActive()
+        safeTextError(error)
+    }
 
     private fun safeTextError(error: Exception): String = when (error) {
         is AiOfflineException -> "Error: ${AiFailure.OFFLINE.guidance}"
         is MissingGeminiKey -> "Error: Gemini API Key is missing."
+        is MissingGeminiModel -> "Error: Select and save a Gemini text model in AI Settings."
         is GatewayCredentialUnavailableException -> "Error: ${AiFailure.LOCKED.guidance}"
         else -> "Error: ${AiFailure.from(error).guidance}"
     }
@@ -112,6 +156,10 @@ class AiRepository @Inject constructor(
         throw cancelled
     } catch (_: AiOfflineException) {
         "Error: Offline Mode is enabled."
+    } catch (_: GatewayCredentialUnavailableException) {
+        "Error: Saved Cloudflare credential unavailable. Check migration, recovery or device lock in AI Settings."
+    } catch (_: AiImageResponseException) {
+        "Error: Invalid or oversized image response."
     } catch (_: SocketTimeoutException) {
         "Error: Timeout. The image generation took too long."
     } catch (_: UnknownHostException) {
@@ -122,6 +170,14 @@ class AiRepository @Inject constructor(
         "Error: Cloudflare network error. Check your connection."
     } catch (_: Exception) {
         "Error: Cloudflare request failed. Check your configuration and connection."
+    }
+
+    suspend fun testSavedCloudflare(): String {
+        val result = visualizeText("A simple line drawing of a lighthouse, no text, plain background.")
+        if (result.startsWith("Error:") || result.startsWith("Cloudflare Error")) return result
+        val bitmap = AiImagePayload.decodeForDisplay(result) ?: return "Error: Invalid image response."
+        bitmap.recycle()
+        return "Cloudflare returned a decodable image."
     }
 
     private suspend fun requestImage(config: AiRequestConfig, prompt: String): String {
@@ -138,12 +194,8 @@ class AiRepository @Inject constructor(
             response.errorBody()?.close()
             return cloudflareStatusError(response.code())
         }
-        val bytes = response.body()?.use { it.bytes() }
-        return if (bytes != null && bytes.isNotEmpty()) {
-            Base64.encodeToString(bytes, Base64.DEFAULT)
-        } else {
-            "Error: Empty image received from server."
-        }
+        return response.body()?.let { AiImagePayload.read(it) }
+            ?: "Error: Empty image received from server."
     }
 
     private fun isValidHttpsEndpoint(raw: String): Boolean = try {
@@ -157,6 +209,8 @@ class AiRepository @Inject constructor(
     private fun cloudflareStatusError(code: Int): String = when (code) {
         400, 404 -> "Cloudflare Error $code: Check the configured image endpoint."
         401, 403 -> "Cloudflare Error $code: Check your Cloudflare credentials."
+        402 -> "Cloudflare Error 402: Check provider billing or credits."
+        413 -> "Cloudflare Error 413: Image request is too large."
         429 -> "Cloudflare Error 429: Rate limit or quota reached. Retry later."
         in 300..399 -> "Cloudflare Error $code: Redirect rejected. Configure the final HTTPS endpoint."
         in 500..599 -> "Cloudflare Error $code: Provider unavailable. Retry later."

@@ -28,12 +28,16 @@ class SettingsRepositoryProviderCoexistenceUnitTest {
     private val secrets = mockk<PrivateGatewaySecrets>()
     private val settings: SettingsRepository
 
+    private val ai = AiCredentialRuntimeFixture()
+
     init {
         every { vault.activeVaultId } returns activeVault
         every { secrets.write(any(), any()) } answers { tokens[firstArg()] = secondArg(); Unit }
         every { secrets.read(any()) } answers { tokens[firstArg()].orEmpty() }
         every { secrets.clear(any()) } answers { tokens.remove(firstArg()); Unit }
-        settings = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets)
+        configureAiVault(vault, activeVault)
+        configureLegacyAiStorage(secrets, tokens)
+        settings = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets, ai.runtime)
     }
 
     @Test fun switchingTextProviderNeverDeletesGeminiCloudflareOrGatewayCredentials() = runBlocking {

@@ -236,8 +236,14 @@ class SettingsComposeInstrumentedTest {
             .assertExists()
         compose.runOnIdle { offline = false }
         compose.onNodeWithContentDescription(
-            "Gemini Integration, Manage API keys for Global Recall and Smart Summaries"
+            "External Providers, Gemini text and Cloudflare Visualize"
         ).assertExists()
+        compose.onNodeWithContentDescription(
+            "Internal — AI-G732, Private Tailscale text gateway"
+        ).assertExists()
+        compose.onNodeWithContentDescription(
+            "Gemini Integration, Manage API keys for Global Recall and Smart Summaries"
+        ).assertDoesNotExist()
     }
 
     @Test fun wideEinkSettingsShowsCategoryListAndDetailsTogether() {

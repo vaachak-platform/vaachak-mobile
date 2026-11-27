@@ -45,8 +45,14 @@ class SettingsConditionCoverageInstrumentedTest {
         choose(Tid.Settings.tabIntelligence)
         compose.onNodeWithText("AI CONFIGURATION").assertExists()
         compose.onNodeWithContentDescription(
-            "Gemini Integration, Manage API keys for Global Recall and Smart Summaries"
+            "External Providers, Gemini text and Cloudflare Visualize"
         ).assertExists()
+        compose.onNodeWithContentDescription(
+            "Internal — AI-G732, Private Tailscale text gateway"
+        ).assertExists()
+        compose.onNodeWithContentDescription(
+            "Gemini Integration, Manage API keys for Global Recall and Smart Summaries"
+        ).assertDoesNotExist()
     }
 
     @Test fun offlineChangesArePreservedWhenSwitchingBetweenCompactCategories() {
@@ -68,8 +74,14 @@ class SettingsConditionCoverageInstrumentedTest {
         showCategoryChooser()
         choose(Tid.Settings.tabIntelligence)
         compose.onNodeWithContentDescription(
-            "Gemini Integration, Manage API keys for Global Recall and Smart Summaries"
+            "External Providers, Gemini text and Cloudflare Visualize"
         ).assertExists()
+        compose.onNodeWithContentDescription(
+            "Internal — AI-G732, Private Tailscale text gateway"
+        ).assertExists()
+        compose.onNodeWithContentDescription(
+            "Gemini Integration, Manage API keys for Global Recall and Smart Summaries"
+        ).assertDoesNotExist()
     }
 
     @Test fun lcdWidePaneSupportsAllCategorySelectionsAndReturnsToGeneral() {

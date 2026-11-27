@@ -26,12 +26,16 @@ internal class AiRequestConfig(
     val url: String,
     val model: String,
     val credential: String,
-    val invalidated: Flow<Boolean>
+    val invalidated: Flow<Boolean>,
+    val dispatchAllowed: () -> Boolean = { true }
 )
 
 internal suspend fun <T> AiRequestConfig.runGuarded(action: suspend () -> T): T = coroutineScope {
     if (invalidated.first()) throw CancellationException("AI request context changed")
-    val work = async(start = CoroutineStart.LAZY) { action() }
+    val work = async(start = CoroutineStart.LAZY) {
+        if (!dispatchAllowed() || invalidated.first()) throw CancellationException("AI request context changed")
+        action()
+    }
     val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
         if (invalidated.firstOrNull { it } == true) {
             work.cancel(CancellationException("AI request context changed"))
@@ -39,7 +43,7 @@ internal suspend fun <T> AiRequestConfig.runGuarded(action: suspend () -> T): T 
     }
     try {
         val result = work.await()
-        if (invalidated.first()) throw CancellationException("AI request context changed")
+        if (!dispatchAllowed() || invalidated.first()) throw CancellationException("AI request context changed")
         result
     } finally {
         watcher.cancel()

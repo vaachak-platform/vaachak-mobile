@@ -27,21 +27,25 @@ class SettingsRepositoryPrivateGatewayTest {
     private val vault = mockk<VaultRepository>()
     private val settings: SettingsRepository
 
+    private val ai = AiCredentialRuntimeFixture()
+
     init {
         every { vault.activeVaultId } returns vaultId
         every { secrets.write(any(), any()) } answers { savedTokens[firstArg()] = secondArg(); Unit }
         every { secrets.read(any()) } answers { savedTokens[firstArg()].orEmpty() }
         every { secrets.clear(any()) } answers { savedTokens.remove(firstArg()); Unit }
-        settings = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets)
+        configureAiVault(vault, vaultId)
+        configureLegacyAiStorage(secrets, savedTokens)
+        settings = SettingsRepository(ApplicationProvider.getApplicationContext<Context>(), vault, secrets, ai.runtime)
     }
 
     @Test fun encryptedTokenIsUsedForReadWriteAndClear() = runBlocking {
         settings.savePrivateGatewayToken("my-secret")
         assertEquals("my-secret", settings.loadPrivateGatewayToken())
-        verify(exactly = 1) { secrets.write(vaultId.value, "my-secret") }
+        assertEquals("my-secret", ai.values[vaultId.value to AiManagedSlot.GATEWAY])
         settings.savePrivateGatewayToken("")
         assertEquals("", settings.loadPrivateGatewayToken())
-        verify(exactly = 1) { secrets.clear(vaultId.value) }
+        verify(exactly = 2) { secrets.retireAiCredential(vaultId.value) }
     }
 
     @Test fun nonSecretGatewayFieldsPersistInPreferences() = runBlocking {

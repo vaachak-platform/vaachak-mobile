@@ -19,6 +19,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.vaachak.reader.core.data.repository.AiManagedSlot
+import org.vaachak.reader.core.data.repository.AiCredentialStatus
 import org.vaachak.reader.core.domain.model.AiConfig
 import org.vaachak.reader.core.domain.model.AiTextProvider
 import org.vaachak.reader.core.domain.model.ThemeMode
@@ -29,17 +31,22 @@ import org.vaachak.reader.leisure.ui.testability.Tid
 @RunWith(AndroidJUnit4::class)
 class AiConfigConditionCoverageInstrumentedTest {
     @get:Rule val compose = createAndroidComposeRule<ComposeTestHostActivity>()
+    private var openedProvider by mutableStateOf<AiTextProvider?>(null)
+
+    private fun openProvider(provider: AiTextProvider) {
+        compose.runOnIdle { openedProvider = provider }
+    }
 
     @Test fun invalidGatewayThenCorrectedEndpointCanBeSaved() {
         val submissions = mutableListOf<AiConfigSaveRequest>()
         render(onSave = { submissions.add(it) })
-        compose.onNodeWithTag("ai_config_provider_gateway").performClick()
-        compose.onNodeWithTag("ai_config_gateway_url").performTextReplacement("http://public.example.org/v1")
+        openProvider(AiTextProvider.PRIVATE_GATEWAY)
+        compose.onNodeWithTag("ai_config_gateway_url").performScrollTo().performTextReplacement("http://public.example.org/v1")
         compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
         compose.runOnIdle { assertTrue(submissions.isEmpty()) }
         compose.onNodeWithTag("ai_config_gateway_url")
-            .performTextReplacement("https://reader.demo.ts.net:8443/v1")
-        compose.onNodeWithTag("ai_config_gateway_model").performTextReplacement("local-chat")
+            .performScrollTo().performTextReplacement("https://reader.demo.ts.net:8443/v1")
+        compose.onNodeWithTag("ai_config_gateway_model").performScrollTo().performTextReplacement("local-chat")
         compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(1, submissions.size)
@@ -53,13 +60,13 @@ class AiConfigConditionCoverageInstrumentedTest {
     @Test fun emptyGatewayModelCannotSubmitUntilRepaired() {
         val submissions = mutableListOf<AiConfigSaveRequest>()
         render(onSave = { submissions.add(it) })
-        compose.onNodeWithTag("ai_config_provider_gateway").performClick()
+        openProvider(AiTextProvider.PRIVATE_GATEWAY)
         compose.onNodeWithTag("ai_config_gateway_url")
-            .performTextReplacement("https://reader.demo.ts.net:8443/v1")
-        compose.onNodeWithTag("ai_config_gateway_model").performTextReplacement("")
+            .performScrollTo().performTextReplacement("https://reader.demo.ts.net:8443/v1")
+        compose.onNodeWithTag("ai_config_gateway_model").performScrollTo().performTextReplacement("")
         compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
         compose.runOnIdle { assertTrue(submissions.isEmpty()) }
-        compose.onNodeWithTag("ai_config_gateway_model").performTextReplacement("safe-model-1")
+        compose.onNodeWithTag("ai_config_gateway_model").performScrollTo().performTextReplacement("safe-model-1")
         compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
         compose.runOnIdle {
             assertEquals(1, submissions.size)
@@ -89,46 +96,50 @@ class AiConfigConditionCoverageInstrumentedTest {
         compose.waitForIdle() // Wait for LaunchedEffect(state.aiConfig) to reset the form.
         compose.onNodeWithTag("ai_config_save").performScrollTo().performClick()
         compose.runOnIdle {
-            assertEquals("new-test-value", submission?.geminiKey)
+            assertEquals("", submission?.geminiKey)
             assertEquals("https://example.invalid/new", submission?.cloudflareUrl)
-            assertEquals("replacement-token", submission?.cloudflareToken)
+            assertEquals("", submission?.cloudflareToken)
             assertTrue(submission?.autoSaveRecaps == true)
         }
     }
 
     @Test fun headerBackAndMaskStateRespondAcrossBothThemes() {
         var theme by mutableStateOf(ThemeMode.E_INK)
-        var masked by mutableStateOf(false)
         var backClicks = 0
         render(
-            state = { SettingsUiState(themeMode = theme, isAiMasked = masked) },
-            onBack = { backClicks++ },
-            onMask = { masked = it }
+            state = { SettingsUiState(themeMode = theme) },
+            onBack = { backClicks++ }
         )
         compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithTag("ai_config_toggle_mask").performClick()
-        compose.runOnIdle { assertEquals(1, backClicks); assertTrue(masked) }
+        compose.onNodeWithTag("ai_credential_gemini_mask").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(1, backClicks) }
+        compose.onNodeWithContentDescription("Hide new draft").assertExists()
         compose.runOnIdle { theme = ThemeMode.LIGHT }
         compose.onNodeWithContentDescription("Back").performClick()
-        compose.onNodeWithTag("ai_config_toggle_mask").performClick()
-        compose.runOnIdle { assertEquals(2, backClicks); assertFalse(masked) }
+        compose.onNodeWithTag("ai_credential_gemini_mask").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(2, backClicks) }
+        compose.onNodeWithContentDescription("Hide new draft").assertDoesNotExist()
     }
 
     private fun render(
         state: () -> SettingsUiState = { SettingsUiState() },
         onSave: (AiConfigSaveRequest) -> Unit = {},
-        onMask: (Boolean) -> Unit = {},
         onBack: () -> Unit = {}
     ) {
         compose.setContent {
             MaterialTheme {
-                AiConfigForm(
-                    state = state(),
-                    onBack = onBack,
-                    onMaskChange = onMask,
-                    onClearGatewayKey = {},
-                    onSave = onSave
-                )
+                val current = state()
+                val provider = openedProvider ?: current.aiConfig.textProvider
+                androidx.compose.runtime.key(provider) {
+                    AiConfigForm(
+                        state = current,
+                        provider = provider,
+                        onBack = onBack,
+                        statuses = AiManagedSlot.entries.associateWith { AiCredentialStatus.SAVED },
+                        onManage = { _, _, _ -> },
+                        onSave = onSave
+                    )
+                }
             }
         }
         compose.waitUntil(timeoutMillis = 10_000L) {

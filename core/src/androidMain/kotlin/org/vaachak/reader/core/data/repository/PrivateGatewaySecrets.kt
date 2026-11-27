@@ -2,7 +2,6 @@ package org.vaachak.reader.core.data.repository
 
 import android.app.KeyguardManager
 import android.content.Context
-import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.security.keystore.UserNotAuthenticatedException
@@ -41,6 +40,7 @@ class PrivateGatewaySecrets @Inject constructor(
 ) {
     private companion object {
         const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
+        const val CREDENTIAL_PREFIX = "vaachak_credential_v1:"
         val keyCreationLock = Any()
     }
 
@@ -95,12 +95,7 @@ class PrivateGatewaySecrets @Inject constructor(
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
             .setUserAuthenticationRequired(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.setUserAuthenticationParameters(60, KeyProperties.AUTH_DEVICE_CREDENTIAL)
-        } else {
-            @Suppress("DEPRECATION")
-            builder.setUserAuthenticationValidityDurationSeconds(60)
-        }
+        builder.setUserAuthenticationParameters(60, KeyProperties.AUTH_DEVICE_CREDENTIAL)
         KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
             .apply { init(builder.build()) }
             .generateKey()
@@ -182,7 +177,7 @@ class PrivateGatewaySecrets @Inject constructor(
                 decryptAead(vaultId, bytes, authenticatedKey())
             }
             magic.contentEquals(legacyMagic) &&
-                !vaultId.startsWith("vaachak_credential_v1:") -> {
+                !vaultId.startsWith(CREDENTIAL_PREFIX) -> {
                 requireFreshAuthentication()
                 val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
                 val oldKey = store.getKey(legacyAlias, null) as? SecretKey
@@ -205,7 +200,7 @@ class PrivateGatewaySecrets @Inject constructor(
     fun write(vaultId: String, token: String) {
         // Separate internal namespace for Gemini/Cloudflare and sync secrets. These may
         // legitimately contain whitespace; the Gateway token policy stays strict.
-        val scoped = vaultId.startsWith("vaachak_credential_v1:")
+        val scoped = vaultId.startsWith(CREDENTIAL_PREFIX)
         if (scoped) {
             require(token.isNotEmpty() && token.toByteArray(Charsets.UTF_8).size <= 4096) {
                 "Invalid credential length"
@@ -229,6 +224,19 @@ class PrivateGatewaySecrets @Inject constructor(
     @Synchronized
     internal fun ensureDurable(vaultId: String) {
         durableFile.ensureDurable(vaultFile(vaultId))
+    }
+
+    /** AI migration metadata lookup; never decrypt just to report presence. */
+    @Synchronized
+    internal fun hasStoredCredential(id: String): Boolean = vaultFile(id).exists()
+
+    /** Retire only the exact AI slot. Shared sync/OPDS aliases are never deleted. */
+    @Synchronized
+    internal fun retireAiCredential(id: String) {
+        require(!id.startsWith(CREDENTIAL_PREFIX) ||
+            id.startsWith("vaachak_credential_v1:GEMINI:") ||
+            id.startsWith("vaachak_credential_v1:CLOUDFLARE:"))
+        durableFile.remove(vaultFile(id))
     }
 
     @Synchronized

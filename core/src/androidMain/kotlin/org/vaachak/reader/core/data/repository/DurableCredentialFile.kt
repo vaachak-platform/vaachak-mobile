@@ -31,6 +31,12 @@ internal class DurableCredentialFile(private val syncDirectory: (File) -> Unit) 
         }
     }
 
+    /** Idempotent durable retirement; a failed sync is reported for retry. */
+    fun remove(destination: File) {
+        Files.deleteIfExists(destination.toPath())
+        syncDirectory(requireNotNull(destination.absoluteFile.parentFile))
+    }
+
     /** Never create a missing file; retry the durability barrier without rewriting ciphertext. */
     fun ensureDurable(destination: File) {
         FileChannel.open(destination.toPath(), StandardOpenOption.WRITE).use { it.force(true) }

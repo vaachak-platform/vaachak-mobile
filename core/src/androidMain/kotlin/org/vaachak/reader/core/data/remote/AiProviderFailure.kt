@@ -18,7 +18,7 @@ internal enum class AiFailure(val guidance: String) {
     URL("Invalid private gateway URL. Check the saved HTTPS API base."),
     MODEL("Invalid or unavailable model. Check the saved model alias."),
     KEY("Private gateway key missing. Configure it in AI Settings."),
-    LOCKED("Private gateway key unavailable. Unlock this device and retry."),
+    LOCKED("Saved AI credential unavailable. Check device lock, migration or recovery in AI Settings."),
     DNS("AI text provider hostname not found."),
     TLS("AI text provider TLS validation failed."),
     ROUTE("Cannot reach the provider. Check network access and Tailscale for a private gateway."),
@@ -26,6 +26,7 @@ internal enum class AiFailure(val guidance: String) {
     UNAUTHORIZED("Provider rejected authentication (401). Check the saved credential."),
     FORBIDDEN("Provider denied access (403). Check permissions."),
     RATE_LIMIT("Provider rate limit or quota reached (429). Retry later."),
+    PAYMENT("Provider billing or credit restriction (402). Check the project billing status."),
     GEMINI_KEY("Gemini rejected the API key. Check the saved credential."),
     GEMINI_QUOTA("Gemini quota exhausted. Retry later."),
     NOT_FOUND("Provider endpoint or model not found (404). Check configuration."),
@@ -38,6 +39,7 @@ internal enum class AiFailure(val guidance: String) {
     companion object {
         fun http(code: Int): AiFailure = when (code) {
             401 -> UNAUTHORIZED
+            402 -> PAYMENT
             403 -> FORBIDDEN
             404 -> NOT_FOUND
             429 -> RATE_LIMIT
@@ -53,6 +55,8 @@ internal enum class AiFailure(val guidance: String) {
                 val current = cause ?: return UNKNOWN
                 when (current) {
                     is GatewayHttpException -> return http(current.status)
+                    is GeminiHttpException -> return http(current.status)
+                    is GeminiResponseException -> return INVALID_RESPONSE
                     is GatewayInputException -> return current.failure
                     is GatewayResponseException, is SerializationException -> return INVALID_RESPONSE
                     is InvalidAPIKeyException -> return GEMINI_KEY

@@ -34,7 +34,7 @@ Use the existing Compose `SettingsScreen`/`SettingsViewModel`/navigation, preser
 - **Reading:** EPUB/text defaults (fonts, margins, layout), dictionaries, Speech & Narration (on-device TTS).
 - **Comics:** comic viewing defaults; manga/webtoon modes and fit; file-import guidance.
 - **Audiobooks:** audiobook playback defaults (speed/skip), sleep timer and background playback; separate from TTS.
-- **AI & Providers:** AI enablement, text provider selector, Gemini settings, Cloudflare visualization settings, optional Private/Self-hosted Gateway settings, Auto-save Recaps, Test Connection, error/help text.
+- **AI & Providers:** AI enablement, exactly two navigation destinations: External Providers (separate Gemini and Cloudflare panels), Internal AI-G732 (existing Private/Self-hosted Gateway settings), Auto-Save Recaps within Gemini, diagnostics, one nonsecret Save Changes. No duplicate Offline Mode toggle on AI Configuration; existing general privacy control and network gates remain.
 
 ### Required UX behavior
 
@@ -55,10 +55,15 @@ Use the existing Compose `SettingsScreen`/`SettingsViewModel`/navigation, preser
 - Existing direct Gemini users remain on Gemini after upgrade, with their key and settings retained. New users with no key see `Not configured`, not a hardcoded private Gateway destination.
 - A missing/exhausted Gemini key must not disable Cloudflare or offline reading.
 
+#### D90 direct Gemini compatibility (P0)
+
+- Discover bounded, paginated model candidates from the saved project's API, distinguish catalog access from inference, and persist an explicitly selected text model per vault. No hardcoded physical model or silent substitute. Model names alone are not capability proof; explicitly consented synthetic inference confirms the selected model.
+- Direct REST text requests use the fixed Google HTTPS origin, header-only API key, no redirect or automatic replay, bounded responses, and answer text only (no opaque reasoning metadata in UI/history). Map billing/credit restriction (402) separately from quota (429).
+
 ### 3.2 Direct Cloudflare (public/BYOK; **must remain fully functional**)
 
 - Preserve configurable Cloudflare URL and token and the existing **Visualize** image-generation action independent of Gemini text selection.
-- Keep `Cloudflare` visible in AI Configuration, including when Private Gateway is selected for text.
+- Show Cloudflare configuration only in External Providers. Each destination opens only its own editor without a duplicate provider selector. The parent menu explains that Visualize continues to use saved direct Cloudflare configuration independently of the text provider. Opening or leaving a destination does not select its provider; Save Changes selects its text provider. Leaving discards unsaved edits only. Saved inactive settings and credentials remain intact.
 - Visualize must report `Cloudflare not configured` if required fields are absent; do not silently redirect it to Gateway text completions or expose content without user intent.
 - Remove/redact prompt and raw provider-error logging in production (public repository's `AiRepository.kt` currently logs a visualization prompt with `Log.d`; that is a concrete audit target).
 
@@ -94,6 +99,12 @@ Use the existing Compose `SettingsScreen`/`SettingsViewModel`/navigation, preser
 - AI configuration, privacy preference and provider credentials should be profile-scoped using existing vault semantics; explicitly test switching profiles cannot surface another profile's credentials. Define separately any deliberate *device-global* nonsecret appearance/media defaults.
 - Migration is non-destructive: old Gemini/Cloudflare keys and user preferences survive; older audiobook/TTS setting names remain recognized; EPUB highlights, bookmarks, sync identifiers and book hashes remain stable. Support upgrade + rollback tests with a sanitized local backup fixture.
 - New comic and audiobook importers must protect against malicious archives, zip-slip, excessive entries/decompression, oversized images and unsupported media; preserve Android Storage Access Framework permissions and graceful relink when grants are revoked.
+
+### D90 credential lifecycle amendment (P0)
+
+- Distinguish Missing, Saved/Locked, Saved/Ready, and Invalidated/Recovery states. Do not require decryption to report presence. Use explicit Keep, Replace and confirmed Remove; blank or failed reads never imply deletion.
+- Use existing reader profile access rules for routine AI credential management on an eligible unlocked secure device: explicit save, confirmed replace/remove, no additional PIN. Legacy migration retains native device credential authentication. Do not reveal saved plaintext. Persist encrypted AI credentials and allow routine foreground AI use on an eligible unlocked secure device without repeated authentication after ordinary unlock, restart or reboot. No 60-second or 15-minute routine-use timer. Cancel access on lock/background/vault change; preserve saved ciphertext. The exact AI-only key policy, API 30–34 compatibility and residual risks must be reviewed and qualified under [D90-ADR-01](../security/D90_ADR_01_PERSISTENT_AI_CREDENTIALS.md). Sync and OPDS remain unchanged. No plaintext fallback, no security-rule suppression.
+- Cloudflare reference Worker is version-controlled without secrets/personal endpoints, bounded and fail-closed; configured model adapters must be qualified. Client must validate response type, size and decoded dimensions, decode off the UI thread and never blindly replay inference.
 
 ## 5. Comics and settings (P0/P1)
 
