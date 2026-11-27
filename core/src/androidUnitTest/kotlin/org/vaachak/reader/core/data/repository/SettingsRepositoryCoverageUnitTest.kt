@@ -67,29 +67,28 @@ class SettingsRepositoryCoverageUnitTest {
     }
 
     @Test
-    fun legacyPlaintextIsMigratedToKeystoreThenDeleted() = runBlocking {
+    fun explicitReplacementDeletesObsoletePlaintext() = runBlocking {
         val store = activePreferences()
         store.edit { it[SettingsRepository.PRIVATE_GATEWAY_TOKEN] = "legacy-test-secret" }
         assertTrue(runCatching { repository.loadPrivateGatewayToken() }.isFailure)
-        assertEquals(AiCredentialStatus.MIGRATION_REQUIRED, repository.aiCredentialStatuses(vaultId.value).first()[AiManagedSlot.GATEWAY])
-        repository.manageAiCredential(vaultId.value, AiManagedSlot.GATEWAY, AiManagementAction.MIGRATE)
-        assertEquals(1, ai.authCalls)
-        assertEquals("legacy-test-secret", repository.loadPrivateGatewayToken())
+        assertEquals(AiCredentialStatus.RECOVERY_REQUIRED, repository.aiCredentialStatuses(vaultId.value).first()[AiManagedSlot.GATEWAY])
+        repository.manageAiCredential(vaultId.value, AiManagedSlot.GATEWAY, AiManagementAction.REPLACE, "replacement-key")
+        assertEquals("replacement-key", repository.loadPrivateGatewayToken())
         assertNull(store.data.first()[SettingsRepository.PRIVATE_GATEWAY_TOKEN])
         verify(exactly = 0) { secrets.write(any(), any()) }
     }
 
     @Test
-    fun failedKeystoreMigrationKeepsLegacyTokenAvailableForRetry() = runBlocking {
+    fun failedReplacementKeepsLegacyTokenUntilExplicitRetry() = runBlocking {
         val store = activePreferences()
         store.edit { it[SettingsRepository.PRIVATE_GATEWAY_TOKEN] = "recovery-test-secret" }
         ai.failWrite = true
-        assertTrue(runCatching { repository.manageAiCredential(vaultId.value, AiManagedSlot.GATEWAY, AiManagementAction.MIGRATE) }.isFailure)
+        assertTrue(runCatching { repository.manageAiCredential(vaultId.value, AiManagedSlot.GATEWAY, AiManagementAction.REPLACE, "replacement-key") }.isFailure)
         assertEquals("recovery-test-secret", store.data.first()[SettingsRepository.PRIVATE_GATEWAY_TOKEN])
         assertTrue(runCatching { repository.loadPrivateGatewayToken() }.isFailure)
         ai.failWrite = false
-        repository.manageAiCredential(vaultId.value, AiManagedSlot.GATEWAY, AiManagementAction.MIGRATE)
-        assertEquals("recovery-test-secret", repository.loadPrivateGatewayToken())
+        repository.manageAiCredential(vaultId.value, AiManagedSlot.GATEWAY, AiManagementAction.REPLACE, "replacement-key")
+        assertEquals("replacement-key", repository.loadPrivateGatewayToken())
         assertNull(store.data.first()[SettingsRepository.PRIVATE_GATEWAY_TOKEN])
     }
 
@@ -101,7 +100,6 @@ class SettingsRepositoryCoverageUnitTest {
         assertEquals(AiCredentialStatus.MISSING, repository.aiCredentialStatuses(vaultId.value).first()[AiManagedSlot.GATEWAY])
         verify(exactly = 0) { secrets.write(any(), any()) }
         verify(exactly = 0) { secrets.read(vaultId.value) }
-        assertEquals(0, ai.authCalls)
     }
 
     @Test
@@ -111,7 +109,6 @@ class SettingsRepositoryCoverageUnitTest {
         assertEquals("https://reader.demo.ts.net:8443/v1", repository.privateGatewayUrl.first())
         assertEquals("local-chat", repository.privateGatewayModel.first())
         assertEquals("saved-test-key", repository.loadPrivateGatewayToken())
-        assertEquals(0, ai.authCalls)
         assertNull(activePreferences().data.first()[SettingsRepository.PRIVATE_GATEWAY_TOKEN])
     }
 

@@ -2,7 +2,7 @@ package org.vaachak.reader.core.data.repository
 
 /** A management grant is not an authorization session for routine inference. */
 enum class AiManagedSlot { GEMINI, CLOUDFLARE, GATEWAY }
-enum class AiManagementAction { REPLACE, REMOVE, MIGRATE }
+enum class AiManagementAction { REPLACE, REMOVE }
 internal data class AiManagementBinding(
     val vault: String,
     val slot: AiManagedSlot,
@@ -13,8 +13,8 @@ internal data class AiManagementBinding(
 
 /**
  * In-memory, one-operation grant ledger. The repository checks active-vault and
- * foreground eligibility for all mutations, plus successful native authentication
- * for migration, before completing a grant. This class is not an authenticator.
+ * foreground eligibility for all mutations before completing a grant.
+ * This class is not an authenticator.
  */
 internal class AiManagementGrantLedger(private val clock: () -> Long) {
     internal class Challenge internal constructor(internal val binding: AiManagementBinding)

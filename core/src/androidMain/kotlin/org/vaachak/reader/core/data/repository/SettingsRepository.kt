@@ -4,9 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flowOn
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
@@ -275,7 +272,7 @@ class SettingsRepository @Inject constructor(
         it[PRIVATE_GATEWAY_MODEL] ?: ""
     }
 
-    private enum class AiCutover { V3, MIGRATING, REPLACING, RETIRING, REMOVING, REMOVED }
+    private enum class AiCutover { V3, REPLACING, REMOVING, REMOVED }
 
     private fun marker(slot: AiManagedSlot) = stringPreferencesKey("ai_credential_v3_${slot.name.lowercase()}")
     private fun legacyPreference(slot: AiManagedSlot) = when (slot) {
@@ -299,10 +296,8 @@ class SettingsRepository @Inject constructor(
             }
             AiCutover.REMOVED.name -> AiCredentialStatus.MISSING
             AiCutover.REMOVING.name -> AiCredentialStatus.REMOVAL_PENDING
-            AiCutover.RETIRING.name -> AiCredentialStatus.CLEANUP_REQUIRED
             AiCutover.REPLACING.name -> AiCredentialStatus.RECOVERY_REQUIRED
-            AiCutover.MIGRATING.name -> AiCredentialStatus.MIGRATION_REQUIRED
-            null -> if (hasLegacy(vault, slot, prefs)) AiCredentialStatus.MIGRATION_REQUIRED else AiCredentialStatus.MISSING
+            null -> if (hasLegacy(vault, slot, prefs)) AiCredentialStatus.RECOVERY_REQUIRED else AiCredentialStatus.MISSING
             else -> AiCredentialStatus.RECOVERY_REQUIRED
         }
     }
@@ -322,7 +317,7 @@ class SettingsRepository @Inject constructor(
                 ?: throw GatewayCredentialUnavailableException("Saved AI credential requires recovery in AI Settings.")
             AiCutover.REMOVED.name -> ""
             null -> if (!hasLegacy(vault, slot, prefs)) "" else throw GatewayCredentialUnavailableException(
-                "Saved AI credential needs one-time PIN migration in AI Settings.")
+                "Old AI credential is unsupported. Replace or remove it in AI Settings.")
             else -> throw GatewayCredentialUnavailableException("Saved AI credential needs recovery in AI Settings.")
         }
     }
@@ -355,7 +350,7 @@ class SettingsRepository @Inject constructor(
         }
     }
 
-    /** Routine mutations require the eligible active vault; legacy migration also requires native authentication. */
+    /** Credential mutations require the eligible active vault. */
     suspend fun manageAiCredential(expectedVault: String, slot: AiManagedSlot, action: AiManagementAction,
                                    replacement: String = ""): Unit = withContext(AppCoroutineConfig.io) {
         aiManagementMutex.withLock {
@@ -374,18 +369,6 @@ class SettingsRepository @Inject constructor(
                 (before[CREDENTIAL_REVISION] ?: 0).toLong(), aiRuntime.managementEpoch())
             val challenge = grants.begin(binding)
             try {
-                val authenticated = action != AiManagementAction.MIGRATE || coroutineScope {
-                    val auth = async { aiRuntime.authenticateMigration() }
-                    val watcher = launch {
-                        combine(vaultRepository.persistedVaultIdentity, store.data, vaultRepository.aiVaultEpoch) { active, prefs, currentEpoch ->
-                            currentEpoch != vaultEpoch || active != expectedVault || !sameAiRouting(before, prefs) ||
-                                before[CREDENTIAL_REVISION] != prefs[CREDENTIAL_REVISION]
-                        }.first { it }
-                        auth.cancel(CancellationException("AI configuration changed"))
-                    }
-                    try { auth.await() } finally { watcher.cancel() }
-                }
-                if (!authenticated) throw GatewayCredentialUnavailableException("Credential management was not authenticated; no change made.")
                 vaultRepository.aiMutationMutex.withLock {
                     credentialMutex.withLock {
                         requireManagementContext(binding)
@@ -395,14 +378,14 @@ class SettingsRepository @Inject constructor(
                         }
                         val grant = grants.complete(challenge, binding)
                             ?: throw GatewayCredentialUnavailableException("Credential operation expired; retry.")
-                        publishCredential(store, now, binding, grant, value)
+                        publishCredential(store, binding, grant, value)
                     }
                 }
             } finally { grants.revoke() }
         }
     }
 
-    private suspend fun publishCredential(store: DataStore<Preferences>, before: Preferences,
+    private suspend fun publishCredential(store: DataStore<Preferences>,
         binding: AiManagementBinding, grant: AiManagementGrantLedger.Grant, replacement: String) {
         val slot = binding.slot
         val vault = binding.vault
@@ -418,28 +401,13 @@ class SettingsRepository @Inject constructor(
             store.edit { it.remove(legacy); it[version] = AiCutover.REMOVED.name; it.bumpCredentialRevision() }
             return
         }
-        val prior = before[version]
-        // RETIRING proves that a new envelope was verified before metadata commit.
-        // Resume cleanup without rereading or resurrecting obsolete ciphertext.
-        if (binding.action == AiManagementAction.MIGRATE && prior == AiCutover.RETIRING.name) {
-            check(grants.consume(grant, binding)) { "Management authentication required" }
-            check(!aiRuntime.storage.read(vault, slot).isNullOrBlank()) { "AI credential recovery required" }
-        } else {
-            val value = if (binding.action == AiManagementAction.MIGRATE) {
-                check(prior == null || prior == AiCutover.MIGRATING.name) { "Migration not available" }
-                val plaintext = before[legacy].orEmpty()
-                val encrypted = privateGatewaySecrets.read(legacyId(vault, slot))
-                check(plaintext.isEmpty() || encrypted.isEmpty() || plaintext == encrypted) { "Conflicting legacy credentials; replace explicitly" }
-                encrypted.ifEmpty { plaintext }.also { check(it.isNotBlank()) { "No legacy AI credential" } }
-            } else replacement
-            val pending = if (binding.action == AiManagementAction.MIGRATE) AiCutover.MIGRATING else AiCutover.REPLACING
-            store.edit { it[version] = pending.name; it.bumpCredentialRevision() }
-            requireManagementContext(binding)
-            aiRuntime.storage.writeVerified(binding, value, grants, grant) { aiRuntime.eligible() && aiRuntime.managementEpoch() == binding.hostEpoch }
-            requireManagementContext(binding)
-            store.edit { it[version] = AiCutover.RETIRING.name; it.bumpCredentialRevision() }
+        store.edit { it[version] = AiCutover.REPLACING.name; it.bumpCredentialRevision() }
+        requireManagementContext(binding)
+        aiRuntime.storage.writeVerified(binding, replacement, grants, grant) {
+            aiRuntime.eligible() && aiRuntime.managementEpoch() == binding.hostEpoch
         }
         requireManagementContext(binding)
+        // Explicit replacement may retire obsolete AI-only material. Never read it.
         privateGatewaySecrets.retireAiCredential(legacyId(vault, slot))
         requireManagementContext(binding)
         store.edit { it.remove(legacy); it[version] = AiCutover.V3.name; it.bumpCredentialRevision() }

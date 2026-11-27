@@ -59,7 +59,6 @@ class SettingsRepositoryProviderCoexistenceUnitTest {
         settings.setAiTextProvider(AiTextProvider.PRIVATE_GATEWAY)
         assertEquals("gateway-one", settings.loadPrivateGatewayToken())
         verify(exactly = 0) { secrets.clear(any()) }
-        assertEquals(0, ai.authCalls)
     }
 
     @Test fun switchingVaultIsolatesAllThreeProvidersAndOfflinePreference() = runBlocking {

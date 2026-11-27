@@ -55,7 +55,6 @@ internal fun AiCredentialPanel(slot: AiManagedSlot, status: AiCredentialStatus?,
                 onManage(action, value)
                 message = when (action) {
                     AiManagementAction.REMOVE -> "Credential removed."
-                    AiManagementAction.MIGRATE -> "Saved credential migrated."
                     AiManagementAction.REPLACE -> "Credential saved."
                 }
             } catch (cancelled: CancellationException) {
@@ -71,9 +70,7 @@ internal fun AiCredentialPanel(slot: AiManagedSlot, status: AiCredentialStatus?,
             AiCredentialStatus.MISSING -> "Not configured"
             AiCredentialStatus.SAVED -> "Saved (not yet verified with provider)"
             AiCredentialStatus.UNAVAILABLE -> "Saved but unavailable. Unlock your secure device."
-            AiCredentialStatus.MIGRATION_REQUIRED -> "Saved in older storage. One-time native PIN migration required."
             AiCredentialStatus.RECOVERY_REQUIRED -> "Recovery required. Replace or remove explicitly."
-            AiCredentialStatus.CLEANUP_REQUIRED -> "Previous change incomplete. Finish migration or remove explicitly."
             AiCredentialStatus.REMOVAL_PENDING -> "Removal incomplete. Confirm removal again to finish cleanup."
         }, modifier = Modifier.tid("${tag}_status"))
         OutlinedTextField(value = draft, onValueChange = { draft = it; onDraftChanged(it.isNotBlank()) },
@@ -93,10 +90,6 @@ internal fun AiCredentialPanel(slot: AiManagedSlot, status: AiCredentialStatus?,
                 else confirmation = AiManagementAction.REPLACE
             }, modifier = Modifier.tid("${tag}_replace")) {
             Text(if (status == AiCredentialStatus.MISSING) "Save credential" else "Replace credential")
-        }
-        if (status == AiCredentialStatus.MIGRATION_REQUIRED || status == AiCredentialStatus.CLEANUP_REQUIRED) {
-            Button(enabled = !busy, onClick = { execute(AiManagementAction.MIGRATE) },
-                modifier = Modifier.tid("${tag}_migrate")) { Text("Migrate / finish saved credential (PIN)") }
         }
         if (status != null && status != AiCredentialStatus.MISSING) {
             TextButton(enabled = !busy, onClick = { confirmation = AiManagementAction.REMOVE }, modifier = Modifier.tid("${tag}_remove")) {

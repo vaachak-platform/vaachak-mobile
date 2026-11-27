@@ -1,3 +1,7 @@
+## R2 supersession — first production installation
+
+Owner decision: no upgrade support from development-only AI credential formats is required for the first production release. The native migration prompt, migration operation and related tests are removed. VAI3 remains the only AI credential format used for requests. Obsolete AI credentials are never read for inference or migrated automatically; explicit replacement/removal can clean the exact obsolete slot. Existing sync/OPDS storage and security controls remain unchanged. Persistent key policy review and final fresh-install acceptance are still required. Earlier migration-specific sections below are historical and superseded by this decision.
+
 # D90-ADR-01 — Persistent AI Credentials with Authenticated Management
 
 **Decision date:** 2026-11-26\

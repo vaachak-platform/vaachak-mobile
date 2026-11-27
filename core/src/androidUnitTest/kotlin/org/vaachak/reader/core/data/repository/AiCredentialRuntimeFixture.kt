@@ -1,6 +1,5 @@
 package org.vaachak.reader.core.data.repository
 
-import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,14 +11,11 @@ internal class AiCredentialRuntimeFixture {
     val runtime = mockk<AiCredentialRuntime>()
     val storage = mockk<AiPersistentCredentialStorage>()
     val values = mutableMapOf<Pair<String, AiManagedSlot>, String>()
-    var authenticated = true
     var eligible = true
     var failWrite = false
     var failRemove = false
     var managementEpoch = 0L
     var requestEpoch = 0L
-    var beforeAuth: (() -> Unit)? = null
-    var authCalls = 0
     init {
         every { runtime.storage } returns storage
         every { runtime.eligible() } answers { eligible }
@@ -27,11 +23,6 @@ internal class AiCredentialRuntimeFixture {
         every { runtime.managementEpoch() } answers { managementEpoch }
         every { runtime.requestEpoch() } answers { requestEpoch }
         every { runtime.invalidated(any()) } answers { flowOf(!eligible || firstArg<Long>() != requestEpoch) }
-        coEvery { runtime.authenticateMigration() } coAnswers {
-            authCalls++
-            beforeAuth?.invoke()
-            authenticated
-        }
         every { storage.presence(any(), any()) } answers {
             if (!values.containsKey(firstArg<String>() to secondArg<AiManagedSlot>())) AiPersistentCredentialStorage.Presence.MISSING
             else if (!eligible) AiPersistentCredentialStorage.Presence.UNAVAILABLE else AiPersistentCredentialStorage.Presence.SAVED

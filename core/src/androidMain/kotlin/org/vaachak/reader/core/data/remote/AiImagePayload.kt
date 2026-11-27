@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import org.vaachak.reader.core.common.AppCoroutineConfig
 
 internal class AiImageResponseException : IllegalStateException("Invalid or oversized image response")
 
@@ -20,12 +21,13 @@ object AiImagePayload {
     const val MAX_BYTES = 8 * 1024 * 1024
     const val MAX_BASE64 = ((MAX_BYTES + 2) / 3) * 4
     internal const val MAX_JSON_BYTES = MAX_BASE64 + 4096
+    private const val JSON_MIME = "application/json"
     private const val MAX_DIMENSION = 2048
     private const val MAX_PIXELS = 4_194_304L
     private val bitmapDispatcher = Dispatchers.Default.limitedParallelism(1)
 
     internal fun wireLimit(contentType: String?): Int = when (contentType) {
-        "application/json" -> MAX_JSON_BYTES
+        JSON_MIME -> MAX_JSON_BYTES
         "image/jpeg", "image/png", "image/webp" -> MAX_BYTES
         else -> throw AiImageResponseException()
     }
@@ -61,6 +63,31 @@ object AiImagePayload {
         return bytes
     }
 
+    private fun readJsonString(reader: JsonReader): String {
+        if (reader.peek() != JsonToken.STRING) throw AiImageResponseException()
+        return reader.nextString()
+    }
+
+    private fun readJsonBoolean(reader: JsonReader): Boolean {
+        if (reader.peek() != JsonToken.BOOLEAN) throw AiImageResponseException()
+        return reader.nextBoolean()
+    }
+
+    private fun readNestedImage(reader: JsonReader): String {
+        reader.beginObject()
+        if (!reader.hasNext() || reader.nextName() != "image") throw AiImageResponseException()
+        val image = readJsonString(reader)
+        if (reader.hasNext()) throw AiImageResponseException()
+        reader.endObject()
+        return image
+    }
+
+    private fun readEmptyArray(reader: JsonReader) {
+        reader.beginArray()
+        if (reader.hasNext()) throw AiImageResponseException()
+        reader.endArray()
+    }
+
     private fun jsonImage(raw: ByteArray): ByteArray {
         return try {
             JsonReader(InputStreamReader(ByteArrayInputStream(raw), Charsets.UTF_8)).use { reader ->
@@ -74,16 +101,10 @@ object AiImagePayload {
                     val name = reader.nextName()
                     if (!seen.add(name)) throw AiImageResponseException()
                     when (name) {
-                        "image" -> { if (reader.peek() != JsonToken.STRING) throw AiImageResponseException(); image = reader.nextString() }
-                        "success" -> { if (reader.peek() != JsonToken.BOOLEAN) throw AiImageResponseException(); success = reader.nextBoolean() }
-                        "result" -> {
-                            reader.beginObject()
-                            if (!reader.hasNext() || reader.nextName() != "image" || reader.peek() != JsonToken.STRING) throw AiImageResponseException()
-                            nested = reader.nextString()
-                            if (reader.hasNext()) throw AiImageResponseException()
-                            reader.endObject()
-                        }
-                        "errors", "messages" -> { reader.beginArray(); if (reader.hasNext()) throw AiImageResponseException(); reader.endArray() }
+                        "image" -> image = readJsonString(reader)
+                        "success" -> success = readJsonBoolean(reader)
+                        "result" -> nested = readNestedImage(reader)
+                        "errors", "messages" -> readEmptyArray(reader)
                         else -> throw AiImageResponseException()
                     }
                 }
@@ -94,29 +115,33 @@ object AiImagePayload {
                     image == null && nested != null && success == true -> nested
                     else -> throw AiImageResponseException()
                 }
-                decodeBase64(requireNotNull(encoded))
+                decodeBase64(encoded)
             }
         } catch (_: Exception) { throw AiImageResponseException() }
     }
 
+    private fun readBounded(body: ResponseBody, cap: Int): ByteArray {
+        val source = body.source()
+        val sink = okio.Buffer()
+        while (sink.size <= cap) {
+            val read = source.read(sink, minOf(8192L, cap.toLong() + 1 - sink.size))
+            if (read == -1L) break
+            if (sink.size > cap) throw AiImageResponseException()
+        }
+        return sink.readByteArray()
+    }
+
     /** The direct transport caps wire bytes before Retrofit could buffer them. Recheck here for all callers. */
-    internal suspend fun read(body: ResponseBody): String = withContext(Dispatchers.IO) {
+    internal suspend fun read(body: ResponseBody): String = withContext(AppCoroutineConfig.io) {
         body.use {
             val contentType = it.contentType()?.let { type -> "${type.type}/${type.subtype}" }
             if (it.contentLength() == 0L) return@withContext "Error: Empty image received from server."
             val cap = wireLimit(contentType)
             if (it.contentLength() > cap) throw AiImageResponseException()
-            val source = it.source()
-            val sink = okio.Buffer()
-            while (sink.size <= cap) {
-                val read = source.read(sink, minOf(8192L, cap.toLong() + 1 - sink.size))
-                if (read == -1L) break
-                if (sink.size > cap) throw AiImageResponseException()
-            }
-            val raw = sink.readByteArray()
+            val raw = readBounded(it, cap)
             if (raw.isEmpty()) return@withContext "Error: Empty image received from server."
-            val bytes = if (contentType == "application/json") jsonImage(raw) else raw
-            validate(bytes, if (contentType == "application/json") null else contentType)
+            val bytes = if (contentType == JSON_MIME) jsonImage(raw) else raw
+            validate(bytes, if (contentType == JSON_MIME) null else contentType)
             Base64.encodeToString(bytes, Base64.NO_WRAP)
         }
     }

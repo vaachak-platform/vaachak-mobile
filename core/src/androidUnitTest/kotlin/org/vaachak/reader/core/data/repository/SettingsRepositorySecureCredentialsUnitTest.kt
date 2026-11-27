@@ -56,7 +56,7 @@ class SettingsRepositorySecureCredentialsUnitTest {
         return requireNotNull(active[selectedVault.value])
     }
 
-    @Test fun threeLegacySecretsMigrateAndRemovePlaintextKeys() = runBlocking {
+    @Test fun explicitAiReplacementAndSyncMigrationRemovePlaintextKeys() = runBlocking {
         val dataStore = store()
         dataStore.edit {
             it[SettingsRepository.GEMINI_KEY] = "old-gemini"
@@ -64,10 +64,10 @@ class SettingsRepositorySecureCredentialsUnitTest {
             it[SettingsRepository.SYNC_PASSWORD] = "sync password with spaces"
         }
         assertTrue(runCatching { repository.geminiKey.first() }.isFailure)
-        repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.MIGRATE)
-        repository.manageAiCredential(firstVault, AiManagedSlot.CLOUDFLARE, AiManagementAction.MIGRATE)
-        assertEquals("old-gemini", repository.geminiKey.first())
-        assertEquals("old-cloudflare", repository.cfToken.first())
+        repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, "new-gemini")
+        repository.manageAiCredential(firstVault, AiManagedSlot.CLOUDFLARE, AiManagementAction.REPLACE, "new-cloudflare")
+        assertEquals("new-gemini", repository.geminiKey.first())
+        assertEquals("new-cloudflare", repository.cfToken.first())
         assertEquals("sync password with spaces", repository.syncPassword.first())
         val after = dataStore.data.first()
         assertNull(after[SettingsRepository.GEMINI_KEY])
@@ -89,27 +89,13 @@ class SettingsRepositorySecureCredentialsUnitTest {
         assertNull(dataStore.data.first()[SettingsRepository.CF_TOKEN])
         assertNull(dataStore.data.first()[SettingsRepository.SYNC_PASSWORD])
         assertEquals("https://cloudflare.example/image", repository.cfUrl.first())
-        assertEquals(0, ai.authCalls)
     }
 
-    @Test fun failedMigrationKeepsLegacyDataAndCanRetry() = runBlocking {
-        val dataStore = store()
-        dataStore.edit { it[SettingsRepository.GEMINI_KEY] = "recoverable-key" }
-        ai.authenticated = false
-        assertTrue(runCatching { repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.MIGRATE) }.isFailure)
-        assertEquals("recoverable-key", dataStore.data.first()[SettingsRepository.GEMINI_KEY])
-        assertTrue(ai.values.isEmpty())
-        ai.authenticated = true
-        repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.MIGRATE)
-        assertEquals("recoverable-key", repository.geminiKey.first())
-        assertNull(dataStore.data.first()[SettingsRepository.GEMINI_KEY])
-    }
 
     @Test fun blankUiFieldCannotDeleteAnUnmigratedLegacyKey() = runBlocking {
         val dataStore = store()
         dataStore.edit { it[SettingsRepository.CF_TOKEN] = "legacy-protected" }
         repository.saveSettings("", "https://example", "", false)
-        assertEquals(0, ai.authCalls)
         assertEquals("legacy-protected", dataStore.data.first()[SettingsRepository.CF_TOKEN])
     }
 
@@ -180,23 +166,9 @@ class SettingsRepositorySecureCredentialsUnitTest {
         assertFalse(before.invalidated.first())
     }
 
-    @Test fun staleHostCallbackCannotPublishCredential() = runBlocking {
-        store().edit { it[SettingsRepository.GEMINI_KEY] = "legacy-key" }
-        ai.beforeAuth = { ai.managementEpoch++ }
-        assertTrue(runCatching { repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.MIGRATE) }.isFailure)
-        assertTrue(ai.values.isEmpty())
-        assertEquals(AiCredentialStatus.MIGRATION_REQUIRED, repository.aiCredentialStatuses(firstVault).first()[AiManagedSlot.GEMINI])
-    }
 
-    @Test fun changedVaultDuringAuthenticationCannotWriteEitherVault() = runBlocking {
-        store().edit { it[SettingsRepository.GEMINI_KEY] = "legacy-key" }
-        ai.beforeAuth = { selectedVault.value = secondVault }
-        assertTrue(runCatching { repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.MIGRATE) }.isFailure)
-        assertTrue(ai.values.isEmpty())
-    }
 
     @Test fun routineManagementDoesNotPromptButRejectsLockedAndWrongVault() = runBlocking {
-        ai.authenticated = false
         repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, "first-key")
         repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, "second-key")
         assertEquals("second-key", repository.geminiKey.first())
@@ -209,17 +181,16 @@ class SettingsRepositorySecureCredentialsUnitTest {
         assertEquals("second-key", repository.geminiKey.first())
         repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REMOVE)
         assertEquals("", repository.geminiKey.first())
-        assertEquals(0, ai.authCalls)
     }
 
-    @Test fun encryptedLegacyMigrationRetiresOnlyExactSlot() = runBlocking {
+    @Test fun explicitReplacementRetiresOnlyExactSlot() = runBlocking {
         val id = "vaachak_credential_v1:GEMINI:\u0000$firstVault"
         val syncId = "vaachak_credential_v1:SYNC_PASSWORD:\u0000$firstVault"
         files[id] = "legacy-key"
         files[syncId] = "sync-key"
-        assertEquals(AiCredentialStatus.MIGRATION_REQUIRED, repository.aiCredentialStatuses(firstVault).first()[AiManagedSlot.GEMINI])
-        repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.MIGRATE)
-        assertEquals("legacy-key", repository.geminiKey.first())
+        assertEquals(AiCredentialStatus.RECOVERY_REQUIRED, repository.aiCredentialStatuses(firstVault).first()[AiManagedSlot.GEMINI])
+        repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, "replacement-key")
+        assertEquals("replacement-key", repository.geminiKey.first())
         assertFalse(files.containsKey(id))
         assertEquals("sync-key", files[syncId])
     }
@@ -238,28 +209,26 @@ class SettingsRepositorySecureCredentialsUnitTest {
         assertFalse(files.containsKey(legacyId))
     }
 
-    @Test fun retirementFailureKeepsVerifiedNewCredentialForAuthenticatedCleanup() = runBlocking {
+    @Test fun retirementFailureRequiresExplicitReplacementRetry() = runBlocking {
         val dataStore = store()
         dataStore.edit { it[SettingsRepository.GEMINI_KEY] = "legacy-key" }
         every { secrets.retireAiCredential(any()) } throws IllegalStateException("Fixture cleanup failed")
-        assertTrue(runCatching { repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.MIGRATE) }.isFailure)
-        assertEquals("legacy-key", ai.values[firstVault to AiManagedSlot.GEMINI])
-        assertEquals(AiCredentialStatus.CLEANUP_REQUIRED, repository.aiCredentialStatuses(firstVault).first()[AiManagedSlot.GEMINI])
+        assertTrue(runCatching { repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, "replacement-key") }.isFailure)
+        assertEquals("replacement-key", ai.values[firstVault to AiManagedSlot.GEMINI])
+        assertEquals(AiCredentialStatus.RECOVERY_REQUIRED, repository.aiCredentialStatuses(firstVault).first()[AiManagedSlot.GEMINI])
         assertTrue(runCatching { repository.geminiKey.first() }.isFailure)
         configureLegacyAiStorage(secrets, files)
-        repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.MIGRATE)
-        assertEquals("legacy-key", repository.geminiKey.first())
+        repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, "replacement-key")
+        assertEquals("replacement-key", repository.geminiKey.first())
         assertNull(dataStore.data.first()[SettingsRepository.GEMINI_KEY])
     }
 
     @Test fun savedCredentialNeedsNoFurtherAuthenticationAndBackgroundBlocksDispatch() = runBlocking {
         repository.saveSettings("test-key", "https://cf.example", "", false)
         repository.setOfflineMode(false)
-        val count = ai.authCalls
         val config = repository.loadAiRequest(AiRequestKind.TEXT, firstVault)
         assertEquals("test-key", config.credential)
         assertEquals("test-key", repository.loadAiRequest(AiRequestKind.TEXT, firstVault).credential)
-        assertEquals(count, ai.authCalls)
         ai.eligible = false
         var sent = false
         assertTrue(runCatching { config.runGuarded { sent = true } }.isFailure)

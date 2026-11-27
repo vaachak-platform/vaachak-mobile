@@ -190,22 +190,6 @@ class AiConfigComposeInstrumentedTest {
         compose.onNodeWithText("Could not save AI configuration").assertDoesNotExist()
     }
 
-    @Test fun migrationRequiresExplicitActionAndDoesNotSubmitSavedSecret() {
-        var calls = 0
-        compose.setContent {
-            MaterialTheme {
-                AiConfigForm(SettingsUiState(), onBack = {},
-                    statuses = AiManagedSlot.entries.associateWith { AiCredentialStatus.MIGRATION_REQUIRED },
-                    onManage = { slot, action, value ->
-                        assertEquals(AiManagedSlot.GEMINI, slot); assertEquals(AiManagementAction.MIGRATE, action)
-                        assertEquals("", value); calls++
-                    }, onSave = {})
-            }
-        }
-        compose.runOnIdle { assertEquals(0, calls) }
-        compose.onNodeWithTag("ai_credential_gemini_migrate").performScrollTo().performClick()
-        compose.runOnIdle { assertEquals(1, calls) }
-    }
 
     private fun render(
         state: () -> SettingsUiState = { SettingsUiState() },

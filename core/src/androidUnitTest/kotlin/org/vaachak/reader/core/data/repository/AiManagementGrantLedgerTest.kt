@@ -34,7 +34,7 @@ class AiManagementGrantLedgerTest {
         check(ledger.complete(current, binding) != null)
     }
 
-    @Test fun revokedPromptOrGrantCannotBeReused() {
+    @Test fun revokedChallengeOrGrantCannotBeReused() {
         val challenge = ledger.begin(binding)
         ledger.revoke()
         check(ledger.complete(challenge, binding) == null)
@@ -67,7 +67,7 @@ class AiManagementGrantLedgerTest {
         check(!ledger.consume(grant, binding))
     }
 
-    @Test fun changedContextCannotCompletePrompt() {
+    @Test fun changedContextCannotCompleteChallenge() {
         val challenge = ledger.begin(binding)
         check(ledger.complete(challenge, binding.copy(revision = 2)) == null)
         check(ledger.complete(challenge, binding) == null)
@@ -82,7 +82,7 @@ class AiManagementGrantLedgerTest {
 
     @Test fun newChallengeRevokesUnusedGrant() {
         val grant = grant()
-        ledger.begin(binding.copy(action = AiManagementAction.MIGRATE))
+        ledger.begin(binding.copy(action = AiManagementAction.REMOVE))
         check(!ledger.consume(grant, binding))
     }
 }

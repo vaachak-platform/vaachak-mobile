@@ -34,7 +34,6 @@ class AiCredentialRecoveryUiRegressionTest {
             MaterialTheme {
                 AiCredentialPanel(AiManagedSlot.GEMINI, status, busy, { busy = it }, {}) { action, _ ->
                     actions.add(action)
-                    if (action == AiManagementAction.MIGRATE) status = AiCredentialStatus.SAVED
                 }
             }
         }
@@ -46,23 +45,25 @@ class AiCredentialRecoveryUiRegressionTest {
             AiCredentialStatus.SAVED to "Saved (not yet verified with provider)",
             AiCredentialStatus.UNAVAILABLE to "Saved but unavailable. Unlock your secure device.",
             AiCredentialStatus.RECOVERY_REQUIRED to "Recovery required. Replace or remove explicitly.",
-            AiCredentialStatus.REMOVAL_PENDING to "Removal incomplete. Confirm removal again to finish cleanup.",
-            AiCredentialStatus.CLEANUP_REQUIRED to "Previous change incomplete. Finish migration or remove explicitly.",
-            AiCredentialStatus.MIGRATION_REQUIRED to "Saved in older storage. One-time native PIN migration required."
+            AiCredentialStatus.REMOVAL_PENDING to "Removal incomplete. Confirm removal again to finish cleanup."
         )) {
             compose.runOnIdle { status = value }
             statusNode.assertExists()
             compose.onNodeWithText(message).assertExists()
         }
-        compose.onNodeWithTag("ai_credential_gemini_migrate").assertIsEnabled().performClick()
-        compose.onNodeWithText("Saved credential migrated.").assertExists()
+        compose.runOnIdle { status = AiCredentialStatus.RECOVERY_REQUIRED }
+        compose.onNodeWithTag("ai_credential_gemini_replace").assertIsNotEnabled()
+        compose.onNodeWithTag("ai_credential_gemini_draft").performTextReplacement("synthetic-recovery")
+        compose.onNodeWithTag("ai_credential_gemini_replace").assertIsEnabled().performClick()
+        compose.onNodeWithText("Replace", substring = false).performClick()
+        compose.onNodeWithText("Credential saved.").assertExists()
         compose.onNodeWithTag("ai_credential_gemini_remove").performClick()
         compose.onNodeWithText("Keep", substring = false).performClick()
-        compose.runOnIdle { assertEquals(listOf(AiManagementAction.MIGRATE), actions) }
+        compose.runOnIdle { assertEquals(listOf(AiManagementAction.REPLACE), actions) }
         compose.onNodeWithTag("ai_credential_gemini_remove").performClick()
         compose.onNodeWithText("Remove", substring = false).performClick()
         compose.onNodeWithText("Credential removed.").assertExists()
-        compose.runOnIdle { assertEquals(listOf(AiManagementAction.MIGRATE, AiManagementAction.REMOVE), actions) }
+        compose.runOnIdle { assertEquals(listOf(AiManagementAction.REPLACE, AiManagementAction.REMOVE), actions) }
     }
 
     @Test fun failedReplacementClearsDraftAndShowsSafeMessage() {

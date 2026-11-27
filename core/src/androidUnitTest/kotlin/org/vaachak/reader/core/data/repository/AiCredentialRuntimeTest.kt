@@ -11,13 +11,9 @@ import android.os.UserManager
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -119,7 +115,7 @@ class AiCredentialRuntimeTest {
         assertFalse(r.eligible())
     }
 
-    @Test fun screenOffInvalidatesAndIneligibleAuthenticationNeverStarts() = runTest {
+    @Test fun screenOffInvalidatesAndIneligibleHostCannotUseCredentials() = runTest {
         val f = Fixture(); val r = f.runtime
         r.hostResumed(f.host)
         val epoch = r.requestEpoch(); val management = r.managementEpoch()
@@ -139,12 +135,9 @@ class AiCredentialRuntimeTest {
 
         every { f.power.isInteractive } returns false
         assertFalse(r.eligibility().first())
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try {
-            assertFalse(r.authenticateMigration())
-            every { f.power.isInteractive } returns true
-            r.hostPaused(f.host)
-            assertFalse(r.authenticateMigration())
-        } finally { Dispatchers.resetMain() }
+        every { f.power.isInteractive } returns true
+        r.hostPaused(f.host)
+        assertFalse(r.eligible())
+        assertTrue(r.invalidated(epoch).first())
     }
 }

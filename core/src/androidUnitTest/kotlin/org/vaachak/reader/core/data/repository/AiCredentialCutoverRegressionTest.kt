@@ -22,7 +22,7 @@ import org.robolectric.RobolectricTestRunner
 import org.vaachak.reader.core.domain.model.AiTextProvider
 import java.util.UUID
 
-/** Exact cutover and nonsecret configuration contracts. OS authentication is mocked by the fixture. */
+/** Exact cutover and nonsecret configuration contracts. OS eligibility is mocked by the fixture. */
 @RunWith(RobolectricTestRunner::class)
 class AiCredentialCutoverRegressionTest {
     private val firstVault = "secure_${UUID.randomUUID()}"
@@ -73,17 +73,16 @@ class AiCredentialCutoverRegressionTest {
         assertFalse(files.containsKey(id))
     }
 
-    @Test fun interruptedMigrationAndUnknownMarkerAreFailClosed() = runBlocking {
+    @Test fun interruptedReplacementAndUnknownMarkerAreFailClosed() = runBlocking {
         val data = store()
         data.edit { it[SettingsRepository.CF_TOKEN] = "old-fixture" }
         ai.failWrite = true
-        assertTrue(runCatching { repository.manageAiCredential(firstVault, AiManagedSlot.CLOUDFLARE, AiManagementAction.MIGRATE) }.isFailure)
-        assertEquals(AiCredentialStatus.MIGRATION_REQUIRED, repository.aiCredentialStatuses(firstVault).first()[AiManagedSlot.CLOUDFLARE])
+        assertTrue(runCatching { repository.manageAiCredential(firstVault, AiManagedSlot.CLOUDFLARE, AiManagementAction.REPLACE, "replacement-fixture") }.isFailure)
+        assertEquals(AiCredentialStatus.RECOVERY_REQUIRED, repository.aiCredentialStatuses(firstVault).first()[AiManagedSlot.CLOUDFLARE])
         assertEquals("old-fixture", data.data.first()[SettingsRepository.CF_TOKEN])
         ai.failWrite = false
-        repository.manageAiCredential(firstVault, AiManagedSlot.CLOUDFLARE, AiManagementAction.MIGRATE)
-        assertEquals(2, ai.authCalls)
-        assertEquals("old-fixture", repository.cfToken.first())
+        repository.manageAiCredential(firstVault, AiManagedSlot.CLOUDFLARE, AiManagementAction.REPLACE, "replacement-fixture")
+        assertEquals("replacement-fixture", repository.cfToken.first())
         data.edit { it[stringPreferencesKey("ai_credential_v3_cloudflare")] = "unknown-future-version" }
         assertEquals(AiCredentialStatus.RECOVERY_REQUIRED, repository.aiCredentialStatuses(firstVault).first()[AiManagedSlot.CLOUDFLARE])
         assertTrue(runCatching { repository.cfToken.first() }.isFailure)
@@ -99,7 +98,6 @@ class AiCredentialCutoverRegressionTest {
 
     @Test fun pinnedNonsecretSettingsKeepCredentialsWithoutReadingOrAuthenticating() = runBlocking {
         repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, "synthetic-key")
-        val auths = ai.authCalls
         ai.eligible = false
         repository.saveAiConfiguration(firstVault, AiConfigurationUpdate(AiTextProvider.PRIVATE_GATEWAY,
             " https://fixture.invalid/image ", " https://fixture.invalid/v1 ", " local-model ", false))
@@ -108,7 +106,6 @@ class AiCredentialCutoverRegressionTest {
         assertEquals("https://fixture.invalid/v1", repository.privateGatewayUrl.first())
         assertEquals("local-model", repository.privateGatewayModel.first())
         assertFalse(repository.isAutoSaveRecapsEnabled.first())
-        assertEquals(auths, ai.authCalls)
         assertEquals("synthetic-key", ai.values[firstVault to AiManagedSlot.GEMINI])
         verify(exactly = 0) { ai.storage.read(any(), any()) }
         assertTrue(runCatching { repository.saveAiConfiguration(secondVault, AiConfigurationUpdate(AiTextProvider.GEMINI,"","","",true)) }.isFailure)
@@ -120,22 +117,19 @@ class AiCredentialCutoverRegressionTest {
         val data = store()
         data.edit { it[SettingsRepository.GEMINI_KEY] = "plain-fixture" }
         files["vaachak_credential_v1:GEMINI:\u0000$firstVault"] = "different-fixture"
-        assertTrue(runCatching { repository.manageAiCredential(firstVault,AiManagedSlot.GEMINI,AiManagementAction.MIGRATE) }.isFailure)
+        assertTrue(runCatching { repository.geminiKey.first() }.isFailure)
         assertTrue(ai.values.isEmpty())
         assertEquals("plain-fixture",data.data.first()[SettingsRepository.GEMINI_KEY])
-        val calls = ai.authCalls
         for (bad in listOf("", "with space", "\u0000", "x".repeat(4097))) {
             assertTrue(runCatching { repository.manageAiCredential(firstVault,AiManagedSlot.GEMINI,AiManagementAction.REPLACE,bad) }.isFailure)
         }
         assertTrue(runCatching { repository.manageAiCredential(firstVault,AiManagedSlot.GATEWAY,AiManagementAction.REPLACE,"x".repeat(513)) }.isFailure)
         assertTrue(runCatching { repository.manageAiCredential(firstVault,AiManagedSlot.GEMINI,AiManagementAction.REMOVE,"unexpected") }.isFailure)
-        assertEquals(calls, ai.authCalls)
         assertTrue(ai.values.isEmpty())
     }
 
     @Test fun saveChangesPersistsModelAndRoutingTogetherWithoutTouchingSecrets() = runBlocking {
         repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, "synthetic-key")
-        val auths = ai.authCalls
         ai.eligible = false
         repository.saveAiConfiguration(firstVault, AiConfigurationUpdate(AiTextProvider.GEMINI,
             "https://fixture.invalid/image", "", "local-chat", false, " models/gemini-b "))
@@ -150,7 +144,6 @@ class AiCredentialCutoverRegressionTest {
         assertEquals("", snapshot.configuration.authToken)
         repository.saveAiConfiguration(firstVault, AiConfigurationUpdate(AiTextProvider.GEMINI,"","","",true))
         assertEquals("gemini-b", repository.geminiModel.first())
-        assertEquals(auths, ai.authCalls)
         assertEquals("synthetic-key", ai.values[firstVault to AiManagedSlot.GEMINI])
         verify(exactly = 0) { ai.storage.read(any(), any()) }
     }
@@ -178,7 +171,6 @@ class AiCredentialCutoverRegressionTest {
             "https://fixture.invalid/image", "https://fixture.tailnet.ts.net:8443/v1", "local-chat", true, "gemini-a"))
         repository.manageAiCredential(firstVault, AiManagedSlot.GEMINI, AiManagementAction.REPLACE, "synthetic-text")
         repository.manageAiCredential(firstVault, AiManagedSlot.CLOUDFLARE, AiManagementAction.REPLACE, "synthetic-image")
-        val auths = ai.authCalls
         ai.eligible = false
         repository.saveAiConfiguration(firstVault, AiConfigurationUpdate(AiTextProvider.PRIVATE_GATEWAY,
             "discarded-image", "https://second.tailnet.ts.net:8443/v1", "local-chat", false, "gemini-b", preserveInactive = true))
@@ -197,7 +189,6 @@ class AiCredentialCutoverRegressionTest {
         assertFalse(external.configuration.autoSaveRecaps)
         assertEquals("https://second.tailnet.ts.net:8443/v1", external.configuration.gatewayUrl)
         assertEquals("local-chat", external.configuration.gatewayModel)
-        assertEquals(auths, ai.authCalls)
         assertEquals("synthetic-text", ai.values[firstVault to AiManagedSlot.GEMINI])
         assertEquals("synthetic-image", ai.values[firstVault to AiManagedSlot.CLOUDFLARE])
         verify(exactly = 0) { ai.storage.read(any(), any()) }

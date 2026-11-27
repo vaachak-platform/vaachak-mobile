@@ -2,7 +2,7 @@ package org.vaachak.reader.core.data.repository
 
 /** Local metadata only; SAVED is not proof of provider validity. */
 enum class AiCredentialStatus {
-    MISSING, SAVED, UNAVAILABLE, MIGRATION_REQUIRED, RECOVERY_REQUIRED, CLEANUP_REQUIRED, REMOVAL_PENDING
+    MISSING, SAVED, UNAVAILABLE, RECOVERY_REQUIRED, REMOVAL_PENDING
 }
 
 class AiConfigurationUpdate(

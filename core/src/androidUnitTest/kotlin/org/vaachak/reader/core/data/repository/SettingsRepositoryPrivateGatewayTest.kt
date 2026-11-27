@@ -46,7 +46,6 @@ class SettingsRepositoryPrivateGatewayTest {
         settings.savePrivateGatewayToken("")
         assertEquals("", settings.loadPrivateGatewayToken())
         verify(exactly = 2) { secrets.retireAiCredential(vaultId.value) }
-        assertEquals(0, ai.authCalls)
     }
 
     @Test fun nonSecretGatewayFieldsPersistInPreferences() = runBlocking {

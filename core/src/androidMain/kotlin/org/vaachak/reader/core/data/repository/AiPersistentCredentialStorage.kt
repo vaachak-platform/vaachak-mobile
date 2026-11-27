@@ -20,8 +20,8 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * D90-ADR-01 AI-only credential backend.
  * No read or write of the existing VAG1/VAG2/VAS2/OPDS files or aliases.
- * The eventual repository owns persisted-vault checks, revision, native prompt,
- * legacy retirement/tombstones and in-flight cancellation. This layer must not
+ * The repository owns persisted-vault checks, revision, explicit replacement/removal,
+ * obsolete credential cleanup and in-flight cancellation. This layer must not
  * be used to bypass those checks. No long-lived plaintext credential cache.
  */
 internal class AiPersistentCredentialStorage(
@@ -84,7 +84,7 @@ internal class AiPersistentCredentialStorage(
         grant: AiManagementGrantLedger.Grant,
         stillAuthorized: () -> Boolean = { true }
     ) = synchronized(fileLock) {
-        check(binding.action == AiManagementAction.REPLACE || binding.action == AiManagementAction.MIGRATE)
+        check(binding.action == AiManagementAction.REPLACE)
         check(ledger.consume(grant, binding) && stillAuthorized()) { "Management authorization required" }
         requireEligible()
         val bytes = value.toByteArray(Charsets.UTF_8)
